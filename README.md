@@ -275,61 +275,13 @@ Quasi-isodynamic designs at four field-period counts: the `|B|` contours close p
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
-### Low transport from a near-circular start
+### Piecewise omnigenity
 
-![Two-period boundary colored by magnetic-field strength, Boozer contours, transport and alpha losses](docs/_static/figures/readme_low_transport.webp)
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
 
-**pwO optimization** minimizes the variation of |B| along contours of a squeezed
-omnigenous mapping,
-following the [PO–pwO construction](https://arxiv.org/abs/2603.12139v1):
+![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 
-$$
-f_{\mathrm{map}}=\sum_s \frac{w_s}{B_{00,s}^{2}}\left\langle\mathrm{Var}_{\gamma} B_s(\gamma,\eta)\right\rangle_{\eta}.
-$$
-
-The mean field B₀₀ supplies the normalization. Aspect ratio 6, finite rotational
-transform and a mirror limit keep the search away from weak-transform or extreme-mirror solutions.
-
-The two-period result lowers $Q = \epsilon_{\mathrm{eff}}^{3/2}$ by **52.6%** and alpha losses from **100% to 6.73%**.
-The vacuum particle comparison uses 256 paired 3.52 MeV alphas over 10 ms at a common
-volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lowers coarse Q another 26.6%.
-At finite beta, refined Q falls 44.2% (NFP1) and 25.8% (NFP3) after QA preconditioning; the NFP4 boundary polish fails NEO.
-
-![NFP 1–4 boundaries colored by magnetic-field strength, unfilled field contours and objective histories](docs/_static/figures/readme_low_transport_nfp.webp)
-
-| Field periods | Aspect ratio | Minimum ι | Transport result |
-|---|---:|---:|---|
-| 1 | 6.007 | 0.421 | Refined mean Q −67.0%; QA precursor |
-| 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
-| 3 | 6.006 | 0.418 | Refined mean Q −87.2%; QA precursor |
-| 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
-
-The one-period construction uses a QA precursor, physical toroidal harmonics through n=4,
-and a NEO-screened pwO step. Its paired alpha losses fall from 100% to 30.0%.
-The three-period case follows the same QA-to-pwO path and lowers paired losses
-from 100% to 26.8%.
-
-![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
-
-QH4 and QA2 have lower effective ripple than pwO2. The two-period field loses fewer alphas
-than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
-sampling uncertainty. All candidates target the same aspect ratio and iota floor;
-actual transforms differ, and only the pwO runs impose the mirror ceiling.
-QI refinement did not converge; its dashed iota profile is from the coarse equilibrium.
-
-Examples: [vacuum](examples/optimization/pwO_optimization.py),
-[finite beta](examples/optimization/pwO_optimization_finite_beta.py),
-[single stage](examples/optimization/single_stage_optimization_pwO.py).
-[Physics](docs/explanation/confinement.rst) · [workflow](docs/reference/optimization.rst) ·
-[figure generator](docs/_static/figures/sources/make_low_transport_figure.py).
-
-![Four-period pwO boundary colored by magnetic-field strength and fitted coils](docs/_static/figures/readme_low_transport_coils.webp)
-
-Joint vacuum optimization lowers the objective by 9.0%; the coils retain a 14.6%
-mean-Q reduction from the near-circle seed. The cold free boundary is 5.25 mm
-from the target. At β≈0.5%, the fit reaches 0.592% normal-field RMS error and
-4.90 mm displacement. Its mean Q improves 7.2%, with a 2.3% inner-radius increase
-that fails the strict transport screen.
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
 ### Free boundary with coils
 

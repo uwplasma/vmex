@@ -20,6 +20,7 @@ from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
+from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
@@ -43,11 +44,11 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2, 3, 4, 5]
+MAX_MODES = [1, 2, 3]
 MAX_NFEV = [15]*len(MAX_MODES)
-# STAGE_FTOL = [1e-13 if NFP==2 else 1e-12]*len(MAX_MODES)
 ASPECT_TARGET = 6.0
-MAGNETIC_WELL_TARGET = 0.01      # 0 turns the well off
+MAGNETIC_WELL_TARGET = 0          # 0 turns the well off
+# MAGNETIC_WELL_TARGET = 0.01  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
 MAGNETIC_WELL_WEIGHT = 1e3
 ELONGATION_LIMIT = 9.0
 NS_ARRAY = np.array([35])
@@ -203,16 +204,15 @@ for ns in FINAL_NS:
         final_input, initial_state=final_equilibrium.solution,
         verbose=not ci_smoke, raise_on_max_iterations=True)
 
-# # Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
-# from vmex.core.neoclassical import screen_transport
-# seed_equilibrium = opt.solve_equilibrium(
-#     replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
-#     verbose=False, raise_on_max_iterations=True)
-# half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
-# neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
-# seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
-# final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
-# print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
+# Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
+seed_equilibrium = opt.solve_equilibrium(
+    replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
+    verbose=False, raise_on_max_iterations=True)
+half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
+neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
+seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
+final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
+print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 
 ### Print, plot and save ######################################################
 

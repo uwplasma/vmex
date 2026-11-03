@@ -35,7 +35,7 @@ NFP = 4
 INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
 WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
-MAX_MODE = 2
+MAX_MODES = [1, 2, 3]  # boundary mode ladder of the plasma stage; the joint stage uses the last
 SURFACES = np.linspace(.25, .75, 3)
 TARGET_BETA = 0.005
 PRESSURE_PROFILE = [1.0, -1.0]
@@ -71,7 +71,7 @@ MAKE_MOVIE, MOVIE_SURFACE_COLOR = False, "absB"
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER, PLASMA_MAX_NFEV = 2, 4, 2, 2
+    MAXITER, MAX_TRIALS, COIL_FIT_MAXITER, PLASMA_MAX_NFEV, MAX_MODES = 2, 4, 2, 2, [1]
     N_SEGMENTS, COIL_ORDER, NPHI, NTHETA = 24, 2, 8, 8
 
 if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
@@ -79,7 +79,7 @@ if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
 
 # Seed and coil pre-fit.
 inp = vj.VmecInput.from_file(INPUT_FILE)
-mpol = max(MAX_MODE + 2, 5)
+mpol = max(MAX_MODES[-1] + 2, 5)
 am = np.zeros(21)
 am[:len(PRESSURE_PROFILE)] = PRESSURE_PROFILE
 inp = replace(inp, delt=0.5, ns_array=np.array([35]),
@@ -122,18 +122,23 @@ stage = opt.VmecProblem.from_tuples(inp, [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 100.0),
     (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0), edge_jacobian] + beta_term,
-    max_mode=MAX_MODE, use_ess=True, restart_from=seed, progress=not ci_smoke)
-free_map = FreeMapProblem(stage, mapped, seed, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
-step = np.concatenate((PLASMA_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
-change = np.concatenate((PLASMA_MAX_CHANGE * step[:free_map.nx], np.full(len(FREE_MAP), np.inf)))
-fit = least_squares(free_map.residual, free_map.x0, jac=free_map.residual_jac, x_scale=step,
-                    max_nfev=PLASMA_MAX_NFEV, bounds=(free_map.x0 - change, free_map.x0 + change),
-                    ftol=1e-6, xtol=1e-10, verbose=2)
-MAP_PARAMETERS = free_map.values(fit.x)
-mapped.options.update(MAP_PARAMETERS)
-print(f"map = {MAP_PARAMETERS}")
-inp, seed = stage.input_from_x(fit.x[:free_map.nx]), stage.equilibrium_from_x(fit.x[:free_map.nx])
-del stage, free_map
+    max_mode=MAX_MODES[-1], use_ess=True, restart_from=seed, progress=not ci_smoke)
+x = stage.x0
+for max_mode in MAX_MODES:
+    sub = stage.subproblem(max_mode=max_mode, x=x)
+    free_map = FreeMapProblem(sub, mapped, seed, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    step = np.concatenate((PLASMA_STEP * sub.scales, np.full(len(FREE_MAP), 0.5)))
+    change = np.concatenate((PLASMA_MAX_CHANGE * step[:free_map.nx], np.full(len(FREE_MAP), np.inf)))
+    fit = least_squares(free_map.residual, free_map.x0, jac=free_map.residual_jac, x_scale=step,
+                        max_nfev=PLASMA_MAX_NFEV, bounds=(free_map.x0 - change, free_map.x0 + change),
+                        ftol=1e-6, xtol=1e-10, verbose=2)
+    MAP_PARAMETERS = free_map.values(fit.x)
+    mapped.options.update(MAP_PARAMETERS)
+    print(f"max_mode {max_mode}: map = {MAP_PARAMETERS}")
+    x = sub.embed(fit.x[:free_map.nx])
+    seed = stage.equilibrium_from_x(x)
+inp = stage.input_from_x(x)
+del stage, sub, free_map
 jax.clear_caches()
 gc.collect()
 
@@ -141,7 +146,7 @@ gc.collect()
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
 plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale), edge_jacobian] + beta_term
 plasma_problem = opt.VmecProblem.from_tuples(
-    inp, plasma_terms, max_mode=MAX_MODE,
+    inp, plasma_terms, max_mode=MAX_MODES[-1],
     use_ess=True, restart_from=seed, progress=not ci_smoke, forward_ftol=1e-12,
     forward_max_iterations=4000, refine_tol=1e-12, adjoint_tol=1e-8, max_fsq_ratio=1.)
 seed_equilibrium = plasma_problem.equilibrium_from_x(plasma_problem.x0)

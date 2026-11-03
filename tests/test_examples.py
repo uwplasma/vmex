@@ -1082,8 +1082,8 @@ def test_low_transport_example(tmp_path):
     pytest.importorskip("booz_xform_jax")
     pytest.importorskip("neo_jax")
     _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
-    for name in ("input.pwO_optimized_nfp2", "wout_pwO_optimized_nfp2.nc",
-                 "pwO_optimized_nfp2_objectives.csv"):
+    for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
+                 "pwO_optimized_nfp3_objectives.csv"):
         assert (tmp_path / name).exists()
 
 
