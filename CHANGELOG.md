@@ -5,7 +5,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 ## Unreleased
 
 - Add pwO vacuum, finite-beta and coil examples with independent transport checks.
-- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid.
+- Refactor finite-beta QA and fix flux/current calibration; skip vacuum VC and verify final-grid free-boundary convergence.
 - Fix constructed-QI first-wall interpolation under a shifted toroidal origin.
 
 ## 0.12.0 - 2026-10-21
