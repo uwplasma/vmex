@@ -528,9 +528,12 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
     integrated with ``nsteps`` RK4 steps, all in ``jnp``, so every output is
     differentiable in the inputs. ``t_final=None`` closes one turn of all
     but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``.
-    Each initial condition ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
-    largest radius, and ``action`` the fitted ``J`` along it, constant up to
-    the integration error.
+    The LCFS absorbs: past ``s = 1`` the drift fades out over ``0.02`` in
+    ``s``, so a lost orbit stops there rather than following the
+    extrapolated fit. Each initial condition ``(s0, alpha0)`` (broadcast
+    together) gives one orbit; ``s_max`` is its largest radius, and
+    ``action`` the fitted ``J`` along it, constant up to the integration
+    error inside the plasma.
     """
     action, bounce_time = jnp.asarray(action), jnp.asarray(bounce_time)
     dtype = action.dtype
@@ -561,8 +564,11 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
                 jnp.real((1j * k * j_k) @ phase), jnp.real(tau_k @ phase))
 
     def rhs(y):
+        # The LCFS absorbs: the drift fades out over 0.02 in s beyond it, so a
+        # lost orbit stops near s = 1 instead of following an extrapolated J.
         _, j_s, j_alpha, tau = fields(y)
-        return jnp.stack([j_alpha, -j_s]) / tau
+        gate = 0.5 - 0.5 * jnp.tanh((jnp.abs(y[0]) - 1.0) / 0.02)
+        return gate * jnp.stack([j_alpha, -j_s]) / tau
 
     if t_final is None:
         grid = jnp.stack(jnp.broadcast_arrays(
