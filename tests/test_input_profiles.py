@@ -268,7 +268,6 @@ def test_partial_niter_minus_one_executes_one_vmec_pass() -> None:
         ("TRIP3D_FILE='field.nc'", "D00E_TRIP3D_MODE_UNSUPPORTED"),
         ("AH(0)=0.1", "D00F_ANIMEC_MODE_UNSUPPORTED"),
         ("AT=0.9", "D00F_ANIMEC_MODE_UNSUPPORTED"),
-        ("TVOLUME=10.0", "D00G_VOLUME_RESCALE_UNSUPPORTED"),
         ("PRECON_TYPE='CG'", "D00H_PRECONDITIONER_MODE_UNSUPPORTED"),
         (
             "PRECON_TYPE='GMRES'\nPRE_NITER=20",

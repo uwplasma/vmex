@@ -39,7 +39,6 @@ import json
 import os
 from pathlib import Path
 
-import jax
 import matplotlib
 import numpy as np
 
@@ -111,7 +110,6 @@ if ci_smoke:
 # End of input parameters.
 ###############################################################################
 
-jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ### Helpers ###################################################################
