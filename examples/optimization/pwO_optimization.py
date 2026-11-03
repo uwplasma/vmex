@@ -42,16 +42,12 @@ MBOZ = 16
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
-# Zero bootstrap current. The mapped field alone already has a zero collisionless
-# bootstrap geometric factor for every map; the current comes from the unmapped
-# band where B_max lives. "band" flattens B across that band (sufficient, not
-# necessary; DKX confirms it lowers the current, at higher edge eps_eff);
-# "geometric" leaves the band free and minimizes the collisionless bootstrap
-# ratio (1 for QA, 0 for zero current) on SURFACES, which DKX does not confirm
-# at reactor collisionality; None does neither:
+# Zero bootstrap current. The mapped field alone already has zero collisionless
+# bootstrap geometry for every map; the current comes from the unmapped band where
+# B_max lives. "band" flattens B across that band (sufficient, not necessary; DKX
+# confirms it lowers the current, at higher edge eps_eff); None leaves it free:
 BOOTSTRAP_TERM = None
-BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flattens at 1e3
-                    "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
+BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
@@ -130,7 +126,7 @@ def boozer_spectrum(equilibrium_state, solver_context):
 
 # Each term is (function, target, weight).
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
-                        nband=16, **MAP_PARAMETERS)
+                        **MAP_PARAMETERS)
 objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
@@ -143,15 +139,9 @@ objective_function_terms = [
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
-bootstrap = opt.BootstrapGeometricResidual(SURFACES)
-if BOOTSTRAP_TERM == "geometric":
-    objective_function_terms.append((bootstrap, 0.0, BOOTSTRAP_WEIGHT))
 
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
-    ("band spread", lambda state, rt: pwo.compute_state(state, rt)["band_total"], ".6e"),
-    ("bootstrap ratio", lambda state, rt: jnp.max(jnp.abs(
-        bootstrap.compute_state(state, rt)["ratio"])), ".3f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
     ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
     ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))

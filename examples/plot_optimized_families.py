@@ -10,9 +10,14 @@ uses the four validated inputs bundled in ``examples/data``. Each column shows
 four equally spaced toroidal cuts over one field period, the 3-D boundary, and
 ``|B|`` on the LCFS in Boozer coordinates. The pwO figure compares the
 ``pwO_optimization.py`` seed and result and adds their ``epsilon_eff^(3/2)``
-and ``|iota|`` profiles; it needs ``vmex[neoclassical]``.
+and ``|iota|`` profiles; it needs ``vmex[neoclassical]``. The ``pwo_bootstrap`` figure
+compares ``pwO_optimization.py`` runs with ``BOOTSTRAP_TERM = None`` and ``"band"``
+(directories ``pwO`` and ``pwO_band``): ``|B|``, the DKX bootstrap current and the alpha
+losses against the seed. The DKX files ``dkx_<case>.json`` (``seed``, ``pwO``, ``pwO_band``)
+come from ``bootstrap_bench.py --res 25,33,64,8`` run on each ``wout``.
 """
 
+import json
 from dataclasses import replace
 
 from pathlib import Path
@@ -48,7 +53,7 @@ SURFACES = np.linspace(0.1, 1.0, 8)
 PLOT_DPI = 220
 QS_INPUT_DIR = Path.cwd()
 OUT_DIR = Path.cwd()
-PLOT_ONLY = "all"  # "all", "qs", "qi" or "pwo"
+PLOT_ONLY = "all"  # "all", "qs", "qi", "pwo" or "pwo_bootstrap"
 PWO_NFP = 3                  # the pwO_optimization.py default
 
 
@@ -158,6 +163,39 @@ def _draw_pwo(output):
     plt.close(figure); print(f"wrote {output}")
 
 
+def _draw_pwo_bootstrap(output):
+    cases = (("Near-circular seed", _pwo_seed(), "seed", "#566a79"),
+             ("pwO", QS_INPUT_DIR / "pwO" / f"input.pwO_optimized_nfp{PWO_NFP}", "pwO", "#c56627"),
+             ("pwO + bootstrap control", QS_INPUT_DIR / "pwO_band" / f"input.pwO_optimized_nfp{PWO_NFP}",
+              "pwO_band", "#2a78d6"))
+    figure = plt.figure(figsize=(8.1, 7.5), dpi=PLOT_DPI)
+    grid = figure.add_gridspec(2, 4, height_ratios=(1.2, 1.0), hspace=0.3, wspace=0.7)
+    current, loss = figure.add_subplot(grid[0, 2:]), figure.add_subplot(grid[1, 2:])
+    for index, (title, source, tag, color) in enumerate(cases):
+        equilibrium = _solve(source if tag == "seed" else vj.VmecInput.from_file(source))
+        dkx = json.loads((QS_INPUT_DIR / f"dkx_{tag}.json").read_text())
+        current.plot(dkx["surfaces"], 1e-6 * np.array(dkx["dkx_jdotb"]), "o-", color=color,
+                     label=rf"{title}, $I_{{bs}}$ = {1e-3 * dkx['I_dkx']:.0f} kA")
+        alphas = vj.trace_alphas(equilibrium.wout, nparticles=1000, tmax=5e-3, s=0.3, seed=2, times_to_trace=100)
+        t, lost = np.asarray(alphas.times), np.asarray(alphas.loss_fractions)
+        loss.plot(t[t > 0], 100 * lost[t > 0], color=color,
+                  label=f"{title}, {100 * alphas.loss_fraction:.1f} %")
+        if index:
+            boozer = figure.add_subplot(grid[0, index - 1]); _boozer(figure, boozer, equilibrium.wout, f"bs{index}")
+            boozer.set_title(title, loc="left", fontsize=9)
+            surface = figure.add_subplot(grid[1, index - 1], projection="3d")
+            _boundary_3d(figure, surface, equilibrium.wout)
+            if index == 1:
+                boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$", fontsize=8)
+    current.set(xlabel="$s$", ylabel=r"DKX $\langle j_\parallel B\rangle$ [MA T/m$^2$]")
+    loss.set(xscale="log", xlabel="time [s]", ylabel="alphas lost [%]")
+    for axis in (current, loss):
+        axis.legend(fontsize=6.5, frameon=False); axis.tick_params(labelsize=7)
+        axis.spines[["top", "right"]].set_visible(False)
+    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05)
+    plt.close(figure); print(f"wrote {output}")
+
+
 def _find_qs_input(directory, tag):
     for name in (f"input.{tag}_optimized", f"input.{tag.lower()}_optimized"):
         path = directory / name
@@ -192,8 +230,8 @@ def _draw(cases, output, *, qi=False):
     plt.close(figure); print(f"wrote {output}")
 
 
-if PLOT_ONLY not in ("all", "qs", "qi", "pwo"):
-    raise ValueError("PLOT_ONLY must be 'all', 'qs', 'qi' or 'pwo'")
+if PLOT_ONLY not in ("all", "qs", "qi", "pwo", "pwo_bootstrap"):
+    raise ValueError("PLOT_ONLY must be 'all', 'qs', 'qi', 'pwo' or 'pwo_bootstrap'")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 if PLOT_ONLY in ("all", "qs"):
     cases = [(_find_qs_input(QS_INPUT_DIR, tag), title, m, n) for tag, title, m, n in QS_CASES]
@@ -202,3 +240,5 @@ if PLOT_ONLY in ("all", "qi"):
     _draw(QI_CASES, OUT_DIR / "readme_qi.webp", qi=True)
 if PLOT_ONLY == "pwo":  # not part of "all": it needs the pwO_optimization.py result
     _draw_pwo(OUT_DIR / "readme_pwo.webp")
+if PLOT_ONLY == "pwo_bootstrap":  # needs the two pwO_optimization.py results and their DKX files
+    _draw_pwo_bootstrap(OUT_DIR / "readme_pwo_bootstrap.webp")
