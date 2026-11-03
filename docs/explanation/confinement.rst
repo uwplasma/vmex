@@ -416,7 +416,25 @@ particles and contribute nothing. The optional ``excursion_weight`` adds weak
 rows on the spread of :math:`J` along each surface relative to its radial
 slope; they need no orbit integration. The bounce-averaged model has no
 finite orbit width, so keep :math:`s_0` well inside the plasma and check the
-result with guiding-centre tracing. ``drift_surfaces.py`` shows the orbits of
+result with guiding-centre tracing.
+
+Three options address what the bounce-averaged reach cannot see. They were
+compared with the traced alpha losses of 19 equilibria (Spearman 0.78 for the
+plain reach; all gains below are within the bootstrap noise of about 0.1).
+:func:`~vmex.core.maxj.birth_pitches` chooses pitches by
+:math:`\xi_0 = v_\parallel/v` at :math:`B_{\min}` of the birth surface,
+:math:`\lambda = (1-\xi_0^2)/B_{\min}`, with Gauss-Legendre weights in
+:math:`\xi_0` and a window that drops barely trapped pitches whose wells
+vanish on outer surfaces (+0.03). ``fow`` adds rows that count an orbit as lost
+when :math:`\hat s + \delta_s \ge 1` for the banana width
+:math:`\delta_s = 2\sqrt{s}\,(\rho_\alpha/a)\,q/\sqrt{\epsilon}` (+0.01 to +0.04).
+``mirror_target`` adds a hinge on :math:`(B_{\max}-B_{\min})/(B_{\max}+B_{\min})` of
+every surface; it does not raise the rank correlation but excludes the
+high-mirror fields (0.5 to 0.95) that a reach term alone can reward.
+``clamp=True`` freezes the fit at the outermost surface with a well.
+None of them predicts the 70 to 90 per cent trapped losses of the
+quasi-axisymmetric fields, which sit at zero reach.
+``drift_surfaces.py`` shows the orbits of
 a quasi-axisymmetric equilibrium and the gradient of ``s_max``.
 
 ``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
