@@ -6,7 +6,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from vmex.core import pwo
 from vmex.core.pwo import (
+    FreeMapProblem,
     MappedPwOResidual,
     mapped_pwo_residual_from_boozer,
     squeezed_pwo_coordinates,
@@ -517,3 +519,45 @@ def test_transport_backtrack_requires_every_radius_physics_and_variance(tmp_path
     else:
         assert len(monitor.report["backtracking"]) == 6
         assert not monitor.report["transport_screen_passed"]
+
+
+def test_limited_map_turns_any_parameters_into_a_valid_map():
+    wild = dict(a=5., b=3., c=-.1, eta_min=.2)
+    out = mapped_pwo_residual_from_boozer(**_spectrum(2), b_ref=1.5, limit_map=True, **wild)
+    assert bool(np.all(out["valid"])) and np.all(np.isfinite(out["residuals1d"]))
+    grad = jax.grad(lambda a: mapped_pwo_residual_from_boozer(
+        **_spectrum(2), b_ref=1.5, limit_map=True, a=a, b=.2, c=-2., eta_min=2.8)["total"])(.3)
+    assert np.isfinite(float(grad))
+
+
+def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch):
+    spec = _spectrum(2)
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
+    shift = np.linspace(.01, .03, flat.size)
+
+    class Stage:
+        x0 = np.zeros(2)
+
+        def residual(self, x):
+            return np.concatenate((flat + shift*x[0], [x[1] - 1.]))
+
+        def residual_jac(self, x):
+            return np.column_stack((np.append(shift, 0.), np.append(np.zeros(flat.size), 1.)))
+
+    class Equilibrium:
+        state = runtime = None
+
+    mapped = MappedPwOResidual((.3, .6))
+    np.testing.assert_allclose(mapped.spectrum_state(None, None), flat)
+    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(a=.3, b=.1, c=-2., eta_min=2.8),
+                             ("a", "b", "c", "eta_min"), weight=10.)
+    z = problem.x0 + .05
+    jac = problem.residual_jac(z)
+    fd = np.column_stack([(problem.residual(z + h) - problem.residual(z - h)) / 2e-6
+                          for h in 1e-6*np.eye(z.size)])
+    np.testing.assert_allclose(jac, fd, rtol=1e-5, atol=1e-7)
+    values = problem.values(z)
+    for name, (low, high) in FreeMapProblem.MAP_BOUNDS.items():
+        assert low < values[name] < high

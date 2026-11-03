@@ -32,7 +32,7 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed
 SEED_PERTURBATION = 0.05
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
-SURFACES = np.linspace(0.1, 0.9, 5)
+SURFACES = np.linspace(0.1, 0.9, 8)
 MBOZ = 16
 
 # Initial values of the pwO map (a, b, c, eta_min), and which of them the
@@ -41,13 +41,24 @@ MBOZ = 16
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
+# Zero bootstrap current. The mapped field alone already has a zero collisionless
+# bootstrap geometric factor for every map; the current comes from the unmapped
+# band where B_max lives. "band" flattens B across that band (sufficient, not
+# necessary; DKX confirms it lowers the current, at higher edge eps_eff);
+# "geometric" leaves the band free and minimizes the collisionless bootstrap
+# ratio (1 for QA, 0 for zero current) on SURFACES, which DKX does not confirm
+# at reactor collisionality; None does neither:
+BOOTSTRAP_TERM = None
+BOOTSTRAP_WEIGHT = {"band": 1.0e3 if NFP == 3 else 1.0e4,  # NFP 2 under-flattens at 1e3
+                    "geometric": 1.0e2}.get(BOOTSTRAP_TERM, 0.0)
+
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2, 3, 4, 5]
 MAX_NFEV = [15]*len(MAX_MODES)
 # STAGE_FTOL = [1e-13 if NFP==2 else 1e-12]*len(MAX_MODES)
-ASPECT_TARGET = 5.5
-MAGNETIC_WELL_TARGET = 0 #0.04
+ASPECT_TARGET = 6.0
+MAGNETIC_WELL_TARGET = 0.01      # 0 turns the well off
 MAGNETIC_WELL_WEIGHT = 1e3
 ELONGATION_LIMIT = 9.0
 NS_ARRAY = np.array([35])
@@ -118,11 +129,11 @@ def boozer_spectrum(equilibrium_state, solver_context):
 
 # Each term is (function, target, weight).
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
-                        **MAP_PARAMETERS)
+                        nband=16, **MAP_PARAMETERS)
 objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 1000.0),
     (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
@@ -131,9 +142,15 @@ objective_function_terms = [
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
+bootstrap = opt.BootstrapGeometricResidual(SURFACES)
+if BOOTSTRAP_TERM == "geometric":
+    objective_function_terms.append((bootstrap, 0.0, BOOTSTRAP_WEIGHT))
 
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
+    ("band spread", lambda state, rt: pwo.compute_state(state, rt)["band_total"], ".6e"),
+    ("bootstrap ratio", lambda state, rt: jnp.max(jnp.abs(
+        bootstrap.compute_state(state, rt)["ratio"])), ".3f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
     ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
     ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
@@ -175,9 +192,10 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
+                           band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
-    step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+    step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
     result = least_squares(
         joint.residual, joint.x0, jac=joint.residual_jac,
