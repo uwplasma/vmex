@@ -180,9 +180,13 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
 final_input = replace(
     inp, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
     niter_array=np.array([FINAL_NITER]))
-final_equilibrium = opt.solve_equilibrium(
-    final_input, initial_state=equilibrium.solution,
-    verbose=not ci_smoke, raise_on_max_iterations=True)
+try:
+    final_equilibrium = opt.solve_equilibrium(
+        final_input, initial_state=equilibrium.solution,
+        verbose=not ci_smoke, raise_on_max_iterations=True)
+except Exception as error:   # keep the optimizer's own solve if the fine one fails
+    print(f"FINAL SOLVE FAILED: {error}")
+    final_equilibrium, final_input = equilibrium, inp
 
 ### Print, plot and save ######################################################
 
