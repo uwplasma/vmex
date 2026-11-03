@@ -48,6 +48,8 @@ links to the module that documents it.
   / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
 - :func:`~vmex.core.scaling.axis_field` / :func:`~vmex.core.scaling.match_b0` —
   ``|B|`` on the magnetic axis, and the scaled deck that sets it
+- :func:`~vmex.core.setup.boundary_volume` — input-boundary volume, the
+  ``TVOLUME`` that holds an optimized plasma at its seed size
 
 **High-order reconstruction and strong-force certificate**
 
@@ -162,7 +164,7 @@ from packaging.version import Version as _Version
 # Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
 # added the least_squares(callback=) that the optimization examples pass.
 _MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
-                     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)}
+                     "booz_xform_jax": (0, 4, 3), "solvax": (0, 35, 0)}
 
 
 def _check_supported_versions() -> None:
@@ -333,6 +335,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "axis_field": (".core.scaling", "axis_field"),
     "match_b0": (".core.scaling", "match_b0"),
     "scale_input": (".core.scaling", "scale_input"),
+    "boundary_volume": (".core.setup", "boundary_volume"),
     "scale_mgrid": (".core.scaling", "scale_mgrid"),
     "scale_wout": (".core.scaling", "scale_wout"),
     # errors

@@ -17,7 +17,6 @@ import json
 import os
 from pathlib import Path
 
-import jax
 
 from vmex.mirror import (
     MirrorConfig,
@@ -65,7 +64,6 @@ ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 # End of input parameters.
 ###############################################################################
 
-jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ### Build the hybrid ##########################################################
