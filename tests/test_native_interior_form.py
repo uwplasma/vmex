@@ -2,9 +2,9 @@
 
 ``B`` used to be synthesized from the Nyquist ``B^u``/``B^v`` tables: a Fourier
 fit of a rational function, interpolated radially on the half mesh, against
-tangent vectors taken from a different (full-mesh) geometry.  The angular parts
-of that are exact and the radial parts are not, and the two do not agree well
-enough for the result to be solenoidal.  The native form instead evaluates
+tangent vectors taken from a different (full-mesh) geometry. Angular fitting
+and mismatched radial interpolation need not preserve vector identities,
+including the solenoidal condition.  The native form instead evaluates
 
     B^theta = (chi' - lambda_zeta) / sqrt(g),
     B^zeta  = (phi' + lambda_theta) / sqrt(g),
@@ -33,7 +33,7 @@ The ``+`` on the ``dlambda/dzeta`` term in the ``magnetic_fields`` class
 docstring disagrees with its own ``lv = -lamscale * dlambda/dzeta`` and with
 the code; the code is authoritative.
 
-Three tests, because the change has three independent ways to be wrong.
+The tests cover field conventions, derivative accuracy and coordinate-adapter consistency.
 :func:`test_native_form_matches_the_fitted_field_on_a_solved_equilibrium` pins
 every convention in that table at once, by requiring the two paths to agree on
 a real equilibrium to the accuracy the fitted one has; any convention error
@@ -41,9 +41,10 @@ moves that by far more than the tolerance.
 :func:`test_native_form_reaches_the_second_derivative_gate` measures what the
 change was for, against a field known in closed form.
 :func:`test_fitted_fallback_keeps_its_measured_accuracy` measures the path
-callers still get when their spectra predate this change, and pins it to the
-numbers it had before this PR: the C2 interpolant the native form needs is
-tied to that form rather than applied to both, so the fallback is untouched.
+callers get without native spectra. Its contravariant interpolation remains
+the fitted path, while its Cartesian geometry now uses the declared prepared
+linear interpolant consistently with the flux-coordinate map. The curved
+geometry adapter regression checks that distinction directly.
 
 The oracles came from PR #382, which committed them on their own, before the
 fix existed, as bands asserting how wrong the code was.  That is a fair thing
@@ -84,7 +85,8 @@ ANGLE = 0.7
 #: ``B = F/R phi_hat``.  Ceilings on what the fitted fallback achieves on it,
 #: measured at ``ns = 41, 81, 161`` (see the test's docstring for the table).
 #: They are upper bounds, not bands: an improved fallback passes unchanged.
-#: This PR leaves that path's numbers exactly as they were.
+#: This oracle has exact regularized geometry, so the interpolation repair
+#: retains these accuracy ceilings.
 FALLBACK_MINOR, FALLBACK_FLUX = 0.1, 2.0
 #: Applied at the FINEST resolution tested; the coarse end is documented in
 #: the test's table rather than asserted, because it is not usable there.
@@ -217,6 +219,40 @@ def _oracle_points():
          minor * np.sin(ANGLE)), axis=1))
 
 
+@pytest.mark.parametrize("native", [False, True], ids=["fitted", "native"])
+def test_flux_adapter_reconstructs_its_cartesian_field_and_gradient(native):
+    """The public flux adapter must trace the same field that Cartesian queries return."""
+    ns = 9
+    # Curved radial geometry also checks that the fitted path uses its
+    # prepared linear geometry interpolant in both coordinate entry points.
+    spectra = _oracle_spectra(ns, native=native)
+    # Add a helical lambda mode without changing the circle geometry. Both
+    # lambda parities exercise the native branch's toroidal derivatives.
+    spectra["xm"] = jnp.array([0.0, 1.0, 1.0])
+    spectra["xn"] = jnp.array([0.0, 0.0, 1.0])
+    for name in ("rmnc", "zmns"):
+        spectra[name] = jnp.pad(spectra[name], ((0, 0), (0, 1)))
+    if native:
+        radius = jnp.sqrt(jnp.linspace(0.0, 1.0, ns))
+        spectra["lmns"] = jnp.zeros((ns, 3)).at[:, 2].set(0.03 * radius)
+        spectra["lmnc"] = jnp.zeros((ns, 3)).at[:, 2].set(0.02 * radius)
+    coordinates = jnp.array([[0.25, 0.6, 0.15], [0.55, 2.0, 0.4], [0.8, 4.0, 1.1]])
+    field = ext.VmecInteriorField(spectra).set_points_flux(coordinates)
+    adapter = field.field_in_flux_coordinates()
+
+    def mapped_field(point):
+        return jax.jacfwd(adapter.to_xyz)(point) @ adapter.B_contravariant(point)
+
+    jacobian = jax.jit(jax.vmap(jax.jacfwd(adapter.to_xyz)))(coordinates)
+    mapped = jax.jit(jax.vmap(mapped_field))(coordinates)
+    np.testing.assert_allclose(mapped, field.B(), rtol=2e-11, atol=2e-11)
+    # Differentiate in flux coordinates and compare with the public Cartesian
+    # gradient pulled back by the coordinate Jacobian, including all basis terms.
+    derivative = jax.jit(jax.vmap(jax.jacfwd(mapped_field)))(coordinates)
+    expected = jnp.einsum("nij,njk->nik", field.gradB(), jacobian)
+    np.testing.assert_allclose(derivative, expected, rtol=2e-10, atol=2e-10)
+
+
 @pytest.mark.full  # nightly: one solovev solve plus two field evaluations
 @pytest.mark.parametrize("deck", ["solovev", "up_down_asymmetric_tokamak"])
 def test_native_form_matches_the_fitted_field_on_a_solved_equilibrium(deck):
@@ -308,12 +344,12 @@ def test_fitted_fallback_keeps_its_measured_accuracy():
     spectra assembled by hand or carried over from before this change, so what
     it achieves is worth stating rather than leaving to be rediscovered.
 
-    This PR does not change it.  The C2 interpolant the native form needs is
-    tied to that form rather than applied to both, precisely so that this path
-    keeps the numbers it had; an earlier revision gave the spline to both and
-    cost this path up to ``ns = 82`` on the second derivative and ``ns = 147``
-    on the third, which is the range real wouts are written at.  Measured
-    against the exact ``B = F/R phi_hat``, identical to before this PR:
+    The fitted contravariant tables retain their interpolation. Cartesian
+    geometry now uses the declared prepared linear interpolant, consistently
+    with the flux-coordinate map; curved regularized geometry can therefore
+    change. This oracle has exact regularized geometry, so its measured
+    accuracy and the existing ceilings remain applicable. Measured against
+    the exact ``B = F/R phi_hat``:
 
     =================  ========  ========  ========  ========
     quantity           ns = 41   ns = 81   ns = 101  ns = 161

@@ -802,3 +802,68 @@ shape derivatives, so even the smooth gradient is approximate. Check actual
 forward descent and sampling refinement for each configuration. The surrogate
 can underestimate shallow ripple wells; anneal ``temperature`` with a finer
 budget and report the independent hard value.
+
+
+Passing particles near rational surfaces
+----------------------------------------
+
+:mod:`vmex.core.cyclometry` evaluates closed-transit action and a moment bound
+on its field-line variation. For ``iota=N/M``, transit tables span ``2*pi*M``
+in Boozer toroidal angle; Fourier toroidal indices include ``nfp``.
+With ``b=B/B_star`` in ``(0, 1]`` and ``lambda=mu*B_star/E``, the action is
+``mean(sqrt(1-lambda*b)/b)``. Keep ``B_star`` fixed during optimization.
+
+.. code-block:: python
+
+   import jax
+   import jax.numpy as jnp
+   from vmex.core.cyclometry import transit_basis, transit_action, moment_bound
+
+   jax.config.update("jax_enable_x64", True)
+   cosine, sine = transit_basis([0, 1, 1], [0, 0, 1], 1, 2)
+   b = cosine @ jnp.array([0.75, 0.07, 0.07])
+   action = transit_action(b, jnp.linspace(0, 0.95, 33))
+   bound = moment_bound(b, order=64, softness=1e-5)
+
+The bound applies to sampled transit measures. Supply ``oscillation_error``
+for known moment errors before interpreting it as a continuum bound.
+Invalid eager inputs raise; invalid traced trials return NaN for rejection.
+The transit invariant is due to `Foster et al.
+<https://arxiv.org/abs/2512.03165>`_. The action includes nonlinear harmonic
+coupling that a resonant-field-power objective omits. It does not bound losses.
+Compare field geometry and derivatives at matched physical points before
+interpreting differences between native and Boozer orbit models.
+
+:func:`~vmex.core.cyclometry.moving_rational_surface` interpolates a fixed Boozer
+radial table at ``iota(s)=N/M`` by solving the active affine interval directly.
+The root and interpolated fields remain differentiable. Pass the actual
+returned ``s_b`` radii and keep the bracket fixed. Endpoint roots,
+interior-knot roots and insufficient or changing shear sign are rejected.
+Refine radial and angular sampling when validating the objective.
+``iota_shear`` is with respect to the table coordinate; convert using
+``dpsi/ds`` for physical formulas with a nonidentity ``APHI`` flux map.
+
+Persistent reference for scalar objectives
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pass a compatible converged equilibrium as ``frozen_reference`` to keep
+values, gradients and materialized equilibria on the same discrete family:
+
+.. code-block:: python
+
+   from vmex import optimize as opt
+   from vmex.core.implicit import iota_edge
+
+   problem = opt.VmecProblem.from_loss(
+       seed.inp, iota_edge, frozen_reference=seed, max_mode=1,
+       use_ess=False, refine_tol=1e-11, adjoint_tol=1e-9)
+   value, gradient = problem.value_and_grad(problem.x0)
+   equilibrium = problem.equilibrium_from_x(problem.x0)
+
+The reference is copied. Trials must pass host convergence admission and a
+finite family residual tolerance. Incompatible references are rejected.
+Inspect ``frozen_reference_residual`` in ``problem.evaluate(x).diagnostics``.
+This option requires an implicit scalar loss; restart and warm-start options
+only select initial guesses. Check directional derivatives at both the
+reference and displaced boundaries. Agreement validates the discrete-family
+derivative; field-resolution and orbit-convergence checks remain separate.
