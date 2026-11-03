@@ -387,3 +387,19 @@ def test_analytic_mode_projection_boundary_derivative(cth_vacuum_inputs, include
         duplicate = np.tile(duplicate, 2)
     for array in jax.tree.leaves(value):
         np.testing.assert_array_equal(np.asarray(array)[duplicate], 0.)
+
+
+def test_analytic_sum_assigns_positive_n_to_t_minus():
+    """Pin ``analysesum2``: exchanging T+ and T- moves this ``wb`` by 17%.
+
+    The assignment itself was checked against quadrature of the subtracted
+    kernel, where T- agrees to 0.2% and T+ misses by 25-33%.
+    """
+    import vmex as vj
+
+    data = REPO / "examples" / "data"
+    inp = vj.VmecInput.from_file(data / "input.cth_like_free_bdy_lasym_small")
+    result = vj.solve_free_boundary_multigrid(
+        dataclasses.replace(inp, niter_array=[100]), mgrid_path=data / inp.mgrid_file,
+        verbose=False, raise_on_max_iterations=False)
+    assert float(result.wb) == pytest.approx(0.00155058552, rel=1e-4)

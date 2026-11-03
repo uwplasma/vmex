@@ -456,23 +456,25 @@ def test_configure_compilation_cache_wiring(monkeypatch):
     assert fake3.config.updates["jax_compilation_cache_dir"] == "/tmp/x"
 
 
-def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch):
+def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch, tmp_path):
     monkeypatch.delenv("VMEX_CACHE_MIN_COMPILE_TIME_SECS", raising=False)
     monkeypatch.delenv("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", raising=False)
     monkeypatch.delenv("VMEX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _compat._configure_compilation_cache(fake, "/tmp/cachedir")
+    _compat._configure_compilation_cache(fake, str(tmp_path))
     # Floor 0: storing the polish path's many sub-second programs halves the
-    # CLI rerun (60.6 s -> 31.6 s measured); the eviction bound below keeps
-    # the disk cost finite.
+    # CLI rerun (60.6 s -> 31.6 s measured); the trim below keeps the disk
+    # cost finite.
     assert fake.config.updates["jax_persistent_cache_min_compile_time_secs"] == 0.0
-    # The bound stays finite (JAX only locks the cache when eviction is on)
-    # but scales with the disk: the old fixed 1 GiB sat at its cap and evicted
-    # the executables the next optimization stage asked for.
-    bound = fake.config.updates["jax_compilation_cache_max_size"]
+    # JAX's own eviction is left off: with a finite size every write re-scans
+    # the cache directory (cold first gradient 40.0 s against 22.9 s).
+    assert "jax_compilation_cache_max_size" not in fake.config.updates
+    # The disk bound is VMEX's own trim, scaled with the filesystem: the old
+    # fixed 1 GiB sat at its cap and evicted the executables the next
+    # optimization stage asked for.
+    bound = _compat._default_cache_max_size(str(tmp_path))
     assert _compat._CACHE_SIZE_FLOOR <= bound <= _compat._CACHE_SIZE_CEILING
-    assert bound == _compat._default_cache_max_size("/tmp/cachedir")
     assert _compat._default_cache_max_size("/no/such/path") == \
         _compat._CACHE_SIZE_FLOOR
 
@@ -675,6 +677,31 @@ def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
     assert len(list(tmp_path.glob("*-cache"))) == 2
     # a missing directory is not an error: the cache may not exist yet
     assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1) == 0
+
+
+def test_prune_cache_entries_dates_entries_without_a_sidecar_by_file_time(tmp_path):
+    """With JAX's eviction off there are no atime sidecars: the oldest file goes."""
+    import os
+
+    for i in range(6):
+        entry = tmp_path / f"k{i}-cache"
+        entry.write_bytes(b"x")
+        os.utime(entry, (1000 + 10 * (5 - i), 1000 + 10 * (5 - i)))  # k0 newest
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 4
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == ["k0-cache", "k1-cache"]
+
+
+def test_prune_cache_entries_enforces_the_byte_bound(tmp_path):
+    _seed_cache(tmp_path, 8)
+    for entry in tmp_path.glob("*-cache"):
+        entry.write_bytes(b"x" * 100)
+    # inside the entry cap, over the byte bound: the oldest go first
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 5
+    assert sorted(int(p.name[1:-6]) for p in tmp_path.glob("*-cache")) == [5, 6, 7]
+    # inside both bounds: no work
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 0
+    # a cache directory that does not exist yet is not an error
+    assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1, max_bytes=1) == 0
 
 
 def test_configure_compilation_cache_bounds_resident_entries(tmp_path, monkeypatch):
