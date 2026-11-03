@@ -324,9 +324,33 @@ def test_j_dot_B_redl_formula_parity_zeff():
         "alpha": [0.4543400490751495, 0.814992230099803],
         "jdotB": [-4131811.6745255208, -4884860.735215111],
     }
+    # Those rows use p*dln(ne); add the ion term from dZeff/ds that they omit.
+    surfaces = np.array([0.3, 0.6])
+    Zeff, d_Zeff = 1.8 + 0.2 * surfaces, 0.2
+    ne = 4.13e20 * (1 - surfaces ** 5)
+    Ti = 11.0e3 * (1 - 0.9 * surfaces)
+    pref = -np.array([35.1, 34.9]) * bs.ELEMENTARY_CHARGE / (-8.2 * np.array([0.42, 0.44]))
+    expected["jdotB"] = np.array(expected["jdotB"]) - pref * np.array(expected["L31"]) * Ti * ne * d_Zeff / Zeff ** 2
     for name, ref in expected.items():
         np.testing.assert_allclose(np.asarray(det[name]), ref, rtol=1e-12, err_msg=name)
     np.testing.assert_allclose(np.asarray(jdotB), expected["jdotB"], rtol=1e-12)
+
+
+def test_constant_zeff_keeps_the_published_density_term():
+    """Landreman 2022 (A1), Redl eq (2) with separate gradients: at constant Zeff dni/ni = dne/ne."""
+    profiles = bs.KineticProfiles(
+        ne_coeffs=4.13e20 * np.array([1, 0, 0, 0, 0, -1.0]), Te_coeffs=12.0e3 * np.array([1, -1.0]),
+        Ti_coeffs=11.0e3 * np.array([1, -0.9]), Zeff_coeffs=np.array([1.8]))
+    geom = bs.RedlGeometry(
+        surfaces=jnp.array([0.3, 0.6]), iota=jnp.array([0.42, 0.44]),
+        G=jnp.array([35.1, 34.9]), I=jnp.zeros(2), R=jnp.array([5.92, 5.95]),
+        epsilon=jnp.array([0.08, 0.11]), f_t=jnp.array([0.41, 0.48]),
+        fsa_B2=jnp.zeros(2), fsa_1overB=jnp.zeros(2),
+        Bmin=jnp.zeros(2), Bmax=jnp.zeros(2), psi_edge=jnp.asarray(-8.2), nfp=2)
+    _, det = bs.j_dot_B_redl(profiles, geom, 0)
+    pref = -geom.G * bs.ELEMENTARY_CHARGE / (geom.psi_edge * geom.iota)
+    published = pref * (det["ne_s"] * det["Te_s"] + det["ni_s"] * det["Ti_s"]) * det["L31"] * (det["d_ne_d_s"] / det["ne_s"])
+    np.testing.assert_allclose(det["dnds_term"], published, rtol=1e-13)
 
 
 # ---------------------------------------------------------------------------
