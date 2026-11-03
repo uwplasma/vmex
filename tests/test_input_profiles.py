@@ -276,7 +276,6 @@ def test_partial_niter_minus_one_executes_one_vmec_pass() -> None:
             "D00I_ITERATION_CONTROL_UNSUPPORTED",
         ),
         ("MAX_MAIN_ITERATIONS=2", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
-        ("LGIVEUP=T", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
         ("LBSUBS=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
         ("LNYQUIST=F", "D00J_OUTPUT_MODE_UNSUPPORTED"),
         ("LBOOZ=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
@@ -360,8 +359,11 @@ def test_cxx_vmec_json_defaults_are_accepted_and_others_raise() -> None:
     """The reimplementation's writer emits every key; non-default ones fail."""
     assert VmecInput.from_json_text(_CXX_JSON).nfp == 2
     VmecInput.from_json_text(_CXX_JSON[:-1] + ', "backup_evaluated_state": false}')
+    assert VmecInput.from_json_text(
+        _CXX_JSON[:-1] + ', "lambda_precondition_checkerboard_terms": 0.001}'
+    ).lambda_m0_floor == 0.001
     for key, bad in (("iteration_style", "parvmec"), ("vacuum_mpol", 4),
-                     ("lgiveup", True), ("ntor_geometry", 5)):
+                     ("lbsubs", True), ("mpol_geometry", 1)):
         text = _CXX_JSON[:-1]
         with pytest.raises(UnsupportedInputModeError, match=key) as caught:
             VmecInput.from_json_text(text + f', "{key}": {json.dumps(bad)}}}')
@@ -737,3 +739,15 @@ def test_cxx_vmec_json_solves_like_the_equivalent_indata() -> None:
     assert ra.converged and rb.converged
     np.testing.assert_allclose(float(ra.fsqr), float(rb.fsqr), atol=1e-14)
     assert int(ra.iterations) == int(rb.iterations)
+
+
+def test_lgiveup_ends_the_ladder_after_a_poor_stage() -> None:
+    """VMEC2000 runvmec.f: a stage above fgiveup*ftol stops the multigrid ladder."""
+    import vmex as vj
+
+    deck = _SOLOVEV_INDATA.replace("NS_ARRAY = 5  NITER_ARRAY = 1000  FTOL_ARRAY = 1E-12",
+                                   "NS_ARRAY = 5 7  NITER_ARRAY = 3 1000  FTOL_ARRAY = 1E-12 1E-12")
+    for extra, ns in (("", 7), ("LGIVEUP = T\n", 5)):
+        inp = VmecInput.from_indata_text(deck.replace("/\n", extra + "/\n"))
+        res = vj.solve_multigrid(inp, verbose=False, raise_on_max_iterations=False)
+        assert (res.iterations <= 3) == (ns == 5)

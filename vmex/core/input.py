@@ -647,12 +647,6 @@ def _validate_indata_modes(
             "MAX_MAIN_ITERATIONS",
             "automatic continuation by additional NITER blocks is not implemented",
         )
-    if bool(first("LGIVEUP", False)):
-        raise UnsupportedInputModeError(
-            "D00I_ITERATION_CONTROL_UNSUPPORTED",
-            "LGIVEUP/FGIVEUP",
-            "VMEC2000 early termination between multigrid stages is not implemented",
-        )
 
     if bool(first("LBSUBS", False)):
         raise UnsupportedInputModeError(
@@ -693,12 +687,9 @@ def _validate_indata_modes(
 # VMEC2000 iteration; lgiveup/fgiveup, lbsubs are INDATA LGIVEUP/FGIVEUP/LBSUBS
 # (rejected at INDATA too); the rest have no INDATA control.
 _JSON_DEFAULT_ONLY: Dict[str, Any] = {
-    "mpol_geometry": -1, "ntor_geometry": -1, "vacuum_mpol": 0,
-    "vacuum_ntor": 0, "signgs": -1, "iteration_style": "vmec_8_52",
-    "lgiveup": False, "fgiveup": 30.0, "lbsubs": False,
-    "lambda_preconditioner_scale": 0.5,
-    "lambda_precondition_checkerboard_terms": 0.001,
-    "always_fix_m1_gauge": False,
+    "vacuum_mpol": 0, "vacuum_ntor": 0, "signgs": -1,
+    "iteration_style": "vmec_8_52", "lbsubs": False,
+    "lambda_preconditioner_scale": 0.5, "always_fix_m1_gauge": False,
 }
 # Accepted at any value: VMEX always returns its final state and keeps no
 # backup of the evaluated state, so neither changes a converged solve.
@@ -707,8 +698,6 @@ _JSON_ANY_VALUE = ("backup_evaluated_state", "return_outputs_even_if_not_converg
 
 def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
     value = data[key]
-    if key in ("mpol_geometry", "ntor_geometry"):  # equal to mpol/ntor is the same
-        return value in (default, data.get(key[:4], None))
     if isinstance(default, str):
         return str(value).strip().lower() == default
     return value == default
@@ -724,6 +713,14 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
             "VMEX JSON solves support NESTOR; only_coils/biest are different models",
         )
 
+    for key in ("mpol", "ntor"):  # geometry resolution >= mpol/ntor or < 0: same
+        geometry = data.get(key + "_geometry")
+        if geometry is not None and 0 <= int(geometry) < int(data.get(key, 6 if key == "mpol" else 0)):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key + "_geometry",
+                "a reduced R/Z resolution with full-resolution lambda is not "
+                "implemented; VMEX uses one resolution for both",
+            )
     for key, default in _JSON_DEFAULT_ONLY.items():
         if key in data and not _json_is_default(data, key, default):
             raise UnsupportedInputModeError(
@@ -734,7 +731,8 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
 
     field_names = {field.name for field in fields(VmecInput)}
     known = (field_names | {"adiabatic_index", "free_boundary_method"}
-             | set(_JSON_DEFAULT_ONLY) | set(_JSON_ANY_VALUE))
+             | set(_JSON_DEFAULT_ONLY) | set(_JSON_ANY_VALUE)
+             | {"mpol_geometry", "ntor_geometry", "lambda_precondition_checkerboard_terms"})
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(
@@ -830,6 +828,9 @@ class VmecInput:
     position_target: float = 0.0     #: target axis radius [m]; <= 0 keeps the initial axis
     position_interval: int = 20      #: iterations between control updates
     position_gain: float = 4.0       #: proportional gain, in units of mu0 I / (4 pi R0^2)
+    lgiveup: bool = False        #: stop the ladder after a stage above fgiveup*ftol
+    fgiveup: float = 30.0        #: give-up factor on ftol (lgiveup)
+    lambda_m0_floor: float | None = None  #: radial m=0 lambda preconditioner floor (None: diagonal)
     position_nmax: int = 0           #: highest helical harmonic controlled (0 = uniform B_Z only)
 
     def __post_init__(self) -> None:
@@ -1329,6 +1330,8 @@ class VmecInput:
             position_interval=int(get("POSITION_INTERVAL", 20)),
             position_gain=float(get("POSITION_GAIN", 4.0)),
             position_nmax=int(get("POSITION_NMAX", 0)),
+            lgiveup=bool(get("LGIVEUP", False)),
+            fgiveup=float(get("FGIVEUP", 30.0)),
         )
 
     @classmethod
@@ -1348,6 +1351,9 @@ class VmecInput:
         # schema stays compatible once it is removed.
         data.pop("_vmex", None)
         _validate_json_modes(data)
+        floor = data.get("lambda_precondition_checkerboard_terms")
+        if floor is not None and "lambda_m0_floor" not in data:
+            data["lambda_m0_floor"] = float(floor) if float(floor) >= 0 else None
         if "adiabatic_index" in data and "gamma" not in data:
             data["gamma"] = data["adiabatic_index"]
 
