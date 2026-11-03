@@ -1839,3 +1839,17 @@ def test_restart_source_prefers_the_equilibrium_state():
     assert opt._restart_source(eq, inp) == "state"
     assert opt._restart_source(eq, inp.change_resolution(mpol=inp.mpol + 1, ntor=inp.ntor)) == "wout"
     assert opt._restart_source("path", inp) == "path"
+
+
+def test_l_grad_b_excess_rows_and_weighted_well(solovev_eq):
+    state, runtime = solovev_eq.state, solovev_eq.runtime
+    minimum = float(opt.l_grad_b_state(state, runtime))
+    assert not np.any(opt.l_grad_b_excess_state(state, runtime, target=.5*minimum))
+    rows = opt.l_grad_b_excess_state(state, runtime, target=2*minimum)
+    assert rows.size == 24*24 and float(rows.max()) == pytest.approx(1.0, rel=1e-12)
+    same = opt.weighted_magnetic_well(state, runtime, inner=jnp.ones_like, outer=jnp.ones_like)
+    assert float(same) == 0.0
+    vp = np.abs(np.asarray(solovev_eq.wout.vp))[1:]
+    s = (np.arange(vp.size) + .5)/vp.size
+    well = opt.weighted_magnetic_well(state, runtime, inner=lambda x: 1 - x, outer=lambda x: x)
+    assert float(well) == pytest.approx(np.sum((1 - 2*s)*vp)/np.sum(vp), rel=1e-6)
