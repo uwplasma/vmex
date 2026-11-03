@@ -824,7 +824,9 @@ class BootstrapFiniteNuResidual(_ResidualTerm):
     ``nu_*^(-1/2)`` off-set. On 11 pwO/QI designs it ranks the DKX ``|I_bs|`` with
     Spearman 0.88, where the collisionless ratio ranks -0.30. ``ratio_weight`` (default 0)
     adds the collisionless Shaing-Callen ratio. Valid when maxima sit on the field-period
-    boundary (pwO, QI); weights default to uniform.
+    boundary (pwO, QI); weights default to uniform. A diagnostic, not an objective: as a pwO
+    objective term (weights 1e3 and 1e4, NFP 3) the optimized design's DKX ``<J.B>`` keeps one
+    sign on every surface, so the net current does not fall.
     """
 
     name = "bootstrap_finite_nu"
