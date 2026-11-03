@@ -1049,7 +1049,7 @@ def _held(x: SpectralState, rt_p: SolverRuntime) -> SpectralState:
     """``x`` with the m=1 constrained family on ``p``'s interior guess, where
     the held host solve leaves it, so the derivative follows the guess."""
     res = rt_p.resolution
-    if not (bool(rt_p.setup.lconm1) and (int(res.ntor) > 0 or bool(res.lasym))):
+    if not (bool(rt_p.setup.lconm1) and int(res.ntor) > 0):
         return x
     return hold_m1_family(x, _initial_state(rt_p.setup), rt_p.modes, lasym=bool(res.lasym))
 

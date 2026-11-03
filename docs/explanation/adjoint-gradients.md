@@ -181,6 +181,7 @@ follows, so a cold re-solve is the differentiated map. On `li383_low_res`,
 interior `Z_sin` objective, where the released family left 1-3 % and 140x
 (`tests/test_implicit_grad_fd.py::test_li383_resolve_fd_matches_the_implicit_derivative`).
 A plain `vmex` run still releases it, as VMEC2000 does.
+Axisymmetric (`ntor = 0`) decks and the lasym `n = 0` entry are exact theta-origin gauges and stay released.
 
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at

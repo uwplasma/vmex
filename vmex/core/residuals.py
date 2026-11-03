@@ -367,7 +367,8 @@ def hold_m1_family(state, source, modes: ModeTable, *, lasym: bool):
 
     ``(Rss - Zcs)/2`` (lasym: ``(Rsc - Zcc)/2``, all n), whose force
     :func:`zero_m1_z_force` zeroes: the antisymmetric ``Z_sin`` part of each
-    ``(+n, -n)`` pair (lasym: the symmetric ``Z_cos`` part and ``n = 0``).
+    ``(+n, -n)`` pair (lasym: the symmetric ``Z_cos`` part).  The lasym
+    ``n = 0`` entry is an exact theta-origin gauge and stays released.
     """
     m, n = np.asarray(modes.m, dtype=int), np.asarray(modes.n, dtype=int)
     index = {(a, b): k for k, (a, b) in enumerate(zip(m, n))}
@@ -378,10 +379,11 @@ def hold_m1_family(state, source, modes: ModeTable, *, lasym: bool):
         d = 0.5 * ((y[:, pos] - x[:, pos]) + sign * (y[:, neg] - x[:, neg]))
         return x.at[:, pos].add(d).at[:, neg].add(sign * d)
 
-    out = {"Z_sin": take(state.Z_sin, source.Z_sin, -1.0)} if pos.size else {}
+    if not pos.size:
+        return state
+    out = {"Z_sin": take(state.Z_sin, source.Z_sin, -1.0)}
     if lasym:
-        z = take(state.Z_cos, source.Z_cos, 1.0) if pos.size else jnp.asarray(state.Z_cos)
-        out["Z_cos"] = z.at[:, index[(1, 0)]].set(jnp.asarray(source.Z_cos)[:, index[(1, 0)]])
+        out["Z_cos"] = take(state.Z_cos, source.Z_cos, 1.0)
     return replace(state, **out)
 
 

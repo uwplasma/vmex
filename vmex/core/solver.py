@@ -786,7 +786,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
-        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and (resolution.ntor > 0 or resolution.lasym)),
+        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and resolution.ntor > 0),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -1135,9 +1135,11 @@ def _force_pipeline(
 
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
-    zero_gate = (jnp.asarray(True) if rt.hold_m1 else m1_zero_condition(
-        fsqz_previous=fsqz_previous, iterations_since_restart=iteration))
-    released = zero_m1_z_force(rotated, zero_gate)
+    zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
+    released = zero_m1_z_force(rotated, jnp.asarray(True) if rt.hold_m1 else zero_gate)
+    if rt.hold_m1 and released.force_Z_cc is not None:  # n = 0 lasym: exact gauge, released as VMEC2000
+        cc = jnp.asarray(rotated.force_Z_cc)[:, 1, 0] * (1.0 - jnp.asarray(zero_gate).astype(rotated.force_Z_cc.dtype))
+        released = replace(released, force_Z_cc=jnp.asarray(released.force_Z_cc).at[:, 1, 0].set(cc))
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
     )
