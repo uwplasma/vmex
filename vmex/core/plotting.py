@@ -1359,11 +1359,12 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     """Polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
 
-    ``J`` contours carry the colorbar. The thick curves are drift surfaces
-    integrated by :func:`vmex.core.maxj.drift_orbits` over about one
-    precession turn, solid if they close inside the LCFS and dashed red if
-    they reach it; dots mark the launch points. The title gives the pitch as
-    ``v_par/v`` where ``|B|`` is smallest.
+    The colored curves are ``J`` contours. The dark curves drawn over them
+    are drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
+    about one precession turn, solid if they close inside the LCFS and dashed
+    red if they reach it; dots mark the launch points. Where an orbit follows
+    a contour, the colored curve shows along its edges. The title gives the
+    pitch as ``v_par/v`` where ``|B|`` is smallest.
     """
     length_scale = abs(float(r_major))
     if not np.isfinite(length_scale) or length_scale <= np.finfo(float).tiny:
@@ -1384,43 +1385,47 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     alpha2d, s2d = np.meshgrid(alpha, j_info["s_b"])
     x, y = s2d * np.cos(alpha2d), s2d * np.sin(alpha2d)
     levels = np.linspace(float(periodic.min()), float(periodic.max()), 12)
-    lines = ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=1.8)
-    bar = fig.colorbar(lines, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
-    bar.lines[0].set_linewidth(4.0)
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=3.2)
+    # A continuous bar reads better than twelve stripes; the contours sample it.
+    mappable = ScalarMappable(Normalize(levels[0], levels[-1]), cmap=_CMAP_J)
+    fig.colorbar(mappable, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
     from matplotlib.lines import Line2D
     from matplotlib.patches import Circle
-    circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.2))
+    circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.8))
     # Drift surfaces: black if the orbit closes inside the LCFS, red if lost.
     orbits = j_info.get("orbits")
-    handles = [Line2D([], [], color="0.15", linewidth=2.2, label="LCFS")]
+    handles = [Line2D([], [], color="0.15", linewidth=2.8, label="LCFS")]
     for s_orbit, a_orbit in zip(*(orbits["s"], orbits["alpha"])) if orbits else ():
         outside = np.abs(s_orbit) >= 1.0
         lost = bool(outside.any())
         end = int(np.argmax(outside)) + 2 if lost else s_orbit.size  # stop at the LCFS
         color = "#c0392b" if lost else "black"
         ax.plot(s_orbit[:end] * np.cos(a_orbit[:end]), s_orbit[:end] * np.sin(a_orbit[:end]),
-                color=color, linewidth=2.4, linestyle="--" if lost else "-",
+                color=color, linewidth=1.6, linestyle="--" if lost else "-",
                 clip_path=circle)
         ax.plot(s_orbit[0] * np.cos(a_orbit[0]), s_orbit[0] * np.sin(a_orbit[0]),
-                "o", color=color, markersize=5)
+                "o", color=color, markersize=7, markeredgecolor="white")
     if orbits:
         lost = np.any(np.abs(orbits["s"]) >= 1.0, axis=-1)
-        handles += [Line2D([], [], color="black", linewidth=2.4,
+        handles += [Line2D([], [], color="black", linewidth=1.6, marker="o", markersize=6,
+                           markeredgecolor="white",
                            label=f"confined drift surface ({int((~lost).sum())})"),
-                    Line2D([], [], color="#c0392b", linewidth=2.4, linestyle="--",
+                    Line2D([], [], color="#c0392b", linewidth=1.6, linestyle="--",
                            label=f"lost drift surface ({int(lost.sum())})")]
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.16),
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.2),
               ncol=1, framealpha=1.0, edgecolor="0.7")
     radius = 1.08
     ax.set_xlim(-radius, radius); ax.set_ylim(-radius, radius)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xticks([-1, 0, 1]); ax.set_yticks([-1, 0, 1])
-    ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
+    ax.set_xlabel(r"$s\,\cos\alpha$"); ax.set_ylabel(r"$s\,\sin\alpha$")
     # v_par/v at the deepest point of |B|: 0 is the most deeply trapped
     # particle, sqrt(1 - Bmin/Bmax) the barely trapped one.
     b_min = float(np.nanmin(j_info["b_min"]))
     xi = np.sqrt(max(0.0, 1.0 - b_min / j_info["pitch_inverse"]))
-    ax.set_title(rf"drift surfaces, $v_\parallel/v={xi:.2f}$ at $B_{{\min}}$")
+    ax.set_title(rf"$J$ and drift surfaces, $v_\parallel/v={xi:.2f}$ at $B_{{\min}}$")
 
 
 def _boozer_modB_panel(ax, fig, booz: dict[str, Any], k: int, *, title: str) -> None:
@@ -1851,7 +1856,7 @@ def plot_summary(
         Physical pitch ``lambda = 1/B*`` in T^-1 for the ``J`` map.  Following
         one physical ``lambda`` radially is what makes ``dJ/dpsi`` meaningful,
         so pass the pitch an optimization targeted to certify it at the same
-        value.  By default a ``B*`` halfway into the trapping band common to
+        value.  By default a ``B*`` a quarter of the way into the trapping band common to
         every plotted surface is chosen automatically.
 
     Returns

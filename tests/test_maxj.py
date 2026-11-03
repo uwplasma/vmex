@@ -481,3 +481,57 @@ def test_drift_confinement_mirror_and_fow_rows(monkeypatch):
     assert 0.0 <= float(out["gamma_fow"]) <= 1.0
     mirror_rows = out["residuals1d"][4:6]
     np.testing.assert_allclose(mirror_rows, 2.0 * (out["mirror"] - 0.05) / np.sqrt(2.0))
+
+
+def _stub_drift_surfaces(j_of_alpha):
+    """Replacement for ``drift_surfaces_from_boozer`` with a synthetic action."""
+    def stub(*, s_b, s0, alpha0, **_kwargs):
+        s = jnp.linspace(0.1, 0.95, 8)
+        alpha = jnp.arange(16) * (2.0 * jnp.pi / 16)
+        action = s[:, None] * j_of_alpha(alpha)[None, :]
+        orbit = maxj.drift_orbits(action, jnp.ones_like(action), s, alpha, s0, alpha0,
+                                  t_final=2.0, nsteps=32)
+        return {**orbit, "j_map": action, "tau_map": jnp.ones_like(action)}
+    return stub
+
+
+def test_drift_confinement_reach_vanishes_on_flux_surfaces(monkeypatch):
+    booz = _boozer()
+    monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    term = maxj.DriftConfinementResidual([0.25, 0.75], [0.9], [0.5], launch_alpha=4)
+    eq = SimpleNamespace(state=object(), runtime=object())
+    gamma = {}
+    for name, j_of_alpha in (("flat", lambda a: jnp.ones_like(a)),
+                             ("rippled", lambda a: 1.0 + 0.3 * jnp.cos(a))):
+        monkeypatch.setattr(maxj, "drift_surfaces_from_boozer", _stub_drift_surfaces(j_of_alpha))
+        out = term.compute_state(eq.state, eq.runtime)
+        gamma[name] = float(out["gamma_w"])
+    assert gamma["flat"] == pytest.approx(0.0, abs=1.0e-12)
+    assert gamma["rippled"] > 0.01
+
+
+def test_drift_surfaces_use_the_deepest_well_within_one_field_period(monkeypatch):
+    nfp, nalpha = 2, 3
+    period = 2.0 * np.pi / nfp
+    #: wells of one line: shallow first well, deeper neighbour, deepest but a period later
+    action = jnp.broadcast_to(jnp.array([1.0, 3.0, 9.0]), (2, nalpha, 1, 3))
+    left = jnp.broadcast_to(jnp.array([0.0, 0.5 * period, 1.5 * period]), action.shape)
+    usable = jnp.ones(action.shape, dtype=bool)
+
+    def stub(**_kwargs):
+        return {"action": action, "bounce_time": 2.0 * action, "well_left": left,
+                "usable_mask": usable, "bmag": jnp.ones((2, nalpha, 4))}
+
+    monkeypatch.setattr(maxj, "bounce_action_from_boozer", stub)
+    booz = _boozer()
+    kwargs = dict(bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
+                  iota_b=booz["iota_b"], G_b=booz["G_b"], I_b=booz["I_b"], nfp=nfp,
+                  s_b=booz["s_b"], pitch=0.9, s0=0.5, nalpha=nalpha, nsteps=4, degree=1,
+                  t_final=0.1)
+    out = maxj.drift_surfaces_from_boozer(**kwargs)
+    np.testing.assert_allclose(out["j_map"], 3.0)
+    np.testing.assert_allclose(out["tau_map"], 6.0)
+    usable = usable.at[:, 1, :, :].set(False)       # no usable well on one line
+    out = maxj.drift_surfaces_from_boozer(**kwargs)
+    assert bool(jnp.all(jnp.isnan(out["j_map"][:, 1]))) and bool(jnp.all(jnp.isfinite(out["j_map"][:, 0])))
