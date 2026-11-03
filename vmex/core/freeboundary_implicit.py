@@ -1240,10 +1240,15 @@ def _host_boundary_schur_adjoint(
         # outside the strict certificate. Continue from it with the original
         # coupled operator; this changes no mathematics and usually needs only
         # a small correction rather than a cold whole-state Krylov search.
+        # A start worse than zero (a reduced solve that does not invert the
+        # operator) only adds digits to reduce: the raw operator needs about
+        # 2000 products for 1e-8 from zero, so a residual 13 times ||rhs||
+        # exhausts the 3000 the budget allows.
         im._count(icfg, adjoint_certificate_fallbacks=1)
         return _host_adjoint(
             coupled_residual, z_star, params, field_parameters, frozen, rcon0,
-            zcon0, rhs, icfg, x0=solution, fail=fail)
+            zcon0, rhs, icfg, fail=fail,
+            x0=solution if residual_norm < rhs_norm else None)
     return solution
 
 
