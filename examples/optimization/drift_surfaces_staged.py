@@ -41,7 +41,7 @@ TRAPPING_DEPTHS = (0.1, 0.25, 0.4, 0.55, 0.7, 0.85)
 
 # Drift-orbit sampling: field lines, traced periods, quadrature, RK4 steps,
 # and the integration time, t_phys m v^2 / (Z e psi_edge) = 4000 for 10 ms:
-DRIFT_OPTIONS = dict(nalpha=32, points_per_period=48, num_periods=16,
+DRIFT_OPTIONS = dict(nalpha=int(os.environ.get("NALPHA", 32)), points_per_period=48, num_periods=16,
                      max_wells=40, quadrature_order=24, nsteps=512, t_final=4000.0)
 BOOZER_MODES = 10
 
