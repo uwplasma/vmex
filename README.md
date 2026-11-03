@@ -22,7 +22,7 @@ boundary and the coils are optimized together. VMEX also computes Boozer
 transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
 and stability diagnostics, and has a separate lane for open mirrors.
 
-- **Use existing workflows:** VMEC input decks and `wout_*.nc` output, `NS_ARRAY` multigrid
+- **Use existing workflows:** VMEC2000 `&INDATA` decks, VMEC++-style JSON inputs and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
 - **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
   Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
