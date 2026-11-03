@@ -415,8 +415,7 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient(monkeypatch, cap
     # refined away on the exact transpose; a wrong sign does not contract,
     # stops after one step and falls back once, counted, to the same gradient.
     response = fbi._edge_response
-    # Holding the m=1 family adds one refinement step to the scaled probe.
-    for scale, steps, fallbacks in ((1.0005, 4, 0), (-1.0, 2, 1)):
+    for scale, steps, fallbacks in ((1.0005, 3, 0), (-1.0, 2, 1)):
         monkeypatch.setattr(fbi, "_edge_response", lambda *a, s=scale, **k: (
             lambda value, jacobian, inputs: (value, s * jacobian, inputs))(
                 *response(*a, **k)))
