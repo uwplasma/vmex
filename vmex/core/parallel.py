@@ -35,6 +35,7 @@ from typing import Any, Callable, Iterable, Sequence
 from solvax.parallel import available_cpus
 from solvax.parallel import map_independent as map_ensemble
 
+
 __all__ = [
     "ProcessWorkers",
     "available_cpus",
@@ -121,7 +122,7 @@ def finite_difference_jacobian(
 
     ``method="3-point"`` (default) is central and second-order accurate;
     ``"2-point"`` is forward and first-order accurate.  ``workers=None`` uses
-    :func:`default_workers`, while ``workers=1`` is deterministic serial
+    :func:`map_ensemble`, while ``workers=1`` is deterministic serial
     execution.  Every probe receives its own copy of ``x`` and ``fun`` must not
     mutate shared state.  With ``pool``, the probes run in that pool's
     processes through its own function, and ``fun`` and ``workers`` are unused.

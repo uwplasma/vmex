@@ -58,50 +58,31 @@ cores.
 The mechanism, and why `pmap` and `vmap` were rejected, is in
 {doc}`/explanation/architecture`.
 
-## Optimizations on a full node
+## Threads and devices on an allocation
 
-With no settings, `derivative_method="finite_difference"` evaluates its probes
-on threads over every available CPU, and an exact-Jacobian optimization runs as
-one process. No more is switched on automatically, because measurement does not
-justify it. On `QA_optimization.py` (24 degrees of freedom, a shared 36-core
-host), the wall time stays flat from 1 to 36 cores, with the final cost equal to
-about 1e-11, and most of the run is the forward solves:
+VMEX sizes itself to the allocation the first time {mod}`vmex.core` is used.
+No setting is needed for a CPU or GPU job. The CPU count is the smallest of the
+affinity mask, the cgroup quota, the Slurm, PBS, SGE or LSF allocation, and the
+host size.
 
-| Cores for one run | 1 | 8 | 18 | 36 |
-|---|---|---|---|---|
-| Wall, two repeats (s) | 621, 369 | 409, 457 | 412, 446 | 462, 502 |
+| Resource | Default | Set your own with |
+| --- | --- | --- |
+| XLA threads in one solve | CPUs, at most 16 | `NPROC` |
+| BLAS threads in one solve | CPUs, at most 16 | `OPENBLAS_NUM_THREADS` |
+| ESSOS CPU devices | CPUs | `ESSOS_CPU_DEVICES` |
+| Ensemble workers | CPUs, at most one per item | `workers=` |
+| GPU | every GPU JAX sees, placed by `device="auto"` | `CUDA_VISIBLE_DEVICES`, `device=` |
 
-Finite differences do not pay here either. One central-difference Jacobian
-takes 32 s on 36 processes and 73 s on 36 threads, against 3-10 s for the exact
-one, and it differs from the exact Jacobian by 0.44%.
+A value you set always wins. Set environment variables before starting Python;
+they have no effect once the JAX backend or SciPy's BLAS has loaded.
 
-### Advanced: independent starts
+Advanced settings, for when the default is not the best choice:
 
-The cores do pay for independent runs. Each one below had a single core, and the
-member with the shipped seed reproduced the single-core run's cost to 1e-12:
-
-| Processes | 1 | 8 | 18 |
-|---|---|---|---|
-| Wall for all members (s) | 369-621 | 390 | 438 |
-| Lowest cost of all members | 7.63e-4 | 5.93e-4 | 5.43e-4 |
-
-This returns a different, better optimum rather than the same result faster,
-and it needs a picklable builder, so you ask for it with
-{class}`vmex.core.parallel.ProcessWorkers`:
-
-```python
-def build():          # module level; runs once in each worker
-    return run_from_seed
-
-if __name__ == "__main__":
-    with vj.parallel.ProcessWorkers(build) as pool:   # one worker per core
-        results = pool.map(seeds)
-```
-
-Change `threads` only if one run shows a gain from more cores, and lower
-`workers` when memory is short: a worker needs up to about 3 GB at this
-resolution. `cache_dir` shares compiled programs, but startup stays at 40-110 s
-per worker, since in one split only 22 s of 123 s was loading programs and 6 s
-importing; most of the rest is tracing. `gpus=[0, 1]` gives each worker its own
-device. Two workers on two GPUs took 322 s for that Jacobian against 120 s on 8
-CPU processes, so GPUs are not chosen automatically.
+- Many equilibria on one node: use one process or worker per few cores and
+  divide the threads, for example `NPROC=4 OPENBLAS_NUM_THREADS=4`. Independent
+  solves scale much better than threads inside one solve.
+- Well above 8 poloidal and toroidal modes on a large exclusive node: compare
+  `NPROC=36` against the default on your case. It can gain a little wall time
+  for a large increase in CPU time.
+- Small cases: `NPROC=8 OPENBLAS_NUM_THREADS=8` uses less CPU for about the same
+  wall time.

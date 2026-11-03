@@ -62,6 +62,31 @@ profile a scaled wout describes evaluates to its `presf`. `AC`, `AI`, and the
 knot positions stay shape data: iota is dimensionless, and every current
 profile is normalized to `ctor`, which scales as $B_s R_s$.
 
+## Set the field on axis
+
+`PHIEDGE` alone does not fix `|B|` on axis: that value exists only after a
+solve. Solve once, then rescale the deck with
+{func}`vmex.core.scaling.match_b0`, which applies `scale_input` with
+`b_scale = b0_target / axis_field(wout, phi)`:
+
+```python
+import vmex
+
+inp = vmex.VmecInput.from_file("input.case")
+wout = vmex.wout_from_result(inp, vmex.solve_multigrid(inp))
+print(vmex.axis_field(wout, phi=0.0))  # |B| on axis at phi = 0, in T
+matched = vmex.match_b0(inp, wout, 5.7, phi=0.0)
+# re-solving `matched` at the same ns gives axis_field = 5.7 T, same beta, iota and shape
+```
+
+`axis_field` extrapolates the half-mesh `m = 0` Nyquist harmonics of `|B|` to
+`s = 0` (`1.5 b[1] - 0.5 b[2]`) and sums them at the toroidal angle `phi`; the
+`m > 0` terms are discretization artifacts at the axis and are left out. It is
+the point value behind `b00_axis`, and it differs from the wout's `b0 =
+rbtor0 / R_axis`, which is a toroidal-component quantity (on a strongly
+helical axis the two differ by 10 % or more). The extrapolation has
+$O(h_s)$ error, so define the target at the production `ns`.
+
 ## ARIES-CS targets from an input
 
 A wout contains `volavgB`, the axis spectrum and `Aminor_p`, so its factors
