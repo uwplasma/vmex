@@ -2,7 +2,7 @@
 
 VMEC2000 counterparts: ``LIBSTELL/Sources/Modules/vmec_input.f``
 (``read_indata_namelist``: variable set and defaults) and ``readin.f``
-(post-read normalizations).  The JSON schema follows VMEC++
+(post-read normalizations).  The JSON schema follows the C++ VMEC reimplementation
 (``vmecpp.VmecInput``): identical key names, boundary coefficients as sparse
 ``{"m": int, "n": int, "value": float}`` lists, dense axis arrays, and
 ``adiabatic_index`` accepted as an alias for ``gamma``.
@@ -694,6 +694,31 @@ def _validate_indata_modes(
         )
 
 
+# Keys of the JSON input format of the C++ VMEC reimplementation that VMEX
+# accepts at their default only (its writer emits every key).  The -1 sentinels
+# mean "use mpol/ntor".  INDATA equivalents: iteration_style=vmec_8_52 is the
+# VMEC2000 iteration; lgiveup/fgiveup, lbsubs are INDATA LGIVEUP/FGIVEUP/LBSUBS
+# (rejected at INDATA too); the rest have no INDATA control.
+_JSON_DEFAULT_ONLY: Dict[str, Any] = {
+    "mpol_geometry": -1, "ntor_geometry": -1, "vacuum_mpol": 0,
+    "vacuum_ntor": 0, "signgs": -1, "iteration_style": "vmec_8_52",
+    "lgiveup": False, "fgiveup": 30.0, "lbsubs": False,
+    "lambda_preconditioner_scale": 0.5,
+    "lambda_precondition_checkerboard_terms": 0.001,
+    "backup_evaluated_state": True, "always_fix_m1_gauge": False,
+    "return_outputs_even_if_not_converged": False,
+}
+
+
+def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
+    value = data[key]
+    if key in ("mpol_geometry", "ntor_geometry"):  # equal to mpol/ntor is the same
+        return value in (default, data.get(key[:4], None))
+    if isinstance(default, str):
+        return str(value).strip().lower() == default
+    return value == default
+
+
 def _validate_json_modes(data: Dict[str, Any]) -> None:
     """Apply the same no-silent-fallback policy to structured JSON controls."""
     method = str(data.get("free_boundary_method", "nestor")).strip().lower()
@@ -704,8 +729,17 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
             "VMEX JSON solves support NESTOR; only_coils/biest are different models",
         )
 
+    for key, default in _JSON_DEFAULT_ONLY.items():
+        if key in data and not _json_is_default(data, key, default):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key,
+                f"only the default ({default!r}) is implemented; the "
+                "VMEC2000 INDATA deck has no equivalent control",
+            )
+
     field_names = {field.name for field in fields(VmecInput)}
-    known = field_names | {"adiabatic_index", "free_boundary_method"}
+    known = (field_names | {"adiabatic_index", "free_boundary_method"}
+             | set(_JSON_DEFAULT_ONLY))
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(
@@ -1298,7 +1332,7 @@ class VmecInput:
 
     @classmethod
     def from_json_text(cls, text: str) -> "VmecInput":
-        """Build from structured JSON text (vmecpp.VmecInput layout).
+        """Build from structured JSON text (layout of the C++ VMEC reimplementation).
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse
@@ -1310,7 +1344,7 @@ class VmecInput:
         data = json.loads(text)
         # Reserved execution-metadata section: run controls, never physics.
         # ``vmex.core.run_options`` validates and consumes it; the physics
-        # schema stays VMEC++ compatible once it is removed.
+        # schema stays compatible once it is removed.
         data.pop("_vmex", None)
         _validate_json_modes(data)
         if "adiabatic_index" in data and "gamma" not in data:
@@ -1342,13 +1376,13 @@ class VmecInput:
         kwargs["mpol"] = mpol
         kwargs["ntor"] = ntor
         if "lfreeb" not in kwargs:
-            kwargs["lfreeb"] = False  # VMEC++ default (vmecpp.VmecInput)
+            kwargs["lfreeb"] = False  # default of that format
         return cls(**kwargs)
 
     # -- writers --------------------------------------------------------------
 
     def to_json(self, path: str | Path) -> Path:
-        """Write VMEC++-schema JSON that round-trips through :meth:`from_file`.
+        """Write JSON in that format that round-trips through :meth:`from_file`.
 
         Boundary coefficients are written as sparse ``{"m","n","value"}``
         lists (nonzero entries only); axis and profile arrays are dense.

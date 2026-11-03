@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import json
+
 import numpy as np
 import pytest
 
@@ -343,6 +345,27 @@ def test_structured_json_modes_and_unknown_keys_are_not_ignored() -> None:
 
     with pytest.raises(ValueError, match="unknown structured JSON input key"):
         VmecInput.from_json_text('{"free_boundary_method": "nestor", "mpoll": 6}')
+
+
+_CXX_JSON = (
+    '{"mpol": 3, "ntor": 1, "nfp": 2, "mpol_geometry": 3, "ntor_geometry": -1,'
+    ' "vacuum_mpol": 0, "signgs": -1, "iteration_style": "vmec_8_52",'
+    ' "lgiveup": false, "fgiveup": 30.0, "lbsubs": false,'
+    ' "lambda_preconditioner_scale": 0.5, "backup_evaluated_state": true,'
+    ' "return_outputs_even_if_not_converged": false,'
+    ' "rbc": [{"m": 0, "n": 0, "value": 1.0}]}'
+)
+
+
+def test_cxx_vmec_json_defaults_are_accepted_and_others_raise() -> None:
+    """The reimplementation's writer emits every key; non-default ones fail."""
+    assert VmecInput.from_json_text(_CXX_JSON).nfp == 2
+    for key, bad in (("iteration_style", "parvmec"), ("vacuum_mpol", 4),
+                     ("lgiveup", True), ("ntor_geometry", 5)):
+        text = _CXX_JSON[:-1]
+        with pytest.raises(UnsupportedInputModeError, match=key) as caught:
+            VmecInput.from_json_text(text + f', "{key}": {json.dumps(bad)}}}')
+        assert caught.value.code == "D00L_JSON_KEY_UNSUPPORTED"
 
 
 def test_unknown_indata_name_is_not_ignored() -> None:
