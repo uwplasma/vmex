@@ -26,7 +26,8 @@ from vmex import optimize as opt
 from vmex.core.maxj import DriftConfinementResidual, common_trapped_pitches_state
 
 # Number of field periods, and the seed deck the boundary is shaped from:
-NFP = 2
+NFP = int(os.environ.get("NFP", 2))
+MODE = os.environ.get("MODE", "excursion")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Rotating-ellipse amplitude added to the circular seed. The exactly circular
@@ -38,7 +39,7 @@ SEED_PERTURBATION = 0.05
 # well) that choose the physical pitches:
 SURFACES = np.linspace(0.1, 1.0, 10)
 START_RADII = (0.3, 0.5, 0.7)
-TRAPPING_DEPTHS = (0.25, 0.5, 0.8)
+TRAPPING_DEPTHS = eval(os.environ.get("DEPTHS", "(0.25, 0.5, 0.8)"))
 
 # Every orbit must close inside S_LIMIT, leaving a margin to the LCFS:
 S_LIMIT = 0.9
@@ -52,7 +53,7 @@ BOOZER_MODES = 10
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_NFEV = eval(os.environ.get("NFEV", "[10, 15]"))
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -110,7 +111,7 @@ pitch = np.asarray(common_trapped_pitches_state(
     equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
     nalpha=DRIFT_OPTIONS["nalpha"], points_per_period=DRIFT_OPTIONS["points_per_period"],
     num_periods=DRIFT_OPTIONS["num_periods"]))
-drift = DriftConfinementResidual(SURFACES, pitch, START_RADII, s_limit=S_LIMIT,
+drift = DriftConfinementResidual(SURFACES, pitch, START_RADII, s_limit=S_LIMIT, mode=MODE,
                                  mboz=BOOZER_MODES, nboz=BOOZER_MODES, **DRIFT_OPTIONS)
 
 # Each term is (function, target, weight).

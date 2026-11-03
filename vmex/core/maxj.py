@@ -665,13 +665,13 @@ class DriftConfinementResidual(MaximumJResidual):
     name = "drift_confinement"
 
     def __init__(self, surfaces, pitch, s0, *, s_limit=1.0, floor=0.05,
-                 orbit_weight=0.0, sharpness=50.0, hinge_cap=0.5,
-                 mboz=16, nboz=16, oversample=2, **drift_options):
+                 orbit_weight=0.0, sharpness=50.0, hinge_cap=0.5, mode="excursion",
+                 sign_margin=0.05, mboz=16, nboz=16, oversample=2, **drift_options):
         super().__init__(surfaces, pitch, mboz=mboz, nboz=nboz, oversample=oversample)
         self.s0 = np.atleast_1d(np.asarray(s0, dtype=float))
         self.s_limit, self.floor = float(s_limit), float(floor)
         self.orbit_weight, self.sharpness = float(orbit_weight), float(sharpness)
-        self.hinge_cap = float(hinge_cap)
+        self.hinge_cap, self.mode, self.sign_margin = float(hinge_cap), mode, float(sign_margin)
         self.residual_options = drift_options
 
     def compute_state(self, state, rt):
@@ -691,6 +691,14 @@ class DriftConfinementResidual(MaximumJResidual):
         delta = jnp.abs(jnp.where(finite, j_map, j_mean[..., None]) - j_mean[..., None])
         delta = delta / jnp.maximum(slope, jnp.finfo(slope.dtype).tiny)[..., None]
         excursion = jnp.maximum(delta - (self.s_limit - s_b)[:, None], 0.0)
+        if self.mode == "gamma":   # smooth Gamma_W loss proxy: R = tanh((s_max - s) / (1 - s))
+            excursion = jnp.tanh(delta / (1.0 - s_b)[:, None])
+        elif self.mode == "relative":   # iso-action rows s (J - <J>)/<J>, plus a maximum-J sign hinge
+            rel = jnp.where(finite, j_map - j_mean[..., None], 0.0) / jnp.maximum(
+                jnp.abs(j_mean), 1e-30)[..., None]
+            sign = jnp.maximum(s_b * jnp.gradient(j_mean, s_b, axis=-1)
+                               / jnp.maximum(jnp.abs(j_mean), 1e-30) + self.sign_margin, 0.0)
+            excursion = jnp.concatenate([s_b[:, None] * rel, sign[..., None]], axis=-1)
         missing = jnp.mean(~finite, axis=-1)
         soft_max = jnp.stack([jax.nn.logsumexp(self.sharpness * o["s"], axis=-1)
                               / self.sharpness for o in orbits])
