@@ -603,8 +603,8 @@ def drift_surfaces_from_boozer(
 
     Evaluates ``J`` and the bounce time on every surface ``s_b`` and
     ``nalpha`` field lines with :func:`~vmex.core.bounce.bounce_action_from_boozer`
-    (the first usable well of each traced line, as in the ``vmex --plot``
-    J map) and integrates them with :func:`drift_orbits`. The grids
+    (on each traced line, the deepest usable well starting within one field
+    period of the first, as in the ``vmex --plot`` J map) and integrates them with :func:`drift_orbits`. The grids
     are returned as ``j_map``/``tau_map`` next to the orbits. The traced
     line must cover a poloidal transit, about ``nfp / iota`` periods.
     """
@@ -616,10 +616,13 @@ def drift_surfaces_from_boozer(
         max_wells=2 * num_periods if max_wells is None else max_wells,
         quadrature_order=quadrature_order, drift_integrands={})
     # Later wells on a traced line sit at other field-line labels, so J(alpha)
-    # is the first usable well from zeta = 0; averaging them erases the alpha
-    # dependence that moves the orbit.
+    # is the deepest (largest-J) usable well starting within one field period
+    # of the first; averaging all wells erases the alpha dependence that
+    # moves the orbit, and the first well alone is often a shallow ripple.
     usable = out["usable_mask"][:, :, 0]
-    first = jnp.argmax(usable, axis=-1)[..., None]
+    left = jnp.where(usable, out["well_left"][:, :, 0], jnp.inf)
+    usable &= left < jnp.min(left, axis=-1, keepdims=True) + 2.0 * jnp.pi / nfp
+    first = jnp.argmax(jnp.where(usable, out["action"][:, :, 0], -jnp.inf), axis=-1)[..., None]
 
     def first_well(values):
         value = jnp.take_along_axis(values[:, :, 0], first, axis=-1)[..., 0]
