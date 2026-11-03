@@ -457,7 +457,7 @@ def _stub_drift_surfaces(j_of_alpha):
     return stub
 
 
-def test_drift_confinement_reach_of_flux_surface_orbits_is_the_smooth_max_floor(monkeypatch):
+def test_drift_confinement_reach_vanishes_on_flux_surfaces(monkeypatch):
     booz = _boozer()
     monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
@@ -469,9 +469,8 @@ def test_drift_confinement_reach_of_flux_surface_orbits_is_the_smooth_max_floor(
         monkeypatch.setattr(maxj, "drift_surfaces_from_boozer", _stub_drift_surfaces(j_of_alpha))
         out = term.compute_state(eq.state, eq.runtime)
         gamma[name] = float(out["gamma_w"])
-    floor = np.tanh(np.log(33.0) / 50.0 / (1.0 - 0.5))      # 33 samples, sharpness 50
-    assert gamma["flat"] == pytest.approx(floor, rel=1.0e-4)
-    assert gamma["rippled"] > 1.5 * gamma["flat"]
+    assert gamma["flat"] == pytest.approx(0.0, abs=1.0e-12)
+    assert gamma["rippled"] > 0.01
 
 
 def test_drift_surfaces_use_the_deepest_well_within_one_field_period(monkeypatch):

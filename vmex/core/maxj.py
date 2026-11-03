@@ -646,12 +646,11 @@ class DriftConfinementResidual(MaximumJResidual):
 
     ``R = tanh(max(s_hat - s0, 0) / (1 - s0))``,
 
-    with ``s_hat = logsumexp(sharpness * s) / sharpness`` the smooth maximum
-    radius over the ``n_t`` orbit samples. It overshoots the true maximum by
-    up to ``ln(n_t) / sharpness``, so a drift surface that stays on its flux
-    surface has the small floor ``tanh(ln(n_t) / (sharpness (1 - s0)))``
-    rather than zero; one that reaches the LCFS has about 0.76, and the reach
-    is bounded beyond. The weighted
+    with ``s_hat = (logsumexp(sharpness * s) - ln(n_t)) / sharpness`` the
+    smooth maximum radius over the ``n_t`` orbit samples. It lies between
+    the mean and the maximum of ``s``, so a drift surface that stays on its
+    flux surface has zero reach, one that reaches the LCFS about 0.76, and
+    the reach is bounded beyond. The weighted
     mean of ``R``, returned as ``gamma_w``, is a smooth version of the reach
     proxy ``Gamma_W`` of arXiv:2608.20042. Over traced alpha losses of 13
     equilibria its rank correlation was 0.97, against 0.62 for the
@@ -694,7 +693,8 @@ class DriftConfinementResidual(MaximumJResidual):
             I_b=booz["I_b"], nfp=booz["nfp"], s_b=s_b, pitch=p, s0=self.s0,
             alpha0=self.alpha0, **self.residual_options) for p in self.pitch]
         path = jnp.stack([o["s"] for o in orbits])               # (pitch, orbit, time)
-        s_hat = jax.nn.logsumexp(self.sharpness * path, axis=-1) / self.sharpness
+        s_hat = (jax.nn.logsumexp(self.sharpness * path, axis=-1)
+                 - np.log(path.shape[-1])) / self.sharpness
         reach = jnp.tanh(jnp.maximum(s_hat - self.s0, 0.0) / (1.0 - self.s0))
         reach = jnp.where(jnp.isfinite(reach), reach, 0.0)        # passing at launch
         rows = [jnp.ravel(reach * self.row_scale[:, None])]
