@@ -46,6 +46,8 @@ dependencies = [
   "h5py",
   "matplotlib",
   "packaging",
+  # tomllib is in the standard library from Python 3.11.
+  "tomli; python_version < '3.11'",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
   # Boozer spectra and differentiable geometry, including asymmetric fields.
