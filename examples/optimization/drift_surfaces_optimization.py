@@ -63,7 +63,7 @@ IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
 PARAMETER_STEP = 0.02
-MAX_PARAMETER_CHANGE = 5.0
+MAX_PARAMETER_CHANGE = float(os.environ.get("STEPCH", 5.0))
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 
 # Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
