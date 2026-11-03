@@ -386,8 +386,7 @@ Profiles
      - Profile-argument expansion factor of ``pmass`` and ``pcurr``;
        ``piota`` ignores it, as in VMEC2000.  ``BLOAT != 1`` with
        ``NCURR != 1`` is rejected, as VMEC2000 does (ier_flag 3).
-       Deliberate difference: VMEC2000 also multiplies ``PHIEDGE`` by
-       ``BLOAT`` (``readin.f``); VMEX uses ``PHIEDGE`` as written.
+       The enclosed flux is ``PHIEDGE*BLOAT``, as in ``readin.f``.
    * - ``NCURR``
      - 0
      - implemented

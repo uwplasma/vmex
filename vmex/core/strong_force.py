@@ -1215,7 +1215,7 @@ def lift_high_order_state(
         nodes = jnp.asarray(radial_basis.collocation_nodes)
         torflux, torflux_derivative = _torflux_functions(inp.aphi)
         torflux_at_edge = torflux(jnp.asarray(1.0))
-        flux_edge = runtime.setup.signgs * float(inp.phiedge) / (2.0 * np.pi)
+        flux_edge = runtime.setup.signgs * float(inp.phiedge) * (float(inp.bloat) or 1.0) / (2.0 * np.pi)
         flux_edge = jnp.where(
             torflux_at_edge != 0.0,
             flux_edge / jnp.where(torflux_at_edge != 0.0, torflux_at_edge, 1.0),
