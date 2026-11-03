@@ -20,6 +20,7 @@ Array = Any
 __all__ = [
     "common_trapped_pitches",
     "common_trapped_pitches_state",
+    "birth_pitches",
     "ConstructedMaximumJResidual",
     "JInvariantQIAndMaximumJResidual",
     "MaximumJResidual",
@@ -161,19 +162,8 @@ def common_trapped_pitches(bmag, trapping_depths=(0.35, 0.55, 0.75)):
     return 1.0 / b_star
 
 
-def common_trapped_pitches_state(
-    state, rt, surfaces, trapping_depths=(0.35, 0.55, 0.75), *,
-    mboz=12, nboz=12, nalpha=9, points_per_period=64, num_periods=4,
-):
-    """Choose common physical pitches directly from a converged equilibrium.
-
-    The sampled field lines use ``theta=alpha+iota*phi`` in Boozer angles.
-    A single ``1/lambda`` is selected from the trapping interval shared by
-    every surface and field-line label; this prevents radial maximum-J
-    comparisons from silently changing the particle population.
-    """
-    booz = boozer_spectrum_state(
-        state, rt, surfaces=surfaces, mboz=mboz, nboz=nboz)
+def _bmag_lines(booz, nalpha=9, points_per_period=64, num_periods=4):
+    """``|B|`` on ``theta = alpha + iota phi`` lines, shape ``(alpha, distance)`` per surface."""
     dtype = jnp.asarray(booz["bmnc_b"]).dtype
     alpha = jnp.asarray(2.0 * np.pi * np.arange(int(nalpha)) / int(nalpha), dtype=dtype)
     nphi = int(points_per_period) * int(num_periods)
@@ -186,8 +176,57 @@ def common_trapped_pitches_state(
     bmns = booz.get("bmns_b")
     if bmns is None:
         bmns = jnp.zeros_like(booz["bmnc_b"])
-    bmag = (jnp.einsum("sapm,sm->sap", jnp.cos(angle), booz["bmnc_b"])
+    return (jnp.einsum("sapm,sm->sap", jnp.cos(angle), booz["bmnc_b"])
             + jnp.einsum("sapm,sm->sap", jnp.sin(angle), bmns))
+
+
+def birth_pitches(bmag, n=6, *, birth=0, margin=0.1, measure="xi"):
+    """Pitches and weights from ``v_par/v`` at the field minimum of a birth surface.
+
+    ``bmag`` has shape ``(surface, alpha, distance)``. A particle with
+    ``xi0 = v_par/v`` at ``B_min`` of surface ``birth`` mirrors at
+    ``B_* = B_min / (1 - xi0**2)``, so ``lambda = 1/B_* = (1 - xi0**2)/B_min``.
+    The ``n`` Gauss-Legendre nodes in ``xi0`` span the window trapped on every
+    sampled surface and line: ``B_*`` runs from the largest line minimum to
+    ``margin`` of the common well depth below the smallest line maximum, so
+    barely trapped pitches whose wells vanish on outer surfaces are dropped.
+    Uniform ``xi0`` weights are the isotropic measure and emphasize deep
+    trapping; ``measure="trapped"`` multiplies them by the trapped density per
+    ``lambda``, ``<B / sqrt(1 - lambda B)>`` over the birth surface.
+    Returns ``(pitch, weights)``, the weights summing to one.
+    """
+    bmag = jnp.asarray(bmag)
+    b_min = jnp.min(bmag[birth])
+    lo, hi = jnp.max(jnp.min(bmag, axis=-1)), jnp.min(jnp.max(bmag, axis=-1))
+    lo, hi = lo + 0.02 * (hi - lo), hi - margin * (hi - lo)
+    xi_lo = jnp.sqrt(jnp.maximum(1.0 - b_min / lo, 0.0))
+    xi_hi = jnp.sqrt(jnp.maximum(1.0 - b_min / hi, 0.0))
+    node, weight = np.polynomial.legendre.leggauss(int(n))
+    xi0 = xi_lo + 0.5 * (node + 1.0) * (xi_hi - xi_lo)
+    pitch = (1.0 - xi0 ** 2) / b_min
+    weight = jnp.asarray(weight, dtype=bmag.dtype)
+    if measure == "trapped":
+        b = bmag[birth].ravel()[None, :]
+        density = jnp.mean(jnp.where(pitch[:, None] * b < 1.0, b / jnp.sqrt(
+            jnp.maximum(1.0 - pitch[:, None] * b, 1.0e-6)), 0.0), axis=1)
+        weight = weight * xi0 * density
+    return pitch, weight / jnp.sum(weight)
+
+
+def common_trapped_pitches_state(
+    state, rt, surfaces, trapping_depths=(0.35, 0.55, 0.75), *,
+    mboz=12, nboz=12, nalpha=9, points_per_period=64, num_periods=4,
+):
+    """Choose common physical pitches directly from a converged equilibrium.
+
+    The sampled field lines use ``theta=alpha+iota*phi`` in Boozer angles.
+    A single ``1/lambda`` is selected from the trapping interval shared by
+    every surface and field-line label; this prevents radial maximum-J
+    comparisons from silently changing the particle population.
+    """
+    bmag = _bmag_lines(boozer_spectrum_state(
+        state, rt, surfaces=surfaces, mboz=mboz, nboz=nboz),
+        nalpha, points_per_period, num_periods)
     return common_trapped_pitches(jnp.swapaxes(bmag, 1, 2), trapping_depths)
 
 
@@ -506,7 +545,8 @@ class ConstructedMaximumJResidual(MaximumJResidual):
 
 
 def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
-                 t_final=None, nsteps: int = 256, degree: int = 3) -> dict[str, Array]:
+                 t_final=None, nsteps: int = 256, degree: int = 3,
+                 clamp: bool = False) -> dict[str, Array]:
     """Integrate the bounce-averaged drift ``(s(t), alpha(t))`` of one pitch.
 
     With ``J`` the action and ``tau`` the bounce time, both per unit speed
@@ -530,7 +570,10 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
     but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``. Each initial condition
     ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
     largest radius, and ``action`` the fitted ``J`` along it, constant up to
-    the integration error.
+    the integration error. ``clamp=True`` evaluates the fit at the radius
+    clipped to the finite surfaces, so an orbit that leaves the window where
+    the well exists meets frozen edge fields instead of the polynomial's
+    extrapolation.
     """
     action, bounce_time = jnp.asarray(action), jnp.asarray(bounce_time)
     dtype = action.dtype
@@ -550,9 +593,13 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
     cj, ct = coefficients(action), coefficients(bounce_time)
     k = jnp.arange(cj.shape[1])
     alpha_offset = jnp.asarray(alpha, dtype=dtype)[0]
+    s_lo = jnp.min(jnp.where(finite, s, jnp.inf))
+    s_hi = jnp.max(jnp.where(finite, s, -jnp.inf))
 
     def fields(y):
         radius, angle = y[0], y[1] - alpha_offset
+        if clamp:
+            radius = jnp.clip(radius, s_lo, s_hi)
         sp = radius ** power
         dsp = jnp.where(power > 0, power * radius ** jnp.maximum(power - 1, 0), 0.0)
         phase = jnp.exp(1j * k * angle)
@@ -597,7 +644,7 @@ def drift_surfaces_from_boozer(
     *, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp: int, s_b, pitch, s0,
     alpha0=0.0, bmns_b=None, t_final=None, nsteps: int = 256, degree: int = 3,
     nalpha: int = 32, points_per_period: int = 64, num_periods: int = 12,
-    max_wells: int | None = None, quadrature_order: int = 32,
+    max_wells: int | None = None, quadrature_order: int = 32, clamp: bool = False,
 ) -> dict[str, Array]:
     """Drift surfaces of one physical ``pitch`` from a Boozer spectrum.
 
@@ -605,7 +652,8 @@ def drift_surfaces_from_boozer(
     ``nalpha`` field lines with :func:`~vmex.core.bounce.bounce_action_from_boozer`
     (on each traced line, the deepest usable well starting within one field
     period of the first, as in the ``vmex --plot`` J map) and integrates them with :func:`drift_orbits`. The grids
-    are returned as ``j_map``/``tau_map`` next to the orbits. The traced
+    are returned as ``j_map``/``tau_map`` next to the orbits, with the
+    ``mirror`` ratio ``(Bmax - Bmin)/(Bmax + Bmin)`` of the traced lines on every surface. The traced
     line must cover a poloidal transit, about ``nfp / iota`` periods.
     """
     alpha = jnp.arange(nalpha) * (2.0 * jnp.pi / nalpha)
@@ -630,9 +678,10 @@ def drift_surfaces_from_boozer(
 
     j_map, tau_map = first_well(out["action"]), first_well(out["bounce_time"])
     orbits = drift_orbits(j_map, tau_map, s_b, alpha, s0, alpha0,
-                          t_final=t_final, nsteps=nsteps, degree=degree)
+                          t_final=t_final, nsteps=nsteps, degree=degree, clamp=clamp)
+    b_max, b_min = jnp.max(out["bmag"], axis=(1, 2)), jnp.min(out["bmag"], axis=(1, 2))
     return {**orbits, "j_map": j_map, "tau_map": tau_map, "alpha_grid": alpha,
-            "s_grid": jnp.asarray(s_b)}
+            "s_grid": jnp.asarray(s_b), "mirror": (b_max - b_min) / (b_max + b_min)}
 
 
 class DriftConfinementResidual(MaximumJResidual):
@@ -664,12 +713,28 @@ class DriftConfinementResidual(MaximumJResidual):
     3.5 MeV alpha at reactor scale); the bounce-averaged model has no
     finite orbit width, so keep ``s0`` well inside and cross-check with
     guiding-centre tracing.
+
+    Three optional terms, all off by default, address what the bounce-averaged
+    reach cannot see. ``mirror_target`` adds a hinge
+    ``mirror_weight * max(m - mirror_target, 0)`` on the mirror ratio
+    ``m = (Bmax - Bmin)/(Bmax + Bmin)`` of every sampled surface, the form of
+    :func:`~vmex.core.optimize.mirror_ratio` and of the usual
+    ``mirror_excess`` residual. ``fow`` is the alpha gyroradius over the minor
+    radius at the target scale (about 0.027 for 3.5 MeV at 5.9 T, ``a`` =
+    1.7 m); an orbit then counts as lost, with a logistic of width 0.05, when
+    ``s_hat + delta_s >= 1`` for the banana width
+    ``delta_s = 2 sqrt(s) fow q / sqrt(eps)``, ``q = 1/|iota|``,
+    ``eps = sqrt(s) a/R`` with ``R = G/B00``, ``a = sqrt(2 psi_edge/B00)``. The
+    reach and these rows are different pictures of one loss, so the weighted
+    mean of the second is returned as ``gamma_fow``. ``clamp`` is passed to
+    :func:`drift_orbits`.
     """
 
     name = "drift_confinement"
 
     def __init__(self, surfaces, pitch, s0, *, pitch_weights=None, launch_alpha=8,
                  sharpness=50.0, excursion_weight=0.0, s_limit=1.0, floor=0.05,
+                 mirror_target=None, mirror_weight=1.0, fow=None, fow_weight=1.0,
                  mboz=16, nboz=16, oversample=2, **drift_options):
         super().__init__(surfaces, pitch, mboz=mboz, nboz=nboz, oversample=oversample)
         alpha0 = np.arange(int(launch_alpha)) * (2.0 * np.pi / int(launch_alpha))
@@ -679,6 +744,8 @@ class DriftConfinementResidual(MaximumJResidual):
         self.row_scale = np.sqrt(weight / weight.sum() / self.s0.size)
         self.sharpness, self.excursion_weight = float(sharpness), float(excursion_weight)
         self.s_limit, self.floor = float(s_limit), float(floor)
+        self.mirror_target, self.mirror_weight = mirror_target, float(mirror_weight)
+        self.fow, self.fow_weight = fow, float(fow_weight)
         self.residual_options = drift_options
 
     def compute_state(self, state, rt):
@@ -695,6 +762,21 @@ class DriftConfinementResidual(MaximumJResidual):
         reach = jnp.tanh(jnp.maximum(s_hat - self.s0, 0.0) / (1.0 - self.s0))
         reach = jnp.where(jnp.isfinite(reach), reach, 0.0)        # passing at launch
         rows = [jnp.ravel(reach * self.row_scale[:, None])]
+        out = {}
+        if self.mirror_target is not None:
+            mirror = orbits[0]["mirror"]
+            excess = jnp.maximum(mirror - self.mirror_target, 0.0)
+            rows.append(self.mirror_weight * excess / np.sqrt(excess.size))
+            out["mirror"] = mirror
+        if self.fow is not None:
+            b00 = booz["bmnc_b"][0, jnp.argmin(jnp.abs(booz["xm_b"]) + jnp.abs(booz["xn_b"]))]
+            eps = jnp.sqrt(s_hat) * jnp.sqrt(2.0 * jnp.abs(booz["psi_edge"]) / b00) * b00 / jnp.abs(booz["G_b"][0])
+            q = 1.0 / jnp.interp(s_hat, s_b, jnp.abs(booz["iota_b"]))
+            delta = 2.0 * jnp.sqrt(s_hat) * self.fow * q / jnp.sqrt(eps)
+            lost = jax.nn.sigmoid((s_hat + delta - 1.0) / 0.05)
+            lost = jnp.where(jnp.isfinite(s_hat), lost, 0.0)
+            rows.append(self.fow_weight * jnp.ravel(lost * self.row_scale[:, None]))
+            out["gamma_fow"] = jnp.sum(lost * self.row_scale[:, None] ** 2)
         if self.excursion_weight:
             j_map = jnp.stack([o["j_map"] for o in orbits])        # (pitch, s, alpha)
             finite = jnp.isfinite(j_map)
@@ -706,7 +788,7 @@ class DriftConfinementResidual(MaximumJResidual):
             excursion = jnp.maximum(delta - (self.s_limit - s_b)[:, None], 0.0)
             rows.append(self.excursion_weight * jnp.ravel(excursion) / np.sqrt(excursion.size))
         residuals1d = jnp.concatenate(rows)
-        return {"residuals1d": residuals1d, "total": jnp.sum(residuals1d ** 2),
+        return {**out, "residuals1d": residuals1d, "total": jnp.sum(residuals1d ** 2),
                 "orbits": orbits, "reach": reach, "gamma_w": jnp.sum(
                     reach * self.row_scale[:, None] ** 2),
                 "s_max": jnp.stack([o["s_max"] for o in orbits])}
