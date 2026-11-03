@@ -45,9 +45,7 @@ _WOUT_POWERS = {
     **{name: (1, 2) for name in (
         "phi", "phipf", "chi", "chipf", "phips",
     )},
-    **{name: (2, 0) for name in (
-        "presf", "mass", "pres", "bdotb", "am_aux_f",
-    )},
+    **{name: (2, 0) for name in ("presf", "pres", "bdotb")},
     **{name: (0, 3) for name in ("volume_p", "vp", "gmnc", "gmns")},
     **{name: (1, -1) for name in (
         "bdotgradv", "bsupumnc", "bsupvmnc", "bsupumns", "bsupvmns",
@@ -174,7 +172,10 @@ def scale_input(
     - ``pres_scale``, the multiplier VMEC applies on top of the ``am`` /
       ``am_aux_f`` pressure profile: ``b_scale**2``, so pressure in Pa scales
       as ``b_scale**2`` while the profile *shape* coefficients stay as
-      written;
+      written.  With ``gamma != 0`` the profile is a mass,
+      ``p = mass / V'**gamma`` and ``mass ~ (phips R00)**gamma``, which carries
+      ``b_scale**gamma`` of its own, so the factor is ``b_scale**(2 - gamma)``
+      (``r_scale`` cancels);
     - ``extcur``, the external coil-group currents (A): ``b_scale * r_scale``;
     - ``curtor``, the net toroidal current (A): ``b_scale * r_scale``, but
       **only when** ``ncurr == 1``.  With ``ncurr == 0`` VMEC prescribes iota
@@ -209,7 +210,7 @@ def scale_input(
     changes = {name: _times(getattr(inp, name), r) for name in _INPUT_LENGTHS}
     changes.update(
         phiedge=inp.phiedge * b * r**2,
-        pres_scale=inp.pres_scale * b**2,
+        pres_scale=inp.pres_scale * b ** (2.0 - float(inp.gamma)),
         curtor=inp.curtor * b * r if inp.ncurr == 1 else inp.curtor,
         extcur=_times(inp.extcur, b * r),
     )
@@ -313,8 +314,10 @@ def scale_wout(
       ``currvmnc`` families; and the NESTOR potential ``potsin``/``potcos``;
     - ``(1, 2)`` fluxes in Wb — ``phi``, ``chi`` and their radial derivatives
       ``phipf``, ``chipf``, ``phips``;
-    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa),
-      ``mass``, and ``bdotb`` (T^2);
+    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa), and
+      ``bdotb`` (T^2); ``mass = pres * V'**gamma`` scales as
+      ``b_scale**2 * r_scale**(3 * gamma)``, and the ``am_aux_f`` knots as
+      ``b_scale**(2 - gamma)`` like ``am`` (below);
     - ``(0, 3)`` volumes in m^3 — ``volume_p``, ``vp``, and the Jacobian
       harmonics ``gmnc``/``gmns``;
     - ``(2, 3)`` energies — ``wb``, ``wp``;
@@ -363,7 +366,12 @@ def scale_wout(
         name: _times(getattr(data, name), b**b_power * r**r_power)
         for name, (b_power, r_power) in _WOUT_POWERS.items()
     }
-    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, b**2)
+    # ``mass = pres * V'**gamma``; ``am``/``am_aux_f`` re-run with
+    # ``pres_scale = 1``, so with ``gamma != 0`` they follow ``scale_input``.
+    gamma, p_factor = float(data.gamma), b ** (2.0 - float(data.gamma))
+    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, p_factor)
+    changes["am_aux_f"] = _times(data.am_aux_f, p_factor)
+    changes["mass"] = _times(data.mass, b**2 * r ** (3.0 * gamma))
     return replace(data, **changes)
 
 
@@ -420,6 +428,12 @@ def input_minor_radius(inp: VmecInput) -> float:
     return float(np.sqrt(2.0 * abs(np.mean(r * zu))))
 
 
+def _axis_harmonics(b: Any, data: WoutData) -> tuple[Any, Any]:
+    """``m = 0`` harmonics of half-mesh ``b`` at ``s = 0`` and their ``xn_nyq``."""
+    b, m0 = np.asarray(b), np.asarray(data.xm_nyq) == 0
+    return (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+
+
 def b00_axis(data: WoutData) -> float:
     """Boozer ``B00`` on the magnetic axis, ``int B^2 dl / int B dl`` [T].
 
@@ -429,9 +443,7 @@ def b00_axis(data: WoutData) -> float:
     from the first two half-mesh surfaces and the curve comes from the axis
     row of ``rmnc``/``zmns``.
     """
-    m0 = np.asarray(data.xm_nyq) == 0
-    b = np.asarray(data.bmnc)
-    b_axis, xn_b = (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+    b_axis, xn_b = _axis_harmonics(data.bmnc, data)
     g0 = np.asarray(data.xm) == 0
     xn, r, z = np.asarray(data.xn)[g0], np.asarray(data.rmnc)[0, g0], np.asarray(data.zmns)[0, g0]
     phi = np.linspace(0.0, 2.0 * np.pi / int(data.nfp), 256, endpoint=False)[:, None]
@@ -440,6 +452,37 @@ def b00_axis(data: WoutData) -> float:
                  + (np.sin(xn * phi) @ (xn * r)) ** 2
                  + (np.cos(xn * phi) @ (xn * z)) ** 2)
     return float(np.sum(field**2 * dl) / np.sum(field * dl))
+
+
+def axis_field(data: WoutData, phi: float = 0.0) -> float:
+    """``|B|`` on the magnetic axis at toroidal angle ``phi`` [T].
+
+    The ``m = 0`` Nyquist harmonics of the half-mesh ``bmnc`` (and ``bmns`` for
+    ``lasym``) are extrapolated to ``s = 0`` as ``1.5 b[1] - 0.5 b[2]`` and
+    summed at ``phi`` (radians), ``sum_n b_n cos(n phi) - b'_n sin(n phi)`` with
+    ``n = xn_nyq``.  Only ``m = 0`` survives at the axis; the extrapolated
+    ``m > 0`` harmonics are discretization artifacts there.  This is the
+    point value that :func:`b00_axis` averages along the axis.  It is not
+    ``wout.b0 = rbtor0 / R_axis``, a toroidal-component quantity that differs
+    from ``|B|`` wherever the axis is tilted.
+    """
+    cos_n, xn = _axis_harmonics(data.bmnc, data)
+    field = float(np.sum(cos_n * np.cos(xn * phi)))
+    if data.bmns is not None:
+        field -= float(np.sum(_axis_harmonics(data.bmns, data)[0] * np.sin(xn * phi)))
+    return abs(field)
+
+
+def match_b0(
+    inp: VmecInput, data: WoutData, b0_target: float, phi: float = 0.0,
+) -> VmecInput:
+    """Scale ``inp`` so that :func:`axis_field` at ``phi`` becomes ``b0_target`` [T].
+
+    ``data`` is the converged wout of ``inp``.  Shape, iota and beta are
+    unchanged (``scale_input`` with ``b_scale = b0_target / axis_field``), so
+    re-solving the returned deck gives ``b0_target`` at the same ``ns``.
+    """
+    return scale_input(inp, b_scale=abs(b0_target) / axis_field(data, phi))
 
 
 def scale_reference(data: WoutData, target: str = "volavgB") -> tuple[float, float]:
