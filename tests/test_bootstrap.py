@@ -414,10 +414,10 @@ def test_flat_profiles_give_zero_jdotB():
 
 
 def test_isomorphism_enters_only_through_iota_minus_N():
-    """(iota, N = nfp*helicity_n) == (iota - N, 0) manually shifted."""
+    """(iota, N = nfp*helicity_n) == (iota - N, 0) with G -> G + N*I (Landreman 2022 A1)."""
     geom = _toy_geometry()
     N = geom.nfp * (-1)
-    shifted = dataclasses.replace(geom, iota=geom.iota - N)
+    shifted = dataclasses.replace(geom, iota=geom.iota - N, G=geom.G + N * geom.I)
     j1, _ = bs.j_dot_B_redl(PAPER_PROFILES, geom, -1)
     j2, _ = bs.j_dot_B_redl(PAPER_PROFILES, shifted, 0)
     np.testing.assert_allclose(np.asarray(j1), np.asarray(j2), rtol=1e-14)

@@ -410,8 +410,7 @@ NESTOR's edge response built once per gradient. The boundary-Schur solver
 differentiates one three-surface force row at a time, retains every terminal
 radial stencil coupling in the bulk, isolates the one evolved edge row that
 contains NESTOR's response, and eliminates the radial bulk with a
-two-sided-equilibrated, globally pivoted
-sparse LU. Reverse-mode row differentiation is used because each local
+two-sided-equilibrated, row-pivoted banded LU (LAPACK ``gbtrf``). Reverse-mode row differentiation is used because each local
 Jacobian has three times more inputs than outputs. The reduced transpose is
 solved and back-substituted, then checked against the original coupled
 residual; a failed certificate is refined on that exact operator, then continues
