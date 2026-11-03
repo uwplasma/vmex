@@ -633,50 +633,46 @@ def drift_surfaces_from_boozer(
 
 
 class DriftConfinementResidual(MaximumJResidual):
-    """Keep every drift orbit of the given pitches inside ``s_limit``.
+    """Keep the drift surfaces of the given pitches inside ``s_limit``.
 
-    For each pitch, orbits start at ``s0`` (and ``alpha0``) and are followed
-    for ``t_final`` with :func:`drift_surfaces_from_boozer` on the Boozer
-    ``surfaces``. One row per orbit is the hinge on its smooth maximum radius,
-    ``max(logsumexp(sharpness * s) / sharpness - s_limit, 0)``, so a zero
-    total means every drift surface closes inside ``s_limit``. Beyond
-    ``s = 1`` the fitted ``J`` is an extrapolation and a lost orbit can run
-    far out, so each row saturates as ``hinge_cap * tanh(hinge / hinge_cap)``.
-
-    A saturated row carries no gradient, so a lost orbit alone gives the
-    optimizer nothing to follow. Barrier rows fix that without orbit
-    integration: an orbit of action ``J0`` closes inside ``s_limit`` only
-    if ``J(s_limit, alpha) - J0`` keeps one sign over ``alpha``. For each
-    orbit and field line on the surface nearest ``s_limit`` the row is
-    ``relu(-sign(<J(s_limit)> - J0) (J(s_limit, alpha) - J0) / |J0|)``,
-    scaled by ``barrier_weight``; it is nonzero exactly where that contour
-    reaches the limit.
+    A drift surface is a contour of ``J(s, alpha)``. Through a point on
+    surface ``s`` it moves radially by about
+    ``delta(s, alpha) = |J - <J>| / |d<J>/ds|``, with ``<J>`` the average over
+    ``alpha``, and it stays inside if ``delta < s_limit - s``. The excursion
+    rows are ``max(delta - (s_limit - s), 0)`` on every sampled surface and
+    field line, with ``|d<J>/ds| + floor * |<J>|`` in the denominator so that
+    a radially flat ``J`` gives a large but finite row. They need no orbit
+    integration, stay smooth where an orbit would leave the plasma, and
+    vanish for an omnigenous ``J``.
 
     A pitch that is no longer trapped on a sampled line leaves ``J``
-    undefined there. Such lines count as lost, not confined: an undefined
-    orbit row is ``hinge_cap``, and one row per pitch and surface adds
-    ``hinge_cap`` times the fraction of field lines without a usable well.
-    Without these rows the optimizer can empty the wells instead of closing
-    the orbits.
+    undefined. Such lines count as lost: one row per pitch and surface is
+    ``hinge_cap`` times the fraction of field lines without a usable well,
+    so the optimizer cannot empty the wells instead of closing the contours.
 
-    ``J`` is the first usable well of each traced line; where that well is
-    born or dies the map jumps, so prefer a fixed ``t_final`` inside an
-    optimization.
+    Orbits launched at ``s0`` are integrated with
+    :func:`drift_surfaces_from_boozer` and reported as ``s_max``. With
+    ``orbit_weight > 0`` each also adds the row
+    ``orbit_weight * hinge_cap * tanh(hinge / hinge_cap)`` on its smooth
+    maximum radius ``logsumexp(sharpness * s) / sharpness`` above
+    ``s_limit``; that row saturates for a lost orbit, so it certifies
+    rather than steers.
     """
 
     name = "drift_confinement"
 
-    def __init__(self, surfaces, pitch, s0, *, s_limit=1.0, sharpness=50.0,
-                 hinge_cap=0.5, barrier_weight=1.0, mboz=16, nboz=16, oversample=2, **drift_options):
+    def __init__(self, surfaces, pitch, s0, *, s_limit=1.0, floor=0.05,
+                 orbit_weight=0.0, sharpness=50.0, hinge_cap=0.5,
+                 mboz=16, nboz=16, oversample=2, **drift_options):
         super().__init__(surfaces, pitch, mboz=mboz, nboz=nboz, oversample=oversample)
         self.s0 = np.atleast_1d(np.asarray(s0, dtype=float))
-        self.s_limit, self.sharpness = float(s_limit), float(sharpness)
-        self.hinge_cap, self.barrier_weight = float(hinge_cap), float(barrier_weight)
-        self.limit_index = int(np.argmin(np.abs(self.surfaces - self.s_limit)))
+        self.s_limit, self.floor = float(s_limit), float(floor)
+        self.orbit_weight, self.sharpness = float(orbit_weight), float(sharpness)
+        self.hinge_cap = float(hinge_cap)
         self.residual_options = drift_options
 
     def compute_state(self, state, rt):
-        """Return per-orbit hinge rows and the orbits of every pitch."""
+        """Return excursion, missing-well and orbit rows for every pitch."""
         booz = self._boozer(state, rt)
         s_b = booz["psi_b"] / booz["psi_edge"]
         orbits = [drift_surfaces_from_boozer(
@@ -684,18 +680,24 @@ class DriftConfinementResidual(MaximumJResidual):
             xn_b=booz["xn_b"], iota_b=booz["iota_b"], G_b=booz["G_b"],
             I_b=booz["I_b"], nfp=booz["nfp"], s_b=s_b, pitch=p, s0=self.s0,
             **self.residual_options) for p in self.pitch]
+        j_map = jnp.stack([o["j_map"] for o in orbits])            # (pitch, s, alpha)
+        finite = jnp.isfinite(j_map)
+        j_mean = jnp.nanmean(j_map, axis=-1)
+        j_mean = jnp.where(jnp.isfinite(j_mean), j_mean, 0.0)
+        slope = jnp.abs(jnp.gradient(j_mean, s_b, axis=-1)) + self.floor * jnp.abs(j_mean)
+        delta = jnp.abs(jnp.where(finite, j_map, j_mean[..., None]) - j_mean[..., None])
+        delta = delta / jnp.maximum(slope, jnp.finfo(slope.dtype).tiny)[..., None]
+        excursion = jnp.maximum(delta - (self.s_limit - s_b)[:, None], 0.0)
+        missing = jnp.mean(~finite, axis=-1)
         soft_max = jnp.stack([jax.nn.logsumexp(self.sharpness * o["s"], axis=-1)
                               / self.sharpness for o in orbits])
-        hinge = jnp.maximum(soft_max - self.s_limit, 0.0)
-        j0 = jnp.stack([o["action"][:, 0] for o in orbits])[..., None]
-        j_limit = jnp.stack([o["j_map"][self.limit_index] for o in orbits])[:, None, :]
-        side = jnp.sign(jnp.nanmean(j_limit, axis=-1, keepdims=True) - j0)
-        barrier = jnp.maximum(-side * (j_limit - j0) / jnp.abs(j0), 0.0)
-        orbit_rows = self.hinge_cap * jnp.tanh(hinge / self.hinge_cap)
-        missing = jnp.stack([jnp.mean(~jnp.isfinite(o["j_map"]), axis=-1) for o in orbits])
+        orbit_rows = self.hinge_cap * jnp.tanh(
+            jnp.maximum(soft_max - self.s_limit, 0.0) / self.hinge_cap)
+        orbit_rows = jnp.where(jnp.isfinite(orbit_rows), orbit_rows, self.hinge_cap)
         residuals1d = jnp.concatenate([
-            jnp.ravel(jnp.where(jnp.isfinite(orbit_rows), orbit_rows, self.hinge_cap)),
-            self.barrier_weight * jnp.ravel(jnp.where(jnp.isfinite(barrier), barrier, 0.0)),
-            self.hinge_cap * jnp.ravel(missing)])
+            jnp.ravel(excursion) / np.sqrt(excursion.shape[-1]),
+            self.hinge_cap * jnp.ravel(missing)]
+            + ([self.orbit_weight * jnp.ravel(orbit_rows)] if self.orbit_weight else []))
         return {"residuals1d": residuals1d, "total": jnp.sum(residuals1d ** 2),
-                "orbits": orbits, "s_max": jnp.stack([o["s_max"] for o in orbits])}
+                "orbits": orbits, "excursion": excursion,
+                "s_max": jnp.stack([o["s_max"] for o in orbits])}
