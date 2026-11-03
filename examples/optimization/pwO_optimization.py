@@ -76,11 +76,13 @@ GAMMA_C_WEIGHT = 100.0
 # The boundary is optimized at the seed's size, where the same collisionality needs the density
 # scaled by the size ratio and <J.B> scales by its square. The row is DKX's adjoint-traced
 # pitch-angle operator with momentum restoring; verify the optimum with a converged DKX run.
-# Needs dkx >= 2.8. Residual units: MA T/m^2 at ARIES-CS size.
+# Spectral angles on 15 x 21 x 48 x 5 are within 8 % of the converged Fokker-Planck run on a
+# 2-period design; the 11 x 11 finite-difference default is not converged on pwO. Needs a dkx
+# with the field-period fix (DKX #403). Residual units: MA T/m^2 at ARIES-CS size.
 DKX_FINAL_STAGES = 0
 DKX_SURFACES = (0.25, 0.55, 0.85)
 DKX_WEIGHT = 30.0
-DKX_RESOLUTION = None             # None keeps the DKX traced default
+DKX_RESOLUTION = dict(Ntheta=15, Nzeta=21, Nxi=48, NL=4, Nx=5)
 ARIES_MINOR_RADIUS = 1.7044       # metres
 ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te = Ti (1 - s) in eV
 DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
@@ -168,13 +170,13 @@ if any(DKX):
         KineticProfiles(ARIES_DENSITY / size * np.array([1, 0, 0, 0, 0, -1.]),
                         ARIES_TEMPERATURE * np.array([1, -1.]), ARIES_TEMPERATURE * np.array([1, -1.])),
         DKX_SURFACES, mismatch=False, collision_model="pas+momentum_correction",
-        resolution=DKX_RESOLUTION)
+        resolution=DKX_RESOLUTION, spectral_angles=True)
 
     def dkx_j_dot_B(equilibrium_state, solver_context):
         """DKX <J.B> in MA T/m^2 at ARIES-CS size."""
         return kinetic.residuals_state(equilibrium_state, solver_context) * size**2
 
-    kinetic._setup(int(NS_ARRAY[-1]))  # DKX builds its host-side operators eagerly, not under a trace
+    kinetic._setup(int(NS_ARRAY[-1]), int(inp.nfp))  # DKX builds its host-side operators eagerly, not under a trace
     dkx_term = (dkx_j_dot_B, 0.0, DKX_WEIGHT)
 
 report = opt.EquilibriumReporter(
