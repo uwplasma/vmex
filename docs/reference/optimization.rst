@@ -653,6 +653,8 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
+.. _optimization-low-transport:
+
 Low-transport optimization
 --------------------------
 
@@ -660,22 +662,29 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 
    python examples/optimization/pwO_optimization.py
 
-The script has the form of ``QA_optimization.py``: set ``NFP`` and the mode
-ladder at the top, and the objective is a list of ``(function, target, weight)``
-terms. They are the mapped pwO variance, aspect ratio, a floor on ``|iota|``,
-the magnetic well and a mirror-ratio ceiling. The verified boundary is compared
-with the seed by a matched NEO calculation on the same radial grid. The fixed
-map and cut are described in :ref:`confinement-mapped-pwo`. The pwO variance
-does not establish confinement; trace particles to qualify a boundary.
+The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
+mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
+``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
+(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
+excursion, the edge-Jacobian ratio and the elongation. The map parameters
+``a, b, c, eta_min`` are optimized together with the boundary
+(:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
+The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
+add it. The verified boundary is re-solved on a finer radial grid and compared
+with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
+The pwO variance does not establish confinement; trace particles to qualify a
+boundary.
 
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
-Run the vacuum example first, with the same ``NFP``: the continuation reads its
-``input.pwO_optimized_nfp{NFP}`` and WOUT. The zero-current pressure is
+Run the vacuum example first, with the same ``NFP`` and the magnetic well enabled
+(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.01`` and its WOUT; from a
+vacuum hill it does not reach a well). The zero-current pressure is
 proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
-and the beta error joins the objective list.
+and the beta error and a Mercier floor join the objective list. It uses the same
+``MAX_MODES`` ladder.
 
 ``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
 pressure, and runs one finite-beta plasma stage with the pwO map free. It then
@@ -683,7 +692,7 @@ fits coils to the fixed plasma and adds the pwO residual, with the map held,
 to the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius;
 dense geometry sampling checks constraints between field quadrature nodes.
-Run the vacuum example first. Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+Run the vacuum example first (``NFP = 4`` here; its plasma stage uses the same ``MAX_MODES`` ladder). Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
 keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
 still apply to supplied coils. The script requires
 ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary

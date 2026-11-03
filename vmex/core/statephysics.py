@@ -230,29 +230,8 @@ def volume_average_beta(state: SpectralState, rt: SolverRuntime) -> Array:
     return jnp.where(wb != 0.0, jnp.asarray(energies.wp) / wb, 0.0)
 
 
-def elongation_profile(
-    state: SpectralState,
-    rt: SolverRuntime,
-    *,
-    ntheta: int | None = None,
-    nphi: int | None = None,
-) -> jnp.ndarray:
-    """Boundary elongation at equally spaced toroidal cross-sections.
-
-    Each constant-geometric-toroidal-angle cross-section is reconstructed
-    from the physical edge Fourier coefficients.  Its area ``A`` and
-    perimeter ``P`` define the equivalent ellipse, whose semi-axes are
-    recovered with Ramanujan's perimeter approximation.  The returned ratio
-    is ``a_major / a_minor`` at each toroidal sample, the same definition used
-    by DESC's elongation objective.
-
-    The default grids (at least 32 poloidal and 24 toroidal points per field
-    period) resolve optimization modes through ``max_mode <= 5`` without
-    adding user-facing sampling knobs to ordinary scripts.  Explicit positive
-    ``ntheta`` and ``nphi`` values are available for convergence studies.
-    The calculation is JAX-traceable and supports stellarator-asymmetric
-    boundaries.
-    """
+def _boundary_sections(state, rt, ntheta, nphi):
+    """Edge ``R, Z`` and their first and second poloidal derivatives, shape ``(ntheta, nphi)``."""
     res = rt.resolution
     ntheta = max(4 * int(res.mpol), 32) if ntheta is None else int(ntheta)
     nphi = max(4 * int(res.ntor) + 1, 24) if nphi is None else int(nphi)
@@ -307,6 +286,36 @@ def elongation_profile(
         "k,tpk->tp", -zc * poloidal_mode, sine
     ) + jnp.einsum("k,tpk->tp", zs * poloidal_mode, cosine)
 
+    second = poloidal_mode**2
+    d2R = -jnp.einsum("k,tpk->tp", rc * second, cosine) - jnp.einsum("k,tpk->tp", rs * second, sine)
+    d2Z = -jnp.einsum("k,tpk->tp", zc * second, cosine) - jnp.einsum("k,tpk->tp", zs * second, sine)
+    return ntheta, R, Z, dR_dtheta, dZ_dtheta, d2R, d2Z
+
+
+def elongation_profile(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    ntheta: int | None = None,
+    nphi: int | None = None,
+) -> jnp.ndarray:
+    """Boundary elongation at equally spaced toroidal cross-sections.
+
+    Each constant-geometric-toroidal-angle cross-section is reconstructed
+    from the physical edge Fourier coefficients.  Its area ``A`` and
+    perimeter ``P`` define the equivalent ellipse, whose semi-axes are
+    recovered with Ramanujan's perimeter approximation.  The returned ratio
+    is ``a_major / a_minor`` at each toroidal sample, the same definition used
+    by DESC's elongation objective.
+
+    The default grids (at least 32 poloidal and 24 toroidal points per field
+    period) resolve optimization modes through ``max_mode <= 5`` without
+    adding user-facing sampling knobs to ordinary scripts.  Explicit positive
+    ``ntheta`` and ``nphi`` values are available for convergence studies.
+    The calculation is JAX-traceable and supports stellarator-asymmetric
+    boundaries.
+    """
+    ntheta, R, Z, dR_dtheta, dZ_dtheta, _, _ = _boundary_sections(state, rt, ntheta, nphi)
     dtheta = 2.0 * np.pi / ntheta
     perimeter = dtheta * jnp.sum(
         jnp.sqrt(dR_dtheta**2 + dZ_dtheta**2), axis=0
@@ -362,6 +371,18 @@ def max_elongation(
     return jnp.max(
         elongation_profile(state, rt, ntheta=ntheta, nphi=nphi)
     )
+
+
+def min_boundary_curvature_radius(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Smallest poloidal radius of curvature of the boundary cross-sections, in metres.
+
+    Coils at a finite distance cannot hold a boundary tip much sharper than
+    their distance; a floor on this radius keeps such tips out of a design.
+    Sampled on at least 96 poloidal and 24 toroidal points per field period.
+    """
+    _, _, _, dR, dZ, d2R, d2Z = _boundary_sections(
+        state, rt, max(16 * int(rt.resolution.mpol), 96), max(4 * int(rt.resolution.ntor) + 1, 24))
+    return jnp.min((dR**2 + dZ**2) ** 1.5 / jnp.abs(dR * d2Z - dZ * d2R))
 
 
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:

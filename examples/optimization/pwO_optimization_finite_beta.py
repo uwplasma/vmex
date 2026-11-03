@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
 
-Run ``pwO_optimization.py`` first with ASPECT_TARGET = 6.0 and
-MAGNETIC_WELL_TARGET = 0.01, plus ELONGATION_LIMIT = 6.0 at NFP 1: from a
-vacuum magnetic hill (its default, well about -0.05) this continuation does
-not reach a well. Pressure is calibrated at fixed toroidal flux, then the
+Run ``pwO_optimization.py`` first with its commented line
+``MAGNETIC_WELL_TARGET = 0.01`` enabled (and ELONGATION_LIMIT = 6.0 at NFP 1):
+from a vacuum magnetic hill this continuation does not reach a well. Pressure is calibrated at fixed toroidal flux, then the
 workflow is that of the vacuum example with beta and Mercier stability added
 to the residual vector. NEO compares the vacuum start at this pressure with
 the result. Requires vmex[neoclassical].
@@ -46,8 +45,8 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend. Higher vacuum modes stay fixed:
-MAX_MODES = [3]
-MAX_NFEV = [80]
+MAX_MODES = [1, 2, 3]
+MAX_NFEV = [20, 20, 40]
 NS_ARRAY = np.array([35])
 NITER_ARRAY = np.array([20000])
 FTOL_ARRAY = np.array([1e-12])
