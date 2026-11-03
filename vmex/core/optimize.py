@@ -155,6 +155,7 @@ __all__ = [
     "volume",
     "volume_average_beta",
     "magnetic_well",
+    "weighted_magnetic_well",
     "elongation_profile",
     "max_elongation",
     "d_merc",
@@ -171,6 +172,7 @@ __all__ = [
     "trial_pressure_glasser_stability_residual",
     "l_grad_b",
     "l_grad_b_state",
+    "l_grad_b_excess_state",
     "quasi_isodynamic_residual",
     "boozer_modes_from_wout",
     "quasi_isodynamic_residual_from_wout",
@@ -864,6 +866,19 @@ def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
     return jnp.where(v0 != 0.0, (v0 - v1) / v0_safe, 0.0)
 
 
+def weighted_magnetic_well(state: SpectralState, rt: SolverRuntime, *, inner, outer) -> Array:
+    """``sum((w1 - w2) V') / sum((w1 + w2) V')`` on the half mesh, with ``w1 = inner(s)``.
+
+    Positive means a favorable well between the regions the weights select,
+    without the endpoint extrapolation of :func:`magnetic_well`.
+    """
+    _, _, _, _, energies = _field_chain(state, rt)
+    vp = jnp.abs(jnp.asarray(energies.vp))[1:]
+    s = (jnp.arange(vp.size) + 0.5) / vp.size
+    w1, w2 = inner(s), outer(s)
+    return jnp.sum((w1 - w2) * vp) / jnp.sum((w1 + w2) * vp)
+
+
 def d_merc(eq) -> jnp.ndarray:
     """Mercier stability criterion profile ``DMerc(s)`` (full mesh).
 
@@ -956,6 +971,19 @@ def l_grad_b_state(
         return jnp.min(grid)
     k = jnp.asarray(float(softmin_k), dtype=grid.dtype)
     return -jax.scipy.special.logsumexp(-k * grid) / k
+
+
+def l_grad_b_excess_state(
+    state: SpectralState, rt: SolverRuntime, *, target: float,
+    s_index: int = -1, ntheta: int = 24, nphi: int = 24,
+) -> Array:
+    """Pointwise rows ``max(target / L_grad_B - 1, 0)``: one per grid point.
+
+    Unlike the scalar minimum, every point below ``target`` drives its own
+    Gauss-Newton row, and the rows are zero once the target is met.
+    """
+    grid = _lgradb_grid(s_index=s_index, ntheta=ntheta, nphi=nphi, **_lgradb_state_tables(state, rt))
+    return jnp.ravel(jnp.maximum(target / grid - 1.0, 0.0))
 
 
 # ===========================================================================
