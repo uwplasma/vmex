@@ -429,14 +429,17 @@ def test_drift_orbits_gradient_and_nan_rows():
     assert bool(jnp.isfinite(dirty)) and float(dirty) == pytest.approx(float(clean), rel=1.0e-4)
 
 
-def test_drift_confinement_residual_hinges_on_s_limit(monkeypatch):
+def test_drift_confinement_residual_reach_rows(monkeypatch):
     booz = _boozer(1.02)
     monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
     eq = SimpleNamespace(state=object(), runtime=object())
     options = dict(mboz=2, nboz=2, nalpha=8, points_per_period=32, num_periods=2,
                    max_wells=4, nsteps=16, t_final=0.1)
-    inside = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], s_limit=2.0, **options)
-    below = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], s_limit=0.1, **options)
-    assert float(jnp.max(jnp.abs(inside(eq)))) == 0.0
-    assert float(below(eq)[0]) > 0.0  # the orbit row; barrier rows follow
+    term = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], launch_alpha=4,
+                                         excursion_weight=1.0, **options)
+    out = term.compute_state(eq.state, eq.runtime)
+    rows = out["residuals1d"]
+    assert rows.shape == (4 + 2 * 8,) and bool(jnp.all(jnp.isfinite(rows)))
+    assert bool(jnp.all((out["reach"] >= 0.0) & (out["reach"] < 1.0)))
+    assert float(out["gamma_w"]) == pytest.approx(float(jnp.mean(out["reach"])))

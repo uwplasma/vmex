@@ -4,13 +4,12 @@
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number, exactly as in
 ``QA_optimization.py``, with quasisymmetry replaced by drift confinement. For
-fixed physical pitches, :class:`~vmex.core.maxj.DriftConfinementResidual`
-estimates how far each contour of the second adiabatic invariant ``J``, a
-drift surface, strays radially from the flux surface it starts on, and
-penalizes every excursion that would carry it past ``S_LIMIT``. Orbits
-launched on a few surfaces are integrated alongside and reported as the
-worst radius they reach. No symmetry is
-imposed. VMEX supplies the exact Jacobian.
+six physical pitches across the trapped window,
+:class:`~vmex.core.maxj.DriftConfinementResidual` launches bounce-centre
+orbits on three surfaces and eight field-line labels, follows them for about
+10 ms of a 3.5 MeV alpha at reactor scale, and penalizes how far each drift
+surface reaches toward the LCFS. The weighted mean reach is reported as
+``Gamma_W``. No symmetry is imposed. VMEX supplies the exact Jacobian.
 """
 
 import os
@@ -26,8 +25,7 @@ from vmex import optimize as opt
 from vmex.core.maxj import DriftConfinementResidual, common_trapped_pitches_state
 
 # Number of field periods, and the seed deck the boundary is shaped from:
-NFP = int(os.environ.get("NFP", 2))
-MODE = os.environ.get("MODE", "excursion")
+NFP = 2
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Rotating-ellipse amplitude added to the circular seed. The exactly circular
@@ -38,22 +36,19 @@ SEED_PERTURBATION = 0.05
 # orbits, and the trapping depths in [0, 1] (shallowest to deepest common
 # well) that choose the physical pitches:
 SURFACES = np.linspace(0.1, 1.0, 10)
-START_RADII = (0.3, 0.5, 0.7)
-TRAPPING_DEPTHS = eval(os.environ.get("DEPTHS", "(0.25, 0.5, 0.8)"))
-
-# Every orbit must close inside S_LIMIT, leaving a margin to the LCFS:
-S_LIMIT = 0.9
+START_RADII = (0.15, 0.25, 0.4)
+TRAPPING_DEPTHS = (0.1, 0.25, 0.4, 0.55, 0.7, 0.85)
 
 # Drift-orbit sampling: field lines, traced periods, quadrature, RK4 steps,
-# and a fixed dimensionless integration time (see DriftConfinementResidual):
-DRIFT_OPTIONS = dict(nalpha=16, points_per_period=48, num_periods=16,
-                     max_wells=40, quadrature_order=24, nsteps=256, t_final=300.0)
+# and the integration time, t_phys m v^2 / (Z e psi_edge) = 4000 for 10 ms:
+DRIFT_OPTIONS = dict(nalpha=32, points_per_period=48, num_periods=16,
+                     max_wells=40, quadrature_order=24, nsteps=512, t_final=4000.0)
 BOOZER_MODES = 10
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = eval(os.environ.get("NFEV", "[10, 15]"))
+MAX_NFEV = [10, 15]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -63,7 +58,7 @@ IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
 PARAMETER_STEP = 0.02
-MAX_PARAMETER_CHANGE = float(os.environ.get("STEPCH", 5.0))
+MAX_PARAMETER_CHANGE = 5.0
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 
 # Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
@@ -111,7 +106,7 @@ pitch = np.asarray(common_trapped_pitches_state(
     equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
     nalpha=DRIFT_OPTIONS["nalpha"], points_per_period=DRIFT_OPTIONS["points_per_period"],
     num_periods=DRIFT_OPTIONS["num_periods"]))
-drift = DriftConfinementResidual(SURFACES, pitch, START_RADII, s_limit=S_LIMIT, mode=MODE,
+drift = DriftConfinementResidual(SURFACES, pitch, START_RADII,
                                  mboz=BOOZER_MODES, nboz=BOOZER_MODES, **DRIFT_OPTIONS)
 
 # Each term is (function, target, weight).
@@ -123,14 +118,13 @@ objective_function_terms = [
 ]
 
 
-def worst_orbit(equilibrium):
-    """Largest radius any sampled drift orbit reaches."""
-    return float(jnp.nanmax(drift.compute_state(
-        equilibrium.state, equilibrium.runtime)["s_max"]))
+def gamma_w(equilibrium):
+    """Weighted mean reach of the sampled drift orbits, 0 when all stay put."""
+    return float(drift.compute_state(equilibrium.state, equilibrium.runtime)["gamma_w"])
 
 
 report = opt.EquilibriumReporter(
-    ("drift total", drift.total, ".6e"), ("worst s_max", worst_orbit, ".4f"),
+    ("drift total", drift.total, ".6e"), ("Gamma_W", gamma_w, ".4f"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"))
 monitor = opt.OptimizationMonitor()
@@ -180,13 +174,9 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
 final_input = replace(
     inp, ns_array=np.array([FINAL_NS]), ftol_array=np.array([FINAL_FTOL]),
     niter_array=np.array([FINAL_NITER]))
-try:
-    final_equilibrium = opt.solve_equilibrium(
-        final_input, initial_state=equilibrium.solution,
-        verbose=not ci_smoke, raise_on_max_iterations=True)
-except Exception as error:   # keep the optimizer's own solve if the fine one fails
-    print(f"FINAL SOLVE FAILED: {error}")
-    final_equilibrium, final_input = equilibrium, inp
+final_equilibrium = opt.solve_equilibrium(
+    final_input, initial_state=equilibrium.solution,
+    verbose=not ci_smoke, raise_on_max_iterations=True)
 
 ### Print, plot and save ######################################################
 
