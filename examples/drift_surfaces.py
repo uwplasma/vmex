@@ -20,6 +20,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
 
 import vmex as vj
 from vmex import optimize as opt
@@ -103,17 +106,28 @@ radius = np.asarray(out["s_grid"])[:, None]
 j_map = np.asarray(out["j_map"])
 j_map = np.concatenate([j_map, j_map[:, :1]], axis=1)
 
-fig, ax = plt.subplots(figsize=(6, 5.5))
-contours = ax.contour(radius * np.cos(alpha), radius * np.sin(alpha), j_map, levels=14, cmap="viridis")
-fig.colorbar(contours, ax=ax, label=r"$J / v$")
-for k, (s_orbit, a_orbit) in enumerate(zip(np.asarray(out["s"]), np.asarray(out["alpha"]))):
-    ax.plot(s_orbit * np.cos(a_orbit), s_orbit * np.sin(a_orbit), "k--", lw=1.2,
-            label="drift surface" if k == 0 else None)
-ax.add_patch(plt.Circle((0, 0), 1.0, fill=False, color="gray"))
+fig, ax = plt.subplots(figsize=(6, 6), layout="constrained")
+levels = np.linspace(np.nanmin(j_map), np.nanmax(j_map), 12)
+ax.contour(radius * np.cos(alpha), radius * np.sin(alpha), j_map, levels=levels,
+           cmap="viridis", linewidths=3.2)
+fig.colorbar(ScalarMappable(Normalize(levels[0], levels[-1]), cmap="viridis"),
+             ax=ax, shrink=0.8, label=r"$J\,/\,v$")
+for k, (s_orbit, a_orbit, s_top) in enumerate(zip(
+        np.asarray(out["s"]), np.asarray(out["alpha"]), np.asarray(out["s_max"]))):
+    lost = s_top >= 1.0
+    color = "#c0392b" if lost else "black"
+    ax.plot(s_orbit * np.cos(a_orbit), s_orbit * np.sin(a_orbit), color=color, lw=1.6,
+            ls="--" if lost else "-")
+    ax.plot(s_orbit[0] * np.cos(a_orbit[0]), s_orbit[0] * np.sin(a_orbit[0]), "o",
+            color=color, ms=7, mec="white")
+ax.add_patch(plt.Circle((0, 0), 1.0, fill=False, color="0.15", lw=2.8))
+ax.legend(handles=[
+    Line2D([], [], color="0.15", lw=2.8, label="LCFS"),
+    Line2D([], [], color="black", lw=1.6, marker="o", ms=6, mec="white", label="drift surface"),
+    Line2D([], [], color="#c0392b", lw=1.6, ls="--", label="lost drift surface")],
+    loc="upper center", bbox_to_anchor=(0.5, -0.12))
 ax.set_aspect("equal")
-ax.set_xlabel(r"$s\cos\alpha$")
-ax.set_ylabel(r"$s\sin\alpha$")
-ax.legend(loc="upper right")
-fig.tight_layout()
+ax.set_xlabel(r"$s\,\cos\alpha$")
+ax.set_ylabel(r"$s\,\sin\alpha$")
 fig.savefig(FIGURE_PATH, dpi=200)
 print(f"Wrote {FIGURE_PATH}")

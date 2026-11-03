@@ -384,22 +384,40 @@ orbits follow contours of :math:`J(s,\alpha)`: the drift surfaces. An orbit
 that reaches :math:`s=1` is a lost particle.
 
 :func:`~vmex.core.maxj.drift_surfaces_from_boozer` samples :math:`J` and
-:math:`\tau` on the Boozer surfaces and a uniform :math:`\alpha` grid
-(the first complete well of each traced line, since later wells on the same line belong to other field-line labels), and
-:func:`~vmex.core.maxj.drift_orbits` fits them with a Fourier series in
+:math:`\tau` on the Boozer surfaces and a uniform :math:`\alpha` grid. On each
+traced line it keeps the deepest usable well that starts within one field
+period of the first, because later wells belong to other field-line labels.
+:func:`~vmex.core.maxj.drift_orbits` fits the samples with a Fourier series in
 :math:`\alpha` times a polynomial in :math:`s` and integrates the equations
 with fixed-step RK4. Everything is ``jnp``, so the largest orbit radius
 ``s_max`` and the conservation of :math:`J` along each orbit are
 differentiable functions of the Boozer spectrum. The field-line trace must
 close a poloidal transit: the default ``num_periods=12`` covers
 :math:`\iota \gtrsim n_{fp}/12`; a shorter trace leaves :math:`J` undefined
-and the orbit NaN. :class:`~vmex.core.maxj.DriftConfinementResidual` turns
-this into an objective: one hinge row per orbit on a smooth maximum of its
-radius above ``s_limit``, zero when every launched orbit closes inside the
-limit. From a minimal seed this objective does not yet converge: orbits
-that leave the plasma give a rough, badly scaled landscape. Start it from a
-configuration whose drift surfaces are already nearly closed. ``drift_surfaces.py`` shows the orbits of a quasi-axisymmetric
-equilibrium and the gradient of ``s_max``.
+and the orbit NaN.
+
+:class:`~vmex.core.maxj.DriftConfinementResidual` turns this into an
+objective. For every physical pitch, launch radius :math:`s_0` and launch
+label, it integrates one orbit for a fixed physical window and returns the
+reach
+
+.. math::
+
+   R = \tanh\frac{\max(\hat s - s_0,\,0)}{1 - s_0},
+
+where :math:`\hat s` is a log-sum-exp smooth maximum of the orbit radius. The
+smooth maximum overshoots the true maximum by up to :math:`\ln n_t/k` over
+:math:`n_t` orbit samples with sharpness :math:`k`, so a drift surface that
+stays on its flux surface has a small constant floor instead of zero; one
+that touches the LCFS has a reach of about 0.76. Its weighted mean over pitches and orbits
+(``gamma_w``) is a smooth version of the reach proxy :math:`\Gamma_W` of
+arXiv:2608.20042. Orbits whose launch point has no trapped well are passing
+particles and contribute nothing. The optional ``excursion_weight`` adds weak
+rows on the spread of :math:`J` along each surface relative to its radial
+slope; they need no orbit integration. The bounce-averaged model has no
+finite orbit width, so keep :math:`s_0` well inside the plasma and check the
+result with guiding-centre tracing. ``drift_surfaces.py`` shows the orbits of
+a quasi-axisymmetric equilibrium and the gradient of ``s_max``.
 
 ``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
 equilibrium, retains a magnetic-well target, and ramps a negative slope
