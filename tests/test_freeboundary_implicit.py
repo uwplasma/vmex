@@ -73,9 +73,18 @@ def test_free_boundary_config_validates_adjoint_solver():
     inp, field = lasym_free_input(DATA), lasym_free_field()
     with pytest.raises(ValueError, match="adjoint_solver must be one of"):
         make_free_boundary_config(inp, field, adjoint_solver="dense")
+    assert make_free_boundary_config(inp, field).adjoint_solver == "boundary_schur"
     for name in fbi._ADJOINT_SOLVERS:
         assert make_free_boundary_config(
             inp, field, adjoint_solver=name).adjoint_solver == name
+    # The host callbacks return float64: without x64 the solve says so.
+    cfg = make_free_boundary_config(inp, field)
+    jax.config.update("jax_enable_x64", False)
+    try:
+        with pytest.raises(RuntimeError, match="float64"):
+            fbi._baseline_struct(cfg)
+    finally:
+        jax.config.update("jax_enable_x64", True)
 
 
 def test_free_boundary_config_validates_adjoint_fail():
@@ -309,7 +318,7 @@ def test_balanced_dense_solver_survives_a_rank_deficient_edge_system():
         np.array([2.0, -1.0]), rtol=1.0e-12, atol=0.0)
 
 
-def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
+def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient(monkeypatch, capsys):
     """The radial-elimination lanes reuse one executable and strand no arrays.
 
     Every per-gradient array -- the bulk blocks, the mask, the saved
@@ -398,6 +407,25 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient():
         "adjoint_certificate_fallbacks"]
     assert after == before + 1
     np.testing.assert_allclose(forced, elimination, rtol=1.0e-6, atol=0.0)
+
+    # Inexact Schur probes: scale NESTOR's edge response. A small error is
+    # refined away on the exact transpose; a wrong sign does not contract,
+    # stops after one step and falls back once, counted, to the same gradient.
+    response = fbi._edge_response
+    for scale, steps, fallbacks in ((1.0005, 3, 0), (-1.0, 2, 1)):
+        monkeypatch.setattr(fbi, "_edge_response", lambda *a, s=scale, **k: (
+            lambda value, jacobian, inputs: (value, s * jacobian, inputs))(
+                *response(*a, **k)))
+        before = (im._SOLVE_STATS.get(schur.implicit) or {}).get(
+            "adjoint_certificate_fallbacks", 0) or 0
+        capsys.readouterr()
+        with monkeypatched_debug():
+            inexact = np.asarray(fbi._solve_bwd_impl(
+                schur, saved[:6], state_bar)[1])
+        assert capsys.readouterr().out.count("Schur certificate step=") == steps
+        assert ((im._SOLVE_STATS.get(schur.implicit) or {}).get(
+            "adjoint_certificate_fallbacks", 0) or 0) == before + fallbacks
+        np.testing.assert_allclose(inexact, elimination, rtol=1.0e-6, atol=0.0)
 
 
 def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
@@ -552,26 +580,57 @@ def test_restart_carries_only_the_reference_state():
     assert fbi._continuation(stage) == {"initial_state": "state"}
 
 
-def test_traced_pullback_says_it_cannot_run_the_host_schur_lane(monkeypatch):
-    """boundary_schur is a host lane; under jit the staged solve replaces it."""
+def test_traced_pullback_runs_the_host_schur_lane(monkeypatch):
+    """Under jit the Schur lane runs on the concrete root, like eager."""
     def residual(z, p, field, *_args):
         return jnp.asarray([z[0]**2 + p * z[1] + field, z[0] * z[1] + z[1]**2 - p])
 
+    def schur(cfg, z, p, field, *args, fail):
+        assert not isinstance(args[-1], jax.core.Tracer) and fail == "error"
+        calls.append(cfg)
+        jacobian = jax.jacrev(residual)(z, p, field)
+        return jnp.linalg.solve(jacobian.T, args[-1])
+
+    class Config:  # hashable by identity, like FreeBoundaryImplicitConfig
+        implicit = SimpleNamespace(device=None)
+        adjoint_solver, adjoint_fail = "boundary_schur", "error"
+
+    calls, cfg = [], Config()
     monkeypatch.setattr(fbi, "_projected_residual", lambda *_a, **_k: residual)
+    monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint", schur)
     monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda tree: tree))
-    cfg = SimpleNamespace(
-        implicit=SimpleNamespace(adjoint_tol=1.0e-12, adjoint_gcrot_m=2,
-                                 adjoint_gcrot_k=1, adjoint_maxiter=10),
-        adjoint_solver="boundary_schur", adjoint_fail="error")
     saved = (jnp.asarray(0.5), jnp.asarray(0.25), jnp.asarray([2., 3.]),
              None, None, None)
-    # The warning has to name both consequences: a different solver, and the
-    # slower one, so a user who jits does not silently pay for both.
-    with pytest.warns(RuntimeWarning, match="not available under jax.jit") as caught:
-        jax.jit(lambda bar: fbi._solve_bwd_impl(cfg, saved, bar))(
-            jnp.asarray([1., -2.]))
-    message = str(caught[0].message)
-    assert "staged" in message and "slower" in message
+    bar = jnp.asarray([1., -2.])
+    eager = fbi._solve_bwd_impl(cfg, saved, bar)
+    staged = jax.jit(lambda value: fbi._solve_bwd_impl(cfg, saved, value))(bar)
+    assert calls == [cfg, cfg]
+    np.testing.assert_allclose(staged, eager, rtol=1.0e-14, atol=0.0)
+    # A typed failure keeps its class behind the callback's runtime error.
+    failure = AdjointSolveError("stalled")
+    monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint",
+                        lambda *_a, **_k: (_ for _ in ()).throw(failure))
+    with pytest.raises(Exception, match="AdjointSolveError: stalled"):
+        jax.jit(lambda value: fbi._solve_bwd_impl(cfg, saved, value))(2.0 * bar)
+    assert im._HOST_ERROR == [failure]
+    im._HOST_ERROR.clear()
+
+
+def test_traced_explicit_gpu_config_runs_on_the_cpu(monkeypatch):
+    """Under jit an explicit GPU config is swapped for one cached CPU copy."""
+    @dataclasses.dataclass(frozen=True)
+    class Implicit:
+        device: object
+
+    gpu = SimpleNamespace(platform="gpu")
+    cfg = fbi.FreeBoundaryImplicitConfig(implicit=Implicit(gpu), field_from_parameters=None)
+    monkeypatch.setattr(fbi, "_CPU_OF", {})
+    monkeypatch.setattr(fbi, "_vacuum_program", lambda built: built.implicit.device)
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    with pytest.warns(RuntimeWarning, match="run on the CPU"):
+        sibling = fbi._traced_config(cfg)
+    assert sibling.implicit.device.platform == "cpu" == sibling.vacuum_program.platform
+    assert fbi._traced_config(cfg) is sibling and fbi._traced_config(sibling) is sibling
 
 
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
@@ -594,7 +653,7 @@ def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=seed, vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -635,7 +694,7 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -686,6 +745,31 @@ def test_failed_trials_do_not_change_a_rebuilt_point(monkeypatch):
     assert fbi._FREE_LAST_RESULT[cfg].marker == "rebuild"
 
 
+def test_trial_stopped_before_vacuum_activation_reports_status_2(monkeypatch):
+    """A budget spent before NESTOR ever ran is status 2, not a crash.
+
+    The dof mask was found from the stage's NESTOR edge pressure, which is
+    ``None`` until fsq reaches the activation threshold (seen on NCSX at
+    nzeta = 6, which stalls above it).
+    """
+    from vmex.core.freeboundary import ACTIVATION_FSQ
+
+    inp = dataclasses.replace(
+        lasym_free_input(DATA), ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-6]), niter_array=np.array([3]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=8, ftol=1.0e-6, max_iterations=3, device="cpu",
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current))
+    monkeypatch.setattr(fbi, "_FREE_MASK_CACHE", {})
+    *_, mask, _rcon0, _zcon0, status, fsq, _ratio = (
+        fbi._host_solve_and_mask_status(
+            cfg, im.params_from_input(inp), field.extcur))
+    assert fsq > ACTIVATION_FSQ and int(status) == 2
+    assert np.asarray(mask.R_cos)[-1].any()  # the edge rows are evolved
+
+
 def test_restart_budget_is_the_cold_reference_cost():
     """A restart gets what the cold reference needed, within [cap/10, cap]."""
     icfg = SimpleNamespace(max_iterations=4000)
@@ -720,7 +804,7 @@ def test_stalled_restart_goes_cold_within_the_budget(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=object(), vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0, iterations=300))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0, iterations=300))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -767,7 +851,7 @@ def test_an_unanchored_solve_is_never_certified(monkeypatch):
     reference = SimpleNamespace(
         continuation_state=state, vacuum=None, rcon0=runtime.rcon0,
         zcon0=runtime.zcon0,
-        result=SimpleNamespace(fsqr=0.0, fsqz=0.0, fsql=0.0))
+        result=SimpleNamespace(state=state, fsqr=0.0, fsqz=0.0, fsql=0.0))
     monkeypatch.setitem(fbi._FREE_HOT_CACHE, cfg, reference)
     monkeypatch.setitem(fbi._FREE_MASK_CACHE, fbi._mask_key(cfg),
                         jax.tree.map(jnp.zeros_like, state))
@@ -793,6 +877,32 @@ def test_an_unanchored_solve_is_never_certified(monkeypatch):
     assert anchored and int(status) == 3
     with pytest.raises(VmecConvergenceError, match="did not anchor"):
         fbi._host_solve_and_mask(cfg, params, field.extcur)
+    # It descended further twice before giving up, with exception-free solves.
+    assert len(anchored) == 2 * (1 + len(fbi._ANCHOR_DESCENT_FTOL))
+
+    # A further descent that lands is certified, with that descent's stage.
+    descents, calls = [], []
+
+    def lands_after_descent(_cfg, _params, _field, host_state, *args):
+        calls.append(args)
+        return host_state, fbi._AnchorReport(
+            certified=len(calls) == 2, initial_residual=1.0, residual=1.0)
+
+    far = fbi._solve_free_boundary_stage
+
+    def counted(*args, **kwargs):
+        descents.append(kwargs)
+        return far(*args, **kwargs)
+
+    monkeypatch.setattr(fbi, "_solve_free_boundary_stage", counted)
+    monkeypatch.setattr(fbi, "_anchor_root", lands_after_descent)
+    *_, status, _fsq, _ratio = fbi._host_solve_and_mask_status(
+        cfg, params, field.extcur)
+    assert int(status) == 0 and len(calls) == 2
+    assert calls[0][-1] is False and len(calls[1]) == 3  # impatient, then patient
+    assert descents[-1]["ftol"] == 1.0e-2 * cfg.implicit.ftol
+    assert descents[-1]["error_on_no_convergence"] is False
+
     # No pullback runs for it: both cotangents are exactly zero.
     cotangents = fbi._solve_status_bwd(
         cfg, (params, field.extcur, state, state, runtime.rcon0,
@@ -933,9 +1043,9 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
     monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
 
-    def run():
+    def run(patient=True):
         return fbi._anchor_root(cfg, im.params_from_input(inp), field.extcur,
-                                state, mask, runtime.rcon0, runtime.zcon0)
+                                state, mask, runtime.rcon0, runtime.zcon0, patient)
 
     return run, state, mask, cfg, root, calls
 
@@ -985,6 +1095,14 @@ def test_newton_anchor_never_certifies_what_it_cannot_land(
     assert not report.certified
     assert report.attempts == len(fbi._ANCHOR_FIRST_DAMPING) == report.steps
     assert report.residual < report.initial_residual
+
+    # Impatient: a first step that needs damping stops at once, however it lands.
+    run, state, *_ = _toy_anchor(monkeypatch)
+    monkeypatch.setattr(fbi, "_ANCHOR_MAX_STEPS", 25)
+    monkeypatch.setattr(fbi, "_ANCHOR_FIRST_DAMPING", (0.25, 0.0625))
+    assert run()[1].certified
+    _, report = run(patient=False)
+    assert not report.certified and report.steps == 1 and report.attempts == 1
 
     run, state, *_ = _toy_anchor(monkeypatch, refine_tol=np.inf)
     anchored, report = run()
@@ -1068,6 +1186,14 @@ def test_free_boundary_current_gradient_matches_resolve_finite_difference():
     np.testing.assert_allclose(
         derivative, finite_difference, rtol=2.0e-2, atol=2.0e-4
     )
+
+    # What the adjoint holds fixed, the forward solve must hold too.
+    frozen = []
+    for sign in (1.0, -1.0):
+        saved = fbi._solve_status_fwd(params, current + sign * step, cfg)[1]
+        project = im._dof_projector(cfg.implicit, saved[3])
+        frozen.append(_flat(jax.tree.map(jnp.subtract, saved[2], project(saved[2]))))
+    np.testing.assert_array_equal(frozen[0], frozen[1])
 
 
 @pytest.mark.full
@@ -1238,7 +1364,7 @@ def test_free_boundary_pressure_gradient_is_certified_at_one_root():
 
 
 @pytest.mark.full
-def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
+def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient(monkeypatch):
     """Both adjoint solvers invert the same converged plasma-vacuum Jacobian.
 
     ``coupled_gcrot`` is matrix-free on the full coupled transpose;
@@ -1272,13 +1398,13 @@ def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
                 field, extcur=current),
             device="cpu")
 
-    def gradient(cfg):
+    def gradient(cfg, transform=lambda function: function):
         def objective(current):
             state, _, _, _ = solve_free_boundary_implicit_status(
                 params, current, cfg)
             return jnp.mean(state.R_cos[-1] ** 2 + state.Z_sin[-1] ** 2)
 
-        return np.asarray(jax.grad(objective)(field.extcur))
+        return np.asarray(transform(jax.grad(objective))(field.extcur))
 
     coupled_cfg, schur_cfg = configure("coupled_gcrot"), configure("boundary_schur")
     coupled = gradient(coupled_cfg)
@@ -1286,9 +1412,17 @@ def test_boundary_schur_adjoint_reproduces_the_coupled_gcrot_gradient():
     # second cold ladder would only add solver noise to it.
     fbi._FREE_HOT_CACHE[schur_cfg] = fbi._FREE_HOT_CACHE[coupled_cfg]
     schur = gradient(schur_cfg)
+    # Under jax.jit the pullback runs the same Schur lane, not staged GCROT.
+    lanes = []
+    host = fbi._host_boundary_schur_adjoint
+    monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint",
+                        lambda *a, **k: lanes.append(1) or host(*a, **k))
+    staged = gradient(schur_cfg, jax.jit)
 
     assert np.all(np.isfinite(coupled)) and np.max(np.abs(coupled)) > 0.0
     np.testing.assert_allclose(schur, coupled, rtol=2.0e-2, atol=1.0e-8)
+    assert lanes == [1]
+    np.testing.assert_allclose(staged, schur, rtol=1.0e-9, atol=0.0)
 
 
 @pytest.mark.full
@@ -1700,3 +1834,12 @@ def test_free_boundary_trial_state_is_anchored_on_the_coupled_root():
         assert again_status == 0
         for a, b in zip(jax.tree.leaves(again), jax.tree.leaves(state)):
             np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+@pytest.mark.parametrize("columns", [1, 7, 9, 10])
+def test_map_columns_matches_a_full_width_vmap(columns):
+    matrix = jnp.arange(4.0 * columns).reshape(4, columns)
+    apply = lambda column: jnp.outer(column, jnp.arange(1.0, 3.0))  # noqa: E731
+    mapped = fbi._map_columns(apply, matrix)
+    assert mapped.shape == (4, 2, columns)
+    assert jnp.array_equal(mapped, jax.vmap(apply, in_axes=-1, out_axes=-1)(matrix))
