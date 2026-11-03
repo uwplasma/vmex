@@ -53,8 +53,9 @@ NITER_ARRAY = np.array([5000])
 FTOL_ARRAY = np.array([1e-12])
 STAGE_FTOL = [FTOL_ARRAY] * len(MAX_MODES)
 
-# Stages that also minimize the smooth fast-ion proxy GammaC, its surfaces and weight:
-GAMMA_C = [False] * len(MAX_MODES)
+# Stages that also minimize the smooth fast-ion proxy GammaC, its surfaces and weight (at NFP 3
+# the last two stages take the DKX current from 330 kA without them to under 100 kA):
+GAMMA_C = [False] * (len(MAX_MODES) - 2) + [True] * 2
 GAMMA_C_SURFACES = tuple(SURFACES[1:])
 GAMMA_C_WEIGHT = 100.0
 
