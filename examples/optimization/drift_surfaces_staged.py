@@ -49,8 +49,8 @@ HELICITY = (1, 0)
 # alone; later stages hand the objective over to drift confinement.
 STAGES = [dict(max_mode=1, nfev=10, qs=1.0, drift=0.0),
           dict(max_mode=2, nfev=15, qs=1.0, drift=0.0),
-          dict(max_mode=2, nfev=15, qs=0.1, drift=1.0),
-          dict(max_mode=3, nfev=15, qs=0.0, drift=1.0)]
+          dict(max_mode=2, nfev=15, qs=1.0, drift=1.0),
+          dict(max_mode=3, nfev=15, qs=1.0, drift=1.0)]
 
 # Drift-orbit sampling: field lines, traced periods, quadrature, RK4 steps,
 # and a fixed dimensionless integration time (see DriftConfinementResidual):
@@ -132,7 +132,7 @@ def worst_orbit(equilibrium):
 
 
 report = opt.EquilibriumReporter(
-    ("QS total", qs.total, ".6e"), ("drift total", lambda e, c: drift.total(e, c), ".6e"), ("worst s_max", worst_orbit, ".4f"),
+    ("QS total", qs.total, ".6e"), ("drift total", lambda eq: drift.total(eq), ".6e"), ("worst s_max", worst_orbit, ".4f"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"))
 monitor = opt.OptimizationMonitor()
@@ -158,7 +158,7 @@ for number, stage_spec in enumerate(STAGES):
         inp, terms, max_mode=max_mode, use_ess=True, ess_alpha=ESS_ALPHA,
         restart_from=equilibrium, progress=True)
     monitor.problem = problem
-    stage = problem
+    stage = problem.subproblem(max_mode=max_mode, x=problem.x0)
     print(f"dof_names = {stage.dof_names}")
     step = PARAMETER_STEP * stage.scales
     result = least_squares(
