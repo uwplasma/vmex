@@ -802,3 +802,47 @@ shape derivatives, so even the smooth gradient is approximate. Check actual
 forward descent and sampling refinement for each configuration. The surrogate
 can underestimate shallow ripple wells; anneal ``temperature`` with a finer
 budget and report the independent hard value.
+
+DeltaRes
+~~~~~~~~
+
+:mod:`vmex.core.deltares` implements the shear-cancelled harmonic strength
+and radial reduction of `Labbate, Paul and Chambliss
+<https://arxiv.org/abs/2609.01890>`_.
+:func:`~vmex.core.deltares.deltares_from_maps` takes complete, matched
+full-bounce displacements and speed-normalized periods. The caller supplies
+well identity, signed flux, physical pitch and a common integration domain.
+Its default rotation is ``frequency_ratio``; ``mean_map`` is also available.
+
+:func:`~vmex.core.deltares.restricted_action_deltares_from_boozer` computes
+these quantities from both parities of a Boozer spectrum, using one complete
+well per eta and physical pitch node in a bounded field-line cell. It uses
+live bounce roots and a three-point radial action derivative. Extra, cut or
+unresolved wells invalidate the result. Mode sampling, field positivity,
+root accuracy and family-continuity checks are returned with the result;
+eta and quadrature convergence still require refinement. The default rotation
+is ``mean_map``. ``full_population`` is always false.
+
+Use ``canonical_flux_sign=+1`` with
+:func:`~vmex.core.omnigenity.boozer_spectrum_state`, whose flux is already
+canonical, and ``-1`` with raw VMEC ``Phi/(2*pi)``. Negative canonical flux
+stays negative. An extra sign flip reverses rotation but can leave a sum over
+symmetric signed resonances and its gradient unchanged.
+
+:func:`~vmex.core.deltares.streamed_restricted_action_deltares_from_boozer`
+uses a checkpointed pitch scan to reduce reverse-mode memory. It sums radial
+rows before squaring and rejects the whole band if any pitch fails.
+:func:`~vmex.core.deltares.pitch_band_phase_space_mass` independently integrates
+the unit-score pitch measure over all accessible segments, including cut and
+passing segments. Both reductions retain the paper's factor two; neither mass
+is a probability or a full-population coverage fraction.
+
+The loss is half the sum of squared deposited radial rows. An isolated unit
+crossing at cell fraction ``t`` gives ``((1-t)**2+t**2)/2``, so the loss varies
+between 1/4 and 1/2 with grid alignment even at fixed physical strength.
+Rational plateaus and resolved tangencies return NaN. Known-absent wells may
+be masked in the lower-level deposition; unresolved wells must not be masked.
+Boundary derivatives need ordinary converged equilibrium re-solves, and
+confinement predictions need independent orbit comparisons. For finite force
+error, those comparisons must retain actual curvature rather than infer it
+from grad-B drift.

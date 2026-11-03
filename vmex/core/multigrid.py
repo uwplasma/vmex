@@ -267,6 +267,7 @@ def solve_multigrid(
     verbose: bool = False,
     emit=emit_flushed,
     initial_state: SpectralState | None = None,
+    m1_gauge: SpectralState | None = None,
     restart_from: Any = None,
     time_step: float | None = None, tcon0: float | None = None,
     gamma: float | None = None, nstep: int | None = None,
@@ -392,10 +393,14 @@ def solve_multigrid(
     polish = _resolve_force_balance_polish(
         inp, None, polish_force_balance
     )
+    if m1_gauge is not None and polish is not False:
+        raise ValueError("m1_gauge cannot be combined with force-balance polishing")
     ns_arr = _vmec_ns_prefix(inp.ns_array if ns_array is None else ns_array)
     if ns_arr.size == 0:
         raise ValueError("ns_array has no positive stages")
     n_stages = int(ns_arr.size)
+    if m1_gauge is not None and n_stages != 1:
+        raise ValueError("m1_gauge currently requires a single-resolution solve")
 
     def _stage_values(values, default, dtype):
         arr = np.atleast_1d(np.asarray(
@@ -438,9 +443,11 @@ def solve_multigrid(
         resolution = resolution_from_input(inp, ns=nsval)
         stage_use_fft = _resolve_use_fft(use_fft, device, resolution)
         with device_context(device, resolution):
+            m1_gauge = _put_numeric_leaves(m1_gauge, _placement_device(device, resolution))
             rt = prepare_runtime(
                 inp, resolution, ftol=float(ftol_arr[igrid]),
                 max_iterations=int(niter_arr[igrid]), lconm1=lconm1,
+                m1_gauge=m1_gauge,
                 tcon0=tcon0, gamma=gamma,
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
@@ -548,6 +555,7 @@ def solve_multigrid(
                 verbose=verbose,
                 emit=emit,
                 initial_state=initial_state,
+                m1_gauge=m1_gauge,
                 time_step=time_step,
                 tcon0=tcon0,
                 gamma=gamma,
