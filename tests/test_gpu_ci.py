@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import faulthandler
 import os
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -582,7 +584,7 @@ def test_free_boundary_multigrid_auto_relocates_every_carry(monkeypatch):
     field = MgridField(
         *(jax.numpy.ones((1, kp, 2, 2)) for _ in range(3)),
         extcur=jax.numpy.ones(1), rmin=0.0, rmax=1.0,
-        zmin=-1.0, zmax=1.0, nfp=1,
+        zmin=-1.0, zmax=1.0, nfp=int(inp.nfp),  # read_mgrid rejects a table of another NFP
     )
     seen = []
 
@@ -862,6 +864,24 @@ def test_block_response_cpu_gpu_parity():
         np.testing.assert_allclose(
             pullback, reference[3], rtol=2e-9, atol=1e-12
         )
+
+
+@_requires_gpu
+def test_implicit_grad_on_explicit_gpu_does_not_deadlock():
+    """A GPU compile inside a GPU-dispatched callback hangs; the gradient must match CPU."""
+    faulthandler.dump_traceback_later(1800, exit=True)
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+
+    def gradient(device):
+        cfg = im.make_config(inp, ftol=1e-10, device=device)
+        objective = lambda p: jnp.sum(im.solve_implicit(p, cfg).R_cos[-1] ** 2)  # noqa: E731
+        return jax.grad(objective)(im.params_from_input(inp))
+
+    on_gpu, on_cpu = gradient(_gpu()), gradient(jax.devices("cpu")[0])
+    faulthandler.cancel_dump_traceback_later()
+    assert all(leaf.devices() == {_gpu()} for leaf in jax.tree.leaves(on_gpu))
+    for a, b in zip(jax.tree.leaves(on_gpu), jax.tree.leaves(on_cpu), strict=True):
+        np.testing.assert_allclose(a, b, rtol=1e-6, atol=1e-10)
 
 
 @_requires_gpu

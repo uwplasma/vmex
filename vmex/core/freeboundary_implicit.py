@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import warnings
+import weakref
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -35,8 +36,9 @@ from solvax import (
 )
 from solvax import gmres as _solvax_gmres
 
+from .._compat import require_x64
 from . import implicit as im
-from .device import AUTO, resolve_implicit_device
+from .device import AUTO, recommended_device, resolve_implicit_device
 from .freeboundary import (
     _edge_fourier,
     _presf_ns_scale,
@@ -52,8 +54,9 @@ from .solver import SpectralState, evaluate_forces
 
 Array = Any
 
-#: ``coupled_gcrot`` is the certified default; ``boundary_schur`` eliminates
-#: the radial bulk and assembles the edge system column by column;
+#: ``boundary_schur`` (the default) eliminates the radial bulk and assembles
+#: the edge system column by column; ``coupled_gcrot`` iterates the whole-state
+#: transpose;
 #: ``edge_response`` iterates the coupled transpose on a dense model of
 #: NESTOR.
 _ADJOINT_SOLVERS = ("boundary_schur", "coupled_gcrot", "edge_response")
@@ -70,10 +73,12 @@ class FreeBoundaryImplicitConfig:
 
     implicit: im.ImplicitConfig
     field_from_parameters: Callable[[Any], Any]
-    adjoint_solver: str = "coupled_gcrot"
+    adjoint_solver: str = "boundary_schur"
     adjoint_fail: str = "error"
     schur_probe_chunk_size: int = 1
     vacuum_program: Any = None
+    #: GPU sibling that ``device="auto"`` uses for eager calls.
+    concrete: Any = None
 
     @property
     def resolution(self):
@@ -92,7 +97,7 @@ def make_free_boundary_config(
     adjoint_maxiter: int = 300,
     adjoint_gcrot_m: int = 30,
     adjoint_gcrot_k: int = 5,
-    adjoint_solver: str = "coupled_gcrot",
+    adjoint_solver: str = "boundary_schur",
     adjoint_fail: str = "error",
     schur_probe_chunk_size: int = 1,
     field_from_parameters: Callable[[Any], Any] | None = None,
@@ -106,18 +111,31 @@ def make_free_boundary_config(
     smaller AD graph, pass ``field_from_parameters`` and then supply only the
     actual current/coil parameters to :func:`solve_free_boundary_implicit`.
     ``external_field`` here is the concrete reference used to fix resolution.
-    ``device="auto"`` uses the CPU for the coupled implicit response on an
-    accelerator host unless the process already pins JAX placement; pass an
-    explicit device to override that measured lower-memory default.
-    ``adjoint_solver="coupled_gcrot"`` is the certified default;
-    ``"boundary_schur"`` selects the advanced radial-elimination path, which
-    stays well conditioned on marginally converged roots where the coupled
-    Krylov solve stalls.  ``"edge_response"`` is the coupled Krylov solve
-    with NESTOR's response to the edge built once as a dense matrix instead
+    ``device="auto"`` on a GPU host, unless the process pins JAX placement,
+    runs eager values and gradients on the GPU when
+    :func:`~vmex.core.device.recommended_device` does and on the CPU otherwise;
+    under ``jax.jit``, which cannot move the host solve off a GPU, it stays on
+    the CPU.  Measured warm gradients run faster on the GPU from mpol=ntor=5,
+    ns=16 upward and match the CPU to 7e-10.  No memory estimate is made: a
+    solve or gradient that runs out of GPU memory warns and reruns on the CPU,
+    which that configuration keeps.  Pass ``device="cpu"`` for a few one-shot gradients,
+    which do not repay the GPU's slower first compile, or on a nearly full
+    shared GPU; ``device="gpu"`` forces the GPU outside ``jit`` and, under
+    ``jit``, warns and runs the host solve and adjoint on the CPU.
+    The default ``adjoint_solver="boundary_schur"`` eliminates the radial bulk
+    and certifies its answer on the exact coupled transpose, refining there if
+    it misses.  It needs no tuning.  The others are advanced settings:
+    ``"coupled_gcrot"`` is the matrix-free whole-state solve; set it only to
+    cross-check a suspect gradient, since it
+    costs 2-50x more on 3-D decks.  ``"edge_response"`` is the coupled Krylov
+    solve with NESTOR's response to the edge built once as a dense matrix instead
     of re-swept in reverse mode on every iteration: the matvec then costs no
     NESTOR call, the answer is certified on the exact coupled transpose, and
     a certificate that misses continues on that exact operator, so the lane
-    is never less accurate than the default -- only cheaper.
+    is never less accurate than ``"coupled_gcrot"`` -- only cheaper; it has no
+    measured advantage over the default.  ``schur_probe_chunk_size`` trades
+    memory for speed in the elimination; raise it only if edge assembly
+    dominates a profile and memory allows.
     ``adjoint_fail="best_effort"`` returns the stalled
     Krylov solution with a warning instead of raising, so one bad trial in an
     optimization is a poor search direction the line search rejects rather
@@ -151,6 +169,10 @@ def make_free_boundary_config(
         raise ValueError("free-boundary implicit differentiation requires LFREEB=T")
     resolution = free_boundary_resolution(inp, external_field, ns=ns)
     solve_device = resolve_implicit_device(device, resolution)
+    auto_gpu = None
+    if (device == AUTO and solve_device is not None and jax.default_backend() == "gpu"
+            and recommended_device(resolution) == "gpu"):
+        auto_gpu = jax.devices("gpu")[0]
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
@@ -176,7 +198,15 @@ def make_free_boundary_config(
         adjoint_fail=adjoint_fail,
         schur_probe_chunk_size=int(schur_probe_chunk_size),
     )
-    return dataclasses.replace(config, vacuum_program=_vacuum_program(config))
+    def with_vacuum(built):
+        return dataclasses.replace(built, vacuum_program=_vacuum_program(built))
+
+    built = with_vacuum(config)
+    if auto_gpu is None:
+        return built
+    sibling = with_vacuum(dataclasses.replace(config, implicit=dataclasses.replace(cfg, device=auto_gpu)))
+    _AUTO_OF[sibling] = built = dataclasses.replace(built, concrete=sibling)
+    return built
 
 
 def _vacuum_program(cfg: FreeBoundaryImplicitConfig):
@@ -504,7 +534,6 @@ def _host_solve_and_mask_impl(
         rt_mask = dataclasses.replace(
             rt, rcon0=rcon0, zcon0=zcon0, lfreeb=True,
             jmax=int(icfg.resolution.ns),
-            bsqvac_edge=jax.lax.stop_gradient(stage.vacuum.bsqvac),
             # Host value on purpose: this runtime only discovers which dofs
             # have structural force support, a discrete answer that no
             # derivative is taken through.  The adjoint lanes above use the
@@ -513,6 +542,14 @@ def _host_solve_and_mask_impl(
                 _presf_ns_scale(inp, int(icfg.resolution.ns))
             ),
         )
+        bsqvac = stage.vacuum.bsqvac
+        if bsqvac is None:
+            # A trial that ran out of iterations before fsq fell to the
+            # activation threshold (NCSX at nzeta = 6 < 2*ntor + 1 stalls
+            # at fsq 1.1e-3) never called NESTOR; evaluate it once here.
+            bsqvac = cfg.vacuum_program.bsq(state, rt_mask, field)
+        rt_mask = dataclasses.replace(
+            rt_mask, bsqvac_edge=jax.lax.stop_gradient(bsqvac))
         force = lambda x: evaluate_forces(x, rt_mask)[0]  # noqa: E731
         mask = im._dof_mask(
             state, rt_mask, icfg, evaluator=force, fixed_edge=False
@@ -623,6 +660,8 @@ def _host_solve_and_mask_status(cfg, params_np, field_parameters_np):
 
 
 def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
+    # Both callbacks declare float64 results; say why before JAX refuses them.
+    require_x64()
     rt = im._template_runtime(cfg.implicit)
     return jax.tree.map(
         lambda value: jax.ShapeDtypeStruct(value.shape, jnp.float64), rt.rcon0
@@ -633,27 +672,23 @@ def _baseline_struct(cfg: FreeBoundaryImplicitConfig):
 
 def _callback(params, field_parameters, cfg):
     rcon_struct, zcon_struct = _baseline_struct(cfg)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 def _callback_status(params, field_parameters, cfg):
     """Return the free-boundary state, linearization data, and solve status."""
     rcon_struct, zcon_struct = _baseline_struct(cfg)
     scalar = jax.ShapeDtypeStruct((), jnp.float64)
-    return jax.pure_callback(
-        im._host_callable(_host_solve_and_mask_status, cfg),
+    return im._host_call(
+        cfg.implicit, im._host_callable(_host_solve_and_mask_status, cfg),
         (im._state_struct(cfg.implicit), im._state_struct(cfg.implicit),
          rcon_struct, zcon_struct, jax.ShapeDtypeStruct((), jnp.int32),
          scalar, scalar),
-        params, field_parameters,
-        sharding=im._callback_sharding(cfg.implicit),
-    )
+        params, field_parameters)
 
 
 @functools.partial(jax.custom_vjp, nondiff_argnums=(2,))
@@ -739,6 +774,17 @@ def _solve_fwd(params, field_parameters, cfg):
 
 
 def _solve_bwd(cfg, saved, state_bar):
+    try:
+        return _placed_bwd(cfg, saved, state_bar)
+    except Exception as error:
+        auto = _AUTO_OF.get(cfg)
+        if not _exhausted(error, auto, "gradient"):
+            raise
+    # The CPU config re-pins the saved arrays; the cotangents return to the GPU.
+    return jax.device_put(_placed_bwd(auto, saved, state_bar), cfg.implicit.device)
+
+
+def _placed_bwd(cfg, saved, state_bar):
     icfg = cfg.implicit
     with im._device_context(icfg), im._forward_trace_context():
         # Committed like the forward anchor's arguments, so its lanes are reused.
@@ -758,33 +804,27 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     traced = any(
         isinstance(value, jax.core.Tracer) for value in jax.tree.leaves(rhs)
     )
-    if traced:
+    if cfg.adjoint_solver == "boundary_schur":
+        # A host lane: under an outer jax.jit it runs behind a pure_callback
+        # on the concrete saved root, so jit and eager take the same solver.
+        args = (z_star, params, field_parameters, frozen, rcon0, zcon0, mask, rhs)
+        lam = im._host_call(
+            cfg.implicit, im._host_callable(_host_schur_lane, cfg),
+            jax.tree.map(lambda leaf: jax.ShapeDtypeStruct(
+                leaf.shape, leaf.dtype), rhs), *args,
+        ) if traced else _host_boundary_schur_adjoint(
+            cfg, *args, fail=cfg.adjoint_fail)
+        residual = _projected_residual(cfg, mask, formulation="raw")
+    elif traced:
         # An outer jax.jit needs a staged Krylov loop. Ordinary SciPy/JAXopt
         # drivers call the concrete lane below, which compiles only one
         # transpose matvec and has a much smaller cold memory peak.
-        if cfg.adjoint_solver == "boundary_schur":
-            warnings.warn(
-                "adjoint_solver='boundary_schur' is a host lane and is not "
-                "available under jax.jit; this pullback uses the staged "
-                "coupled GCROT solve instead. That is a different solver, so "
-                "the gradient agrees only to the Krylov tolerance, and it is "
-                "the slower of the two -- measured on the free-boundary "
-                "single-stage deck at ns = 25, one warm value-and-gradient "
-                "costs 5.1 s through the Schur lane against 38.6 s staged. "
-                "Call the objective eagerly to keep the solver you asked for.",
-                RuntimeWarning, stacklevel=2)
         _, state_pullback = jax.vjp(
             lambda z: residual(
                 z, params, field_parameters, frozen, rcon0, zcon0), z_star
         )
         lam, _ = im._adjoint_solve_gcrot(
             lambda cotangent: state_pullback(cotangent)[0], rhs, cfg.implicit)
-    elif cfg.adjoint_solver == "boundary_schur":
-        lam = _host_boundary_schur_adjoint(
-            cfg, z_star, params, field_parameters, frozen, rcon0, zcon0,
-            mask, rhs, fail=cfg.adjoint_fail,
-        )
-        residual = _projected_residual(cfg, mask, formulation="raw")
     elif cfg.adjoint_solver == "edge_response":
         response = _edge_response(
             cfg, params, field_parameters, frozen, rcon0, zcon0)
@@ -979,6 +1019,10 @@ def _edge_basis(cfg: FreeBoundaryImplicitConfig, dof_mask, packed_mask, dtype):
     return jnp.asarray(np.stack(columns, axis=1), dtype=dtype)
 
 
+#: Exact-transpose refinement steps of the Schur adjoint before its fallback.
+_SCHUR_REFINEMENTS = 3
+
+
 def _balanced_dense_solver(schur):
     """Two-sided balanced dense solve of one small edge Schur matrix."""
     tiny = np.finfo(schur.dtype).tiny
@@ -987,12 +1031,18 @@ def _balanced_dense_solver(schur):
     column_scale = 1.0 / np.maximum(np.max(np.abs(row_scaled), axis=0), tiny)
     balanced = row_scaled * column_scale[None, :]
     condition = np.linalg.cond(balanced)
+    # One factorization on JAX's LU: NumPy's threaded LAPACK refactored on
+    # every call and spun its pool, 3 s and 40 CPU-s per 143x143 solve on a
+    # busy node against about 1 ms here.
+    factors = (jax.scipy.linalg.lu_factor(jnp.asarray(balanced))
+               if np.isfinite(condition)
+               and condition < 1.0 / np.finfo(schur.dtype).eps else None)
 
     def solve_reduced(value):
         scaled_rhs = row_scale * value
-        if np.isfinite(condition) and condition < 1.0 / np.finfo(
-                schur.dtype).eps:
-            balanced_solution = np.linalg.solve(balanced, scaled_rhs)
+        if factors is not None:
+            balanced_solution = np.asarray(jax.scipy.linalg.lu_solve(
+                factors, jnp.asarray(scaled_rhs)))
         else:
             # The edge system can inherit redundant m=1 directions. A
             # rank-revealing solve avoids amplifying them; the exact
@@ -1045,6 +1095,24 @@ def _banded_bulk_transpose_solver(lower, diagonal, upper, row_scale,
         return np.moveaxis(solved.reshape(ns, size, -1), -1, 0) * rows
 
     return solve
+
+
+def _host_schur_lane(cfg, *args):
+    """``pure_callback`` body of the Schur adjoint under an outer ``jax.jit``.
+
+    A typed failure is relayed like the forward solve's: kept in
+    ``implicit._HOST_ERROR`` behind a short sentinel naming its class.
+    """
+    im._HOST_ERROR.clear()
+    try:
+        with im._device_context(cfg.implicit):
+            args = im._device_pin(cfg.implicit, jax.tree.map(jnp.asarray, args))
+            return jax.tree.map(np.asarray, _host_boundary_schur_adjoint(
+                cfg, *args, fail=cfg.adjoint_fail))
+    except VmecError as exc:
+        im._HOST_ERROR.append(exc)
+        raise RuntimeError(f"boundary-Schur adjoint failed with {type(exc).__name__}: "
+                           f"{str(exc)[:200]}") from None
 
 
 def _host_boundary_schur_adjoint(
@@ -1125,33 +1193,52 @@ def _host_boundary_schur_adjoint(
         return np.asarray(edge_values) + np.asarray(_edge_rows(
             sparse_inverse_packed(packed), mask, edge_basis, cfg=cfg))
 
-    base = sparse_inverse(rhs)
-    edge_rhs = np.asarray(_edge_rows_of_tree(base, mask, edge_basis, cfg=cfg))
-
-    identity = np.eye(nedge, dtype=np.asarray(edge_rhs).dtype)
+    identity = np.eye(nedge, dtype=np.dtype(dtype))
     schur = probe(identity, edge_pullback).T
     solve_reduced, condition = _balanced_dense_solver(schur)
-    edge_solution = solve_reduced(edge_rhs)
-    # Dense iterative refinement is cheap at edge size and recovers the
-    # residual digits lost to the raw near-axis scaling.
-    for _ in range(3):
-        edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
     if im._adjoint_debug_enabled():
         print(f"[vmex adjoint] balanced Schur condition={condition:.3e}")
 
-    correction_rows = _edge_probe_columns(
-        jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
-        lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
-        chunk=chunk)[0]
-    correction = _unpack_projected(
-        sparse_inverse_packed(correction_rows), mask, cfg=cfg)
-    solution = jax.tree.map(jnp.subtract, base, correction)
-    defect = jax.tree.map(
-        jnp.subtract, rhs, _apply_pullback(coupled_pullback, solution))
-    residual_norm = float(im._tree_norm(defect))
+    def schur_inverse(value):
+        """The reduced solve: exact on the response-linearized transpose."""
+        base = sparse_inverse(value)
+        edge_rhs = np.asarray(_edge_rows_of_tree(
+            base, mask, edge_basis, cfg=cfg))
+        edge_solution = solve_reduced(edge_rhs)
+        # Dense iterative refinement is cheap at edge size and recovers the
+        # residual digits lost to the raw near-axis scaling.
+        for _ in range(3):
+            edge_solution += solve_reduced(edge_rhs - schur @ edge_solution)
+        correction_rows = _edge_probe_columns(
+            jnp.asarray(np.atleast_2d(edge_solution), dtype), edge_pullback,
+            lower_blocks, diagonal, upper_blocks, mask, edge_basis, cfg=cfg,
+            chunk=chunk)[0]
+        return jax.tree.map(jnp.subtract, base, _unpack_projected(
+            jnp.asarray(sparse_inverse_packed(
+                np.asarray(correction_rows))), mask, cfg=cfg))
+
     rhs_norm = float(im._tree_norm(rhs))
     tolerance = float(im._adjoint_acceptance(icfg, rhs_norm))
-    if not np.isfinite(residual_norm) or residual_norm > tolerance:
+    # A miss is a few digits at most, 4e-7 against 1e-7 at 8/8/31: refine on
+    # the exact coupled transpose, about 0.3 s a step, before the cold Krylov
+    # fallback, which took 300 s there.  This is a stationary iteration, so it
+    # contracts only where the reduced solve is a good inverse: a step that
+    # does not lower the exact residual ends it, and the best iterate is kept.
+    trial, solution, residual_norm = schur_inverse(rhs), None, np.inf
+    for step in range(_SCHUR_REFINEMENTS + 1):
+        defect = jax.tree.map(
+            jnp.subtract, rhs, _apply_pullback(coupled_pullback, trial))
+        trial_norm = float(im._tree_norm(defect))
+        if im._adjoint_debug_enabled():
+            print(f"[vmex adjoint] Schur certificate step={step} "
+                  f"residual={trial_norm:.3e} tolerance={tolerance:.3e}")
+        if not trial_norm < residual_norm:
+            break
+        solution, residual_norm = trial, trial_norm
+        if residual_norm <= tolerance or step == _SCHUR_REFINEMENTS:
+            break
+        trial = jax.tree.map(jnp.add, trial, schur_inverse(defect))
+    if not residual_norm <= tolerance:
         # The raw near-axis scaling can leave the reduced solve a few ulps
         # outside the strict certificate. Continue from it with the original
         # coupled operator; this changes no mathematics and usually needs only
@@ -1801,6 +1888,86 @@ def _phiedge_root_bwd(residual, grads, phiedge_bar):
 
 solve_free_boundary_implicit.defvjp(_solve_fwd, _solve_bwd)
 solve_free_boundary_implicit_status.defvjp(_solve_status_fwd, _solve_status_bwd)
+
+
+def _auto_placed(solve):
+    """Run ``device="auto"``'s GPU sibling for eager calls, gradients included.
+
+    Under ``jax.jit`` or ``jax.vmap`` the host solve cannot leave the GPU, so
+    it stays on the CPU.  ``stop_gradient`` returns an AD tracer's concrete
+    primal but keeps those tracers, which tells the cases apart with public
+    API alone; should a JAX release keep AD tracers too, calls fall back to
+    the CPU, never to a hang.  Whether a solve fits is left to the allocator,
+    the only party that sees XLA's real buffers, the device and other
+    processes on it (see :func:`_exhausted`).
+    """
+    @functools.wraps(solve)
+    def placed(params, field_parameters, cfg):
+        traced = any(isinstance(jax.lax.stop_gradient(leaf), jax.core.Tracer)
+                     for leaf in jax.tree.leaves((params, field_parameters))
+                     if isinstance(leaf, jax.core.Tracer))
+        if traced:
+            return solve(params, field_parameters, _traced_config(cfg))
+        if cfg.concrete is None or cfg in _GPU_EXHAUSTED:
+            return solve(params, field_parameters, cfg)
+        try:
+            return solve(params, field_parameters, cfg.concrete)
+        except Exception as error:
+            if not _exhausted(error, cfg, "solve"):
+                raise
+        return solve(params, field_parameters, cfg)
+    return placed
+
+
+def _traced_config(cfg):
+    """``cfg`` for a ``jax.jit`` trace, or a CPU copy of an explicit GPU config.
+
+    Compiling for the GPU from a host callback that a GPU computation waits on
+    deadlocks, so under ``jit`` an explicit GPU device runs its host solve and
+    adjoint on the CPU, as ``device="auto"`` does there.  The copy is cached:
+    it is a jit key and keys the hot-restart cache.
+    """
+    device = getattr(getattr(cfg, "implicit", None), "device", None)
+    if getattr(device, "platform", "cpu") == "cpu" or jax.default_backend() != device.platform:
+        return cfg
+    if cfg not in _CPU_OF:
+        warnings.warn("device='gpu' under jax.jit: the free-boundary host solve and adjoint run on "
+                      "the CPU, since compiling for the GPU inside a jitted GPU computation "
+                      "deadlocks; call the objective eagerly to keep the GPU.",
+                      RuntimeWarning, stacklevel=4)
+        cpu = dataclasses.replace(cfg, implicit=dataclasses.replace(
+            cfg.implicit, device=jax.devices("cpu")[0]))
+        with im._concrete_build():
+            _CPU_OF[cfg] = dataclasses.replace(cpu, vacuum_program=_vacuum_program(cpu))
+    return _CPU_OF[cfg]
+
+
+def _exhausted(error, auto, stage) -> bool:
+    """Whether ``error`` is ``auto``'s GPU running out of memory; if so it keeps the CPU.
+
+    XLA raises ``RESOURCE_EXHAUSTED`` directly or inside a host callback's
+    error.  The forward solve and the gradient both fall back, because the
+    gradient's first-call compiles can raise the peak above the forward's.
+    """
+    if auto is None or "RESOURCE_EXHAUSTED" not in str(error):
+        return False
+    warnings.warn(f"device='auto': the free-boundary {stage} ran out of GPU memory and reruns on the "
+                  "CPU, which this configuration keeps from now on.", RuntimeWarning, stacklevel=3)
+    _GPU_EXHAUSTED.add(auto)
+    return True
+
+
+# Weak, so configs a long scan or optimization drops are freed with their
+# vacuum programs; the auto config holds its sibling, so the value is weak.
+_GPU_EXHAUSTED: weakref.WeakSet[FreeBoundaryImplicitConfig] = weakref.WeakSet()
+_CPU_OF: weakref.WeakKeyDictionary[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = (
+    weakref.WeakKeyDictionary())
+#: The ``device="auto"`` config of each GPU sibling, for the gradient's fallback.
+_AUTO_OF: weakref.WeakValueDictionary[FreeBoundaryImplicitConfig, FreeBoundaryImplicitConfig] = (
+    weakref.WeakValueDictionary())
+
+solve_free_boundary_implicit = _auto_placed(solve_free_boundary_implicit)
+solve_free_boundary_implicit_status = _auto_placed(solve_free_boundary_implicit_status)
 phiedge_root.defvjp(_phiedge_root_fwd, _phiedge_root_bwd)
 
 
