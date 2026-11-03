@@ -45,13 +45,25 @@ key is either implemented or raises an error that names it:
      - Implemented; same meaning as the INDATA name.
    * - ``backup_evaluated_state``, ``return_outputs_even_if_not_converged``
      - Accepted with any value; VMEX always returns its final state.
-   * - ``mpol_geometry``, ``ntor_geometry``, ``vacuum_mpol``, ``vacuum_ntor``,
-       ``signgs``, ``iteration_style``, ``lgiveup``, ``fgiveup``, ``lbsubs``,
-       ``lambda_preconditioner_scale``,
-       ``lambda_precondition_checkerboard_terms``, ``always_fix_m1_gauge``
-     - Accepted at the default only (``-1``/``0`` sizes follow ``mpol``/``ntor``,
-       ``signgs=-1``, ``vmec_8_52``); any other value raises
-       ``UnsupportedInputModeError``.
+   * - ``lgiveup``, ``fgiveup``
+     - Implemented (also INDATA ``LGIVEUP``/``FGIVEUP``): the ladder ends after
+       a stage that leaves a residual above ``fgiveup * ftol``, as in VMEC2000.
+   * - ``lambda_precondition_checkerboard_terms``
+     - Implemented: a value ``>= 0`` is the radial ``m = 0`` lambda floor
+       (``VmecInput.lambda_m0_floor``, 3-D decks); a negative value keeps the
+       diagonal preconditioner.
+   * - ``mpol_geometry``, ``ntor_geometry``
+     - Implemented when ``< 0`` or at least ``mpol``/``ntor``; a smaller value
+       (R and Z at reduced resolution, lambda at full resolution) raises, since
+       VMEX uses one resolution for both.
+   * - ``signgs``, ``iteration_style``, ``lbsubs``, ``vacuum_mpol``,
+       ``vacuum_ntor``, ``lambda_preconditioner_scale``, ``always_fix_m1_gauge``
+     - Default only (``-1``, ``vmec_8_52``, ``false``, ``0``, ``0.5``,
+       ``false``); other values raise ``UnsupportedInputModeError``.  VMEX
+       fixes the Jacobian sign at ``-1`` (the boundary is flipped), has only
+       the VMEC 8.52 iteration and lambda damping, computes the wout ``B_s``
+       one way, ties the NESTOR resolution to ``mpol + 1``/``ntor``, and zeroes
+       the constrained m = 1 force by the VMEC 8.52 rule.
    * - ``free_boundary_method`` other than ``nestor``, any unknown key
      - Raises an error naming the key.
 
