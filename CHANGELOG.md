@@ -7,7 +7,6 @@ record under `benchmarks/` names the revision it was measured at.
 ## Unreleased
 
 - `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
-- Fix constructed-QI first-wall interpolation under a shifted toroidal origin.
 
 ## 0.12.0 - 2026-10-21
 
