@@ -428,8 +428,17 @@ Axis and boundary
      - Asymmetric boundary partners (``LASYM = T``).
    * - ``TVOLUME`` / ``LVOLUME_RFIX``
      - —
-     - rejected when active
-     - Target-volume rescaling (``RESCALE_BOUNDARY``) is not ported.
+     - implemented
+     - Rescale the boundary to enclose ``TVOLUME`` [m^3] before the solve;
+       ``LVOLUME_RFIX = T`` holds the ``m = 0`` harmonics and scales only the
+       minor radius.  VMEX solves the volume exactly where VMEC2000 uses a
+       Pappus estimate, and the rescaling is differentiable, so an optimizer
+       cannot trade plasma size for beta.  ``vmex.boundary_volume`` gives
+       the seed volume; the finite-beta optimization examples hold it.  As in
+       VMEC2000 the rescaling is ignored for free-boundary runs, where the coils
+       set the size.  The overall scale of the rescaled harmonics becomes a null
+       direction of the raw boundary coefficients; ``scale_input`` scales the
+       target by ``r_scale**3``.
 
 Free boundary
 ~~~~~~~~~~~~~
