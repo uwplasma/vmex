@@ -558,6 +558,17 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
+    # Released gauge entries (ntor = 0, lasym n = 0) have no equation at the
+    # root; hold them at the one reference, as the adjoint does.  The m=1
+    # family proper comes from p (im._held).
+    project = im._dof_projector(icfg, jax.tree.map(jnp.asarray, mask))
+
+    def held_directions(solved):
+        ref = reference.result.state
+        return im._held(jax.tree.map(lambda a, b, c: a + b - c, project(solved), ref, project(ref)), rt)
+
+    state = held_directions(state)
+
     # Anchor a certifiable state on the coupled root the adjoint linearizes,
     # so the value, the objective's cotangent and the linearization all read
     # the same point (see _anchor_root).  An uncertifiable solve is never
@@ -575,7 +586,7 @@ def _host_solve_and_mask_impl(
                 # Outside Newton's basin: descend closer, from where it stopped.
                 stage = solve(**_continuation(stage), ftol=factor * icfg.ftol,
                               error_on_no_convergence=False)
-                state, rcon0, zcon0 = stage.result.state, stage.rcon0, stage.zcon0
+                state, rcon0, zcon0 = held_directions(stage.result.state), stage.rcon0, stage.zcon0
                 state, report = _anchor_root(
                     cfg, params, field_parameters, state, mask, rcon0, zcon0)
         if error_on_no_convergence and not report.certified:
