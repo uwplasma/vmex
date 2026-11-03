@@ -593,11 +593,17 @@ optimization. CPU and GPU performance depend on resolution and workload; the dat
 in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
 and the [benchmark records](benchmarks/).
 
+Optimizations need no worker settings. Finite-difference probes already use every
+available CPU, and an exact-Jacobian run measures no faster on 36 cores than on 1, so
+it stays one process. Independent starts on every core are an
+[advanced option](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html#optimizations-on-a-full-node).
+
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
 baseline. Set worker and device budgets with the
-[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
-kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html).
+
+Defaults for CPU, GPU and whole nodes, and when to change them: [running on CPU, GPU and whole nodes](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html#running-on-cpu-gpu-and-whole-nodes).
 
 ## Running the examples
 

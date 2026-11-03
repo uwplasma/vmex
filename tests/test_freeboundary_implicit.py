@@ -951,6 +951,21 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         probe_chunk_size=fbi._bulk_probe_chunk(cfg, mask))
     factors = fbi._anchor_factor(lower, diagonal, upper, row_scale,
                                  column_scale)
+    # The Schur adjoint's bulk solve applies A^-T for these raw blocks.
+    blocks = np.zeros((ns, ns) + diagonal.shape[1:])
+    for j in range(ns):
+        blocks[j, j] = diagonal[j]
+        if j:
+            blocks[j, j - 1], blocks[j - 1, j] = lower[j], upper[j - 1]
+    dense = np.moveaxis(blocks, 2, 1).reshape(row_scale.size, -1)
+    rhs = np.random.default_rng(0).standard_normal((2,) + row_scale.shape)
+    solved = fbi._banded_bulk_transpose_solver(
+        lower, diagonal, upper, row_scale, column_scale)(rhs).reshape(2, -1)
+    np.testing.assert_allclose(solved @ dense, rhs.reshape(2, -1),
+                               atol=1.0e-9 * np.abs(rhs).max())
+    with pytest.raises(np.linalg.LinAlgError, match="singular"):
+        fbi._banded_bulk_transpose_solver(
+            0 * lower, 0 * diagonal, 0 * upper, row_scale, column_scale)
     response = fbi._edge_response(cfg, params, current, state, rcon0, zcon0)
     force = fbi._anchor_raw_residual(z, *lane, cfg=cfg)
     coupling = fbi._anchor_coupling(
