@@ -4,12 +4,11 @@
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number, exactly as in
 ``QA_optimization.py``, with quasisymmetry replaced by drift confinement. For
-fixed physical pitches, :class:`~vmex.core.maxj.DriftConfinementResidual`
-estimates how far each contour of the second adiabatic invariant ``J``, a
-drift surface, strays radially from the flux surface it starts on, and
-penalizes every excursion that would carry it past ``S_LIMIT``. Orbits
-launched on a few surfaces are integrated alongside and reported as the
-worst radius they reach. No symmetry is
+six physical pitches across the trapped window,
+:class:`~vmex.core.maxj.DriftConfinementResidual` launches bounce-centre
+orbits on three surfaces and eight field-line labels and penalizes how far
+each drift surface reaches toward the LCFS (weighted mean reported as
+``Gamma_W``). A quasisymmetry term warms the start and is then weakened. No symmetry is
 imposed. VMEX supplies the exact Jacobian.
 """
 
@@ -37,9 +36,8 @@ SEED_PERTURBATION = 0.12
 # orbits, trapping depths (shallowest to deepest common well), and the radius
 # every orbit must close inside:
 SURFACES = np.linspace(0.1, 1.0, 10)
-START_RADII = (0.3, 0.5, 0.7)
-TRAPPING_DEPTHS = (0.25, 0.5, 0.8)
-S_LIMIT = 0.9
+START_RADII = (0.15, 0.25, 0.4)
+TRAPPING_DEPTHS = (0.1, 0.25, 0.4, 0.55, 0.7, 0.85)
 
 # Quasisymmetry helicity (m, n) of the warm-start stage: (1, 0) QA, (1, NFP) QH:
 HELICITY = (1, -1)
@@ -49,14 +47,18 @@ HELICITY = (1, -1)
 # alone; later stages hand the objective over to drift confinement.
 STAGES = [dict(max_mode=1, nfev=10, qs=1.0, drift=0.0),
           dict(max_mode=2, nfev=15, qs=1.0, drift=0.0),
-          dict(max_mode=2, nfev=15, qs=1.0, drift=1.0),
-          dict(max_mode=3, nfev=15, qs=1.0, drift=1.0)]
+          dict(max_mode=2, nfev=15, qs=0.1, drift=1.0),
+          dict(max_mode=3, nfev=15, qs=0.1, drift=1.0)]
 
 # Drift-orbit sampling: field lines, traced periods, quadrature, RK4 steps,
 # and a fixed dimensionless integration time (see DriftConfinementResidual):
-DRIFT_OPTIONS = dict(nalpha=16, points_per_period=48, num_periods=16,
-                     max_wells=40, quadrature_order=24, nsteps=256, t_final=300.0)
+DRIFT_OPTIONS = dict(nalpha=32, points_per_period=48, num_periods=16,
+                     max_wells=40, quadrature_order=24, nsteps=512, t_final=4000.0)
 BOOZER_MODES = 10
+
+# Orbit-reach rows are chaotic in the boundary: cap each Jacobian row's
+# response over one parameter step at this size.
+JAC_ROW_CAP = 0.5
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -118,21 +120,20 @@ def make_drift(equilibrium):
         equilibrium.solution, equilibrium.solver_context, SURFACES, TRAPPING_DEPTHS,
         nalpha=DRIFT_OPTIONS["nalpha"], points_per_period=DRIFT_OPTIONS["points_per_period"],
         num_periods=DRIFT_OPTIONS["num_periods"]))
-    return DriftConfinementResidual(SURFACES, pitch, START_RADII, s_limit=S_LIMIT,
+    return DriftConfinementResidual(SURFACES, pitch, START_RADII,
                                     mboz=BOOZER_MODES, nboz=BOOZER_MODES, **DRIFT_OPTIONS)
 
 
 drift, drift_ready = make_drift(equilibrium), False
 
 
-def worst_orbit(equilibrium):
-    """Largest radius any sampled drift orbit reaches."""
-    return float(jnp.nanmax(drift.compute_state(
-        equilibrium.state, equilibrium.runtime)["s_max"]))
+def gamma_w(equilibrium):
+    """Weighted mean reach of the sampled drift orbits, 0 when all stay put."""
+    return float(drift.compute_state(equilibrium.state, equilibrium.runtime)["gamma_w"])
 
 
 report = opt.EquilibriumReporter(
-    ("QS total", qs.total, ".6e"), ("drift total", lambda eq: drift.total(eq), ".6e"), ("worst s_max", worst_orbit, ".4f"),
+    ("QS total", qs.total, ".6e"), ("drift total", lambda eq: drift.total(eq), ".6e"), ("Gamma_W", gamma_w, ".4f"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"))
 monitor = opt.OptimizationMonitor()
@@ -161,8 +162,12 @@ for number, stage_spec in enumerate(STAGES):
     stage = problem.subproblem(max_mode=max_mode, x=problem.x0)
     print(f"dof_names = {stage.dof_names}")
     step = PARAMETER_STEP * stage.scales
+    def capped_jac(x, stage=stage, step=step):
+        J = np.nan_to_num(np.asarray(stage.residual_jac(x)), nan=0.0, posinf=0.0, neginf=0.0)
+        scale = np.maximum(np.linalg.norm(J * step, axis=1) / JAC_ROW_CAP, 1.0)
+        return J / scale[:, None]
     result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
+        stage.residual, stage.x0, jac=capped_jac,
         x_scale=step, max_nfev=max_nfev,
         bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
                 stage.x0 + MAX_PARAMETER_CHANGE * step),
