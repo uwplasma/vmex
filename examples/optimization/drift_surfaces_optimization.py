@@ -54,6 +54,7 @@ MAX_NFEV = [10, 15]
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
+MIRROR_LIMIT = 0.25               # (Bmax - Bmin)/(Bmax + Bmin) on the LCFS
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
@@ -100,6 +101,13 @@ def iota_floor(equilibrium_state, solver_context):
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 
+def mirror_excess(equilibrium_state, solver_context):
+    """Hinge on the LCFS mirror ratio. A strong mirror can empty the sampled
+    wells and close the drift surfaces of the few particles still trapped,
+    while tracing loses most of the others."""
+    return jnp.maximum(opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
+
+
 # One physical lambda must describe the same particles on every radius and
 # field-line label, so the pitches are chosen once, on the seed, and held fixed.
 pitch = np.asarray(common_trapped_pitches_state(
@@ -115,6 +123,7 @@ objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (iota_floor, 0.0, 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
+    (mirror_excess, 0.0, 10.0),
 ]
 
 
@@ -126,7 +135,7 @@ def gamma_w(equilibrium):
 report = opt.EquilibriumReporter(
     ("drift total", drift.total, ".6e"), ("Gamma_W", gamma_w, ".4f"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
-    ("magnetic well", opt.magnetic_well, ".4f"))
+    ("magnetic well", opt.magnetic_well, ".4f"), ("mirror", opt.mirror_ratio, ".4f"))
 monitor = opt.OptimizationMonitor()
 report("seed", equilibrium)
 
