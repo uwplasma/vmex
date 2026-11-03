@@ -18,8 +18,10 @@ from vmex.core.multigrid import solve_free_boundary_multigrid, solve_multigrid
 from vmex.core.postprocess import full_mesh_from_half
 from vmex.core.scaling import (
     aries_cs_scales,
+    axis_field,
     b00_axis,
     input_minor_radius,
+    match_b0,
     probe_input,
     scale_input,
     scale_mgrid,
@@ -168,6 +170,38 @@ def test_scale_wout_commutes_with_finite_beta_solve(finite_beta_similarity):
     _assert_pressure_echo(
         solved_scaled_input, scale_input(inp, b_scale=2.3, r_scale=1.7)
     )
+
+
+def test_adiabatic_pressure_scales_as_b_to_two_minus_gamma():
+    """``GAMMA != 0`` makes the pressure profile a mass: PRES_SCALE ~ B**(2-gamma)."""
+    inp = VmecInput.from_file(DATA / "input.shaped_tokamak_pressure")
+    inp = dataclasses.replace(
+        inp,
+        gamma=1.4,
+        ns_array=np.array([9]),
+        ftol_array=np.array([1e-12]),
+        niter_array=np.array([3000]),
+    )
+    b, r = 1.5, 1.3
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    scaled_input = scale_input(inp, b_scale=b, r_scale=r)
+    assert scaled_input.pres_scale == pytest.approx(inp.pres_scale * b**0.6)
+    scaled_wout = scale_wout(original, b_scale=b, r_scale=r)
+    _assert_wout_similarity(run(scaled_input), scaled_wout)
+    # The echoed profile re-runs with PRES_SCALE = 1, so it carries the same factor.
+    np.testing.assert_allclose(scaled_wout.am, b**0.6 * original.am)
+    knots = dataclasses.replace(original, am_aux_f=np.ones(3))
+    np.testing.assert_allclose(scale_wout(knots, b_scale=b).am_aux_f, b**0.6)
 
 
 def test_scale_wout_keeps_pressure_coefficients_consistent_with_presf(
@@ -584,3 +618,88 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
     )
     assert abs(scaled_wout.volavgB / 5.8646 - 1.0) <= 2.0 * declared_error
     assert scaled_wout.Aminor_p == pytest.approx(1.7044, rel=2e-12)
+
+
+@pytest.mark.parametrize("name, ns", [
+    ("input.circular_tokamak", [9, 13]),      # AM = 0: V = 2 pi^2 R0 a^2 = 48 pi^2 exactly
+    ("input.solovev_analytical", [15, 21]),   # finite beta and toroidal current
+    ("input.nfp2_QA_finite_beta", [5, 7]),     # 3D, finite beta
+])
+def test_tvolume_run_is_the_dilation_of_the_unscaled_run(name, ns):
+    """A boundary dilated by lambda is the boundary rescaled to TVOLUME = lambda^3 V.  With
+    B -> B / lambda^2 (phiedge fixed, p ~ B^2, I ~ B R) the equilibrium is self-similar:
+    iota, beta and the aspect ratio are unchanged and the volume is the target.  The deck
+    below keeps the unscaled boundary and axis, so only TVOLUME carries the dilation."""
+    base = VmecInput.from_file(DATA / name)
+    base = dataclasses.replace(base, ns_array=np.array(ns), ftol_array=np.full(2, 1e-11),
+                               niter_array=np.full(2, 4000))
+    lam = 1.4
+
+    def solve(deck):
+        result = solve_multigrid(deck, verbose=False, device="cpu")
+        assert result.converged
+        return wout_from_state(inp=deck, state=result.state, fsqr=float(result.fsqr),
+                               fsqz=float(result.fsqz), fsql=float(result.fsql),
+                               niter=int(result.iterations), converged=True)
+
+    ref = solve(base)
+    if name.endswith("circular_tokamak"):
+        assert ref.volume_p == pytest.approx(48 * np.pi**2, rel=1e-12)
+    dilated = dataclasses.replace(
+        scale_input(base, b_scale=lam**-2, r_scale=lam), rbc=base.rbc, rbs=base.rbs,
+        zbc=base.zbc, zbs=base.zbs, raxis_c=base.raxis_c, raxis_s=base.raxis_s,
+        zaxis_c=base.zaxis_c, zaxis_s=base.zaxis_s, tvolume=lam**3 * ref.volume_p)
+    got = solve(dilated)
+    assert got.volume_p == pytest.approx(lam**3 * ref.volume_p, rel=1e-12)
+    np.testing.assert_allclose(got.iotaf, ref.iotaf, rtol=0.0, atol=1e-8)
+    for key in ("betatotal", "aspect"):
+        assert getattr(got, key) == pytest.approx(getattr(ref, key), rel=1e-8)
+    assert got.Aminor_p == pytest.approx(lam * ref.Aminor_p, rel=1e-9)
+    assert got.b0 == pytest.approx(ref.b0 / lam**2, rel=1e-8)
+
+
+def test_axis_field_sums_the_m0_harmonics_extrapolated_to_the_axis():
+    bmnc = np.zeros((4, 3))
+    bmnc[1], bmnc[2] = [1.0, 0.2, 9.0], [1.0, 0.1, 9.0]
+    bmns = np.zeros((4, 3))
+    bmns[1], bmns[2] = [0.0, 0.4, 9.0], [0.0, 0.2, 9.0]
+    wout = SimpleNamespace(
+        bmnc=bmnc, bmns=None, xm_nyq=np.array([0, 0, 1]), xn_nyq=np.array([0, 2, 0]),
+    )
+    # m = 0 only: 1 + 0.25 cos(2 phi); the m = 1 column is an artifact.
+    assert axis_field(wout, 0.3) == pytest.approx(1.0 + 0.25 * np.cos(0.6))
+    wout.bmns = bmns
+    assert axis_field(wout, 0.3) == pytest.approx(
+        1.0 + 0.25 * np.cos(0.6) - 0.5 * np.sin(0.6)
+    )
+
+
+@pytest.mark.parametrize(
+    "name, changes",
+    [
+        ("LandremanPaul2021_QA_lowres", dict(ns_array=np.array([9]))),
+        ("shaped_tokamak_pressure", dict(ns_array=np.array([9]), gamma=1.4)),
+    ],
+)
+def test_match_b0_reproduces_the_target_axis_field(name, changes):
+    """Vacuum and finite-beta decks: re-solving the matched deck gives ``b0_target``."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA / f"input.{name}"),
+        ftol_array=np.array([1e-13]),
+        niter_array=np.array([4000]),
+        **changes,
+    )
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    target, phi = 1.7 * axis_field(original), 0.0
+    matched = match_b0(inp, original, target, phi)
+    assert axis_field(run(matched), phi) == pytest.approx(target, rel=1e-10)

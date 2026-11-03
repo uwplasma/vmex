@@ -16,7 +16,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
   ``<J.B>`` formula (eqs. 10-16, 19-21 with the Sauter 18b-18e
   collisionalities), transcribed verbatim from simsopt ``j_dot_B_Redl``
   including its quasisymmetry isomorphism: ``iota -> iota - nfp*helicity_n``
-  everywhere iota appears, ``G`` unshifted.
+  everywhere iota appears, with the prefactor ``G -> G + N*I``.
 - :class:`KineticProfiles` / :func:`profile_value_and_dds` — polynomial
   ``ne/Te/Ti/Zeff`` profiles in ``s`` (lowest order first, simsopt
   ``ProfilePolynomial`` convention), value + analytic d/ds via Horner.
@@ -569,12 +569,13 @@ def j_dot_B_redl(
     ne_s, d_ne_d_s = profile_value_and_dds(profiles.ne_coeffs, s)
     Te_s, d_Te_d_s = profile_value_and_dds(profiles.Te_coeffs, s)
     Ti_s, d_Ti_d_s = profile_value_and_dds(profiles.Ti_coeffs, s)
-    Zeff_s, _ = profile_value_and_dds(profiles.Zeff_coeffs, s)
+    Zeff_s, d_Zeff_d_s = profile_value_and_dds(profiles.Zeff_coeffs, s)
 
     ne_s = jnp.maximum(ne_s, 1e17)
     Te_s = jnp.maximum(Te_s, 1.0)
     Ti_s = jnp.maximum(Ti_s, 1.0)
     ni_s = ne_s / Zeff_s
+    d_ni_d_s = d_ne_d_s / Zeff_s - ne_s * d_Zeff_d_s / Zeff_s ** 2
     pe_s = ne_s * Te_s
     pi_s = ni_s * Ti_s
 
@@ -647,8 +648,10 @@ def j_dot_B_redl(
         / (1 + 0.004 * nu_i * nu_i * (f_t ** 6))
 
     # Factor of ELEMENTARY_CHARGE converts temperatures from eV to J:
-    pref = -geom.G * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
-    dnds_term = pref * (ne_s * Te_s + ni_s * Ti_s) * L31 * (d_ne_d_s / ne_s)
+    # Landreman 2022 (A1): the quasisymmetric prefactor is G + N*I, not G.
+    pref = -(geom.G + helicity_N * geom.I) * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
+    # Redl eq (2) with separate gradients; ni=ne/Zeff assumes one ion species.
+    dnds_term = pref * (Te_s * d_ne_d_s + Ti_s * d_ni_d_s) * L31
     dTeds_term = pref * pe_s * (L31 + L32) * (d_Te_d_s / Te_s)
     dTids_term = pref * pi_s * (L31 + L34 * alpha) * (d_Ti_d_s / Ti_s)
     jdotB = dnds_term + dTeds_term + dTids_term
