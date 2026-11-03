@@ -527,8 +527,8 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
     non-finite sample get zero weight. The fit is evaluated analytically and
     integrated with ``nsteps`` RK4 steps, all in ``jnp``, so every output is
     differentiable in the inputs. ``t_final=None`` closes one turn of all
-    but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``. Each initial condition
-    ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
+    but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``.
+    Each initial condition ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
     largest radius, and ``action`` the fitted ``J`` along it, constant up to
     the integration error.
     """
@@ -604,8 +604,8 @@ def drift_surfaces_from_boozer(
     Evaluates ``J`` and the bounce time on every surface ``s_b`` and
     ``nalpha`` field lines with :func:`~vmex.core.bounce.bounce_action_from_boozer`
     (on each traced line, the deepest usable well starting within one field
-    period of the first, as in the ``vmex --plot`` J map) and integrates them with :func:`drift_orbits`. The grids
-    are returned as ``j_map``/``tau_map`` next to the orbits. The traced
+    period of the first, as in the ``vmex --plot`` J map) and integrates them
+    with :func:`drift_orbits`. The grids are returned as ``j_map``/``tau_map`` next to the orbits. The traced
     line must cover a poloidal transit, about ``nfp / iota`` periods.
     """
     alpha = jnp.arange(nalpha) * (2.0 * jnp.pi / nalpha)
@@ -647,12 +647,15 @@ class DriftConfinementResidual(MaximumJResidual):
     ``R = tanh(max(s_hat - s0, 0) / (1 - s0))``,
 
     with ``s_hat = logsumexp(sharpness * s) / sharpness`` the smooth maximum
-    radius: zero for a drift surface that stays on its flux surface, about
-    0.76 for one that reaches the LCFS, and bounded beyond. The weighted
+    radius over the ``n_t`` orbit samples. It overshoots the true maximum by
+    up to ``ln(n_t) / sharpness``, so a drift surface that stays on its flux
+    surface has the small floor ``tanh(ln(n_t) / (sharpness (1 - s0)))``
+    rather than zero; one that reaches the LCFS has about 0.76, and the reach
+    is bounded beyond. The weighted
     mean of ``R``, returned as ``gamma_w``, is a smooth version of the reach
     proxy ``Gamma_W`` of arXiv:2608.20042. Over traced alpha losses of 13
     equilibria its rank correlation was 0.97, against 0.62 for the
-    excursion rows below.
+    excursion rows.
 
     ``excursion_weight`` adds the rows
     ``max(|J - <J>| / (|d<J>/ds| + floor |<J>|) - (s_limit - s), 0)`` on

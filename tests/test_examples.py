@@ -113,6 +113,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
     "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
+    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
