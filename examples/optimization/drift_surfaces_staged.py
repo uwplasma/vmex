@@ -104,6 +104,13 @@ def iota_floor(equilibrium_state, solver_context):
         IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
 
 
+MIRROR_LIMIT = 0.25
+
+
+def mirror_excess(equilibrium_state, solver_context):
+    return jnp.maximum(opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
+
+
 def make_drift(equilibrium):
     """One physical lambda must describe the same particles on every radius and
     field-line label, so the pitches are chosen on the equilibrium the drift stage starts from."""
@@ -127,7 +134,7 @@ def gamma_w(equilibrium):
 report = opt.EquilibriumReporter(
     ("drift total", lambda eq: drift.total(eq), ".6e"), ("Gamma_W", gamma_w, ".4f"),
     ("aspect", opt.aspect_ratio, ".4f"), ("mean iota", opt.mean_iota, ".4f"),
-    ("magnetic well", opt.magnetic_well, ".4f"))
+    ("magnetic well", opt.magnetic_well, ".4f"), ("mirror", opt.mirror_ratio, ".4f"))
 monitor = opt.OptimizationMonitor()
 report("seed", equilibrium)
 
@@ -138,7 +145,7 @@ for number, (max_mode, max_nfev, qs_w, drift_w) in enumerate(STAGES):
     if drift_w > 0.0 and not drift_ready:
         drift, drift_ready = make_drift(equilibrium), True
     terms = [(opt.aspect_ratio, ASPECT_TARGET, 1.0), (iota_floor, 0.0, 10.0),
-             (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0)]
+             (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0), (mirror_excess, 0.0, 10.0)]
     if qs_w > 0.0:
         terms.append((qs, 0.0, qs_w))
     if drift_w > 0.0:
