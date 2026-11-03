@@ -27,7 +27,7 @@ normalizations are applied on construction (the :mod:`vmex.core.input`
 docstring has the exact rules).  Unknown names and active unsupported
 physics fail before setup.
 
-The JSON input of the C++ VMEC reimplementation is read key by key.  Every
+VMEC++ JSON inputs are read key by key.  Every
 key is either implemented or raises an error that names it:
 
 .. list-table::
