@@ -649,6 +649,10 @@ Which objectives differentiate how
      - yes
      - yes
      - signed radial action slope with matched well identity
+   * - :class:`~vmex.core.maxj.DriftConfinementResidual`
+     - yes
+     - yes
+     - hinge on the smooth maximum radius of bounce-averaged drift orbits
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes

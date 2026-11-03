@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from .bounce import bounce_action, bounce_action_from_boozer
@@ -23,6 +24,9 @@ __all__ = [
     "JInvariantQIAndMaximumJResidual",
     "MaximumJResidual",
     "constructed_maximum_j_residual_from_boozer",
+    "DriftConfinementResidual",
+    "drift_orbits",
+    "drift_surfaces_from_boozer",
     "maximum_j_residual_from_boozer",
     "qi_and_maximum_j_from_boozer",
 ]
@@ -499,3 +503,199 @@ class ConstructedMaximumJResidual(MaximumJResidual):
 
     name = "constructed_maximum_j"
     _from_boozer = staticmethod(constructed_maximum_j_residual_from_boozer)
+
+
+def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
+                 t_final=None, nsteps: int = 256, degree: int = 3) -> dict[str, Array]:
+    """Integrate the bounce-averaged drift ``(s(t), alpha(t))`` of one pitch.
+
+    With ``J`` the action and ``tau`` the bounce time, both per unit speed
+    (the ``action`` and ``bounce_time`` of :func:`bounce_action`, sampled on
+    surfaces ``s = psi/psi_edge`` and a uniform ``alpha`` grid), the
+    bounce-centre equations of motion are
+
+    ``ds/dt = (dJ/dalpha) / tau``,  ``dalpha/dt = -(dJ/ds) / tau``,
+
+    with dimensionless time ``t = t_phys m v**2 / (Z e psi_edge)``, the signs
+    of a positive charge in ``B = grad(psi) x grad(alpha)``; the opposite
+    charge or orientation reverses the direction, not the orbit. Their
+    ratio ``ds/dalpha = -(dJ/dalpha) / (dJ/ds)`` is the action-transport law
+    ``dJ/dalpha = 0``, so orbits follow ``J`` contours: the drift surfaces.
+
+    ``J`` and ``tau`` are fitted by a Fourier series in ``alpha`` times a
+    least-squares polynomial of ``degree`` in ``s``; surfaces with any
+    non-finite sample get zero weight. The fit is evaluated analytically and
+    integrated with ``nsteps`` RK4 steps, all in ``jnp``, so every output is
+    differentiable in the inputs. ``t_final=None`` closes one turn of all
+    but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``. Each initial condition
+    ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
+    largest radius, and ``action`` the fitted ``J`` along it, constant up to
+    the integration error.
+    """
+    action, bounce_time = jnp.asarray(action), jnp.asarray(bounce_time)
+    dtype = action.dtype
+    s = jnp.asarray(s, dtype=dtype)
+    nalpha = int(action.shape[1])
+    finite = jnp.all(jnp.isfinite(action) & jnp.isfinite(bounce_time), axis=1)
+    weight = finite.astype(dtype)[:, None]
+    power = jnp.arange(degree + 1)
+    fit = jnp.linalg.pinv(weight * s[:, None] ** power)
+
+    def coefficients(values):  # (degree + 1, nk) complex polynomial x Fourier
+        spectrum = jnp.fft.rfft(jnp.where(finite[:, None], values, 0.0), axis=1) / nalpha
+        k = jnp.arange(spectrum.shape[1])
+        spectrum = spectrum * jnp.where((k == 0) | (2 * k == nalpha), 1.0, 2.0)
+        return fit @ (weight * spectrum)
+
+    cj, ct = coefficients(action), coefficients(bounce_time)
+    k = jnp.arange(cj.shape[1])
+    alpha_offset = jnp.asarray(alpha, dtype=dtype)[0]
+
+    def fields(y):
+        radius, angle = y[0], y[1] - alpha_offset
+        sp = radius ** power
+        dsp = jnp.where(power > 0, power * radius ** jnp.maximum(power - 1, 0), 0.0)
+        phase = jnp.exp(1j * k * angle)
+        j_k, tau_k = sp @ cj, sp @ ct
+        return (jnp.real(j_k @ phase), jnp.real((dsp @ cj) @ phase),
+                jnp.real((1j * k * j_k) @ phase), jnp.real(tau_k @ phase))
+
+    def rhs(y):
+        _, j_s, j_alpha, tau = fields(y)
+        return jnp.stack([j_alpha, -j_s]) / tau
+
+    if t_final is None:
+        grid = jnp.stack(jnp.broadcast_arrays(
+            s[:, None], jnp.asarray(alpha, dtype=dtype)[None, :]), -1).reshape(-1, 2)
+        rate = jnp.abs(jax.vmap(rhs)(grid)[:, 1])
+        rate = jnp.where(jnp.repeat(finite, nalpha), rate, jnp.nan)
+        t_final = 2.0 * jnp.pi / jnp.nanpercentile(rate, 10.0)
+    dt = jnp.asarray(t_final, dtype=dtype) / nsteps
+
+    def step(y, _):
+        k1 = rhs(y); k2 = rhs(y + 0.5 * dt * k1)
+        k3 = rhs(y + 0.5 * dt * k2); k4 = rhs(y + dt * k3)
+        y = y + dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        return y, y
+
+    s0, alpha0 = jnp.broadcast_arrays(jnp.atleast_1d(jnp.asarray(s0, dtype=dtype)),
+                                      jnp.asarray(alpha0, dtype=dtype))
+    y0 = jnp.stack([s0, alpha0], -1)
+    path = jax.vmap(lambda y: jnp.concatenate(
+        [y[None], jax.lax.scan(step, y, None, length=nsteps)[1]]))(y0)
+    return {
+        "t": dt * jnp.arange(nsteps + 1),
+        "s": path[..., 0],
+        "alpha": path[..., 1],
+        "s_max": jnp.max(path[..., 0], axis=-1),
+        "action": jax.vmap(jax.vmap(lambda y: fields(y)[0]))(path),
+        "t_final": dt * nsteps,
+    }
+
+
+def drift_surfaces_from_boozer(
+    *, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp: int, s_b, pitch, s0,
+    alpha0=0.0, bmns_b=None, t_final=None, nsteps: int = 256, degree: int = 3,
+    nalpha: int = 32, points_per_period: int = 64, num_periods: int = 12,
+    max_wells: int | None = None, quadrature_order: int = 32,
+) -> dict[str, Array]:
+    """Drift surfaces of one physical ``pitch`` from a Boozer spectrum.
+
+    Evaluates ``J`` and the bounce time on every surface ``s_b`` and
+    ``nalpha`` field lines with :func:`~vmex.core.bounce.bounce_action_from_boozer`
+    (the first usable well of each traced line, as in the ``vmex --plot``
+    J map) and integrates them with :func:`drift_orbits`. The grids
+    are returned as ``j_map``/``tau_map`` next to the orbits. The traced
+    line must cover a poloidal transit, about ``nfp / iota`` periods.
+    """
+    alpha = jnp.arange(nalpha) * (2.0 * jnp.pi / nalpha)
+    out = bounce_action_from_boozer(
+        bmnc_b=bmnc_b, bmns_b=bmns_b, xm_b=xm_b, xn_b=xn_b, iota_b=iota_b,
+        G_b=G_b, I_b=I_b, nfp=nfp, alpha=alpha, pitch=jnp.atleast_1d(pitch)[:1],
+        points_per_period=points_per_period, num_periods=num_periods,
+        max_wells=2 * num_periods if max_wells is None else max_wells,
+        quadrature_order=quadrature_order, drift_integrands={})
+    # Later wells on a traced line sit at other field-line labels, so J(alpha)
+    # is the first usable well from zeta = 0; averaging them erases the alpha
+    # dependence that moves the orbit.
+    usable = out["usable_mask"][:, :, 0]
+    first = jnp.argmax(usable, axis=-1)[..., None]
+
+    def first_well(values):
+        value = jnp.take_along_axis(values[:, :, 0], first, axis=-1)[..., 0]
+        return jnp.where(jnp.any(usable, axis=-1), value, jnp.nan)
+
+    j_map, tau_map = first_well(out["action"]), first_well(out["bounce_time"])
+    orbits = drift_orbits(j_map, tau_map, s_b, alpha, s0, alpha0,
+                          t_final=t_final, nsteps=nsteps, degree=degree)
+    return {**orbits, "j_map": j_map, "tau_map": tau_map, "alpha_grid": alpha,
+            "s_grid": jnp.asarray(s_b)}
+
+
+class DriftConfinementResidual(MaximumJResidual):
+    """Keep every drift orbit of the given pitches inside ``s_limit``.
+
+    For each pitch, orbits start at ``s0`` (and ``alpha0``) and are followed
+    for ``t_final`` with :func:`drift_surfaces_from_boozer` on the Boozer
+    ``surfaces``. One row per orbit is the hinge on its smooth maximum radius,
+    ``max(logsumexp(sharpness * s) / sharpness - s_limit, 0)``, so a zero
+    total means every drift surface closes inside ``s_limit``. Beyond
+    ``s = 1`` the fitted ``J`` is an extrapolation and a lost orbit can run
+    far out, so each row saturates as ``hinge_cap * tanh(hinge / hinge_cap)``.
+
+    A saturated row carries no gradient, so a lost orbit alone gives the
+    optimizer nothing to follow. Barrier rows fix that without orbit
+    integration: an orbit of action ``J0`` closes inside ``s_limit`` only
+    if ``J(s_limit, alpha) - J0`` keeps one sign over ``alpha``. For each
+    orbit and field line on the surface nearest ``s_limit`` the row is
+    ``relu(-sign(<J(s_limit)> - J0) (J(s_limit, alpha) - J0) / |J0|)``,
+    scaled by ``barrier_weight``; it is nonzero exactly where that contour
+    reaches the limit.
+
+    A pitch that is no longer trapped on a sampled line leaves ``J``
+    undefined there. Such lines count as lost, not confined: an undefined
+    orbit row is ``hinge_cap``, and one row per pitch and surface adds
+    ``hinge_cap`` times the fraction of field lines without a usable well.
+    Without these rows the optimizer can empty the wells instead of closing
+    the orbits.
+
+    ``J`` is the first usable well of each traced line; where that well is
+    born or dies the map jumps, so prefer a fixed ``t_final`` inside an
+    optimization.
+    """
+
+    name = "drift_confinement"
+
+    def __init__(self, surfaces, pitch, s0, *, s_limit=1.0, sharpness=50.0,
+                 hinge_cap=0.5, barrier_weight=1.0, mboz=16, nboz=16, oversample=2, **drift_options):
+        super().__init__(surfaces, pitch, mboz=mboz, nboz=nboz, oversample=oversample)
+        self.s0 = np.atleast_1d(np.asarray(s0, dtype=float))
+        self.s_limit, self.sharpness = float(s_limit), float(sharpness)
+        self.hinge_cap, self.barrier_weight = float(hinge_cap), float(barrier_weight)
+        self.limit_index = int(np.argmin(np.abs(self.surfaces - self.s_limit)))
+        self.residual_options = drift_options
+
+    def compute_state(self, state, rt):
+        """Return per-orbit hinge rows and the orbits of every pitch."""
+        booz = self._boozer(state, rt)
+        s_b = booz["psi_b"] / booz["psi_edge"]
+        orbits = [drift_surfaces_from_boozer(
+            bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"), xm_b=booz["xm_b"],
+            xn_b=booz["xn_b"], iota_b=booz["iota_b"], G_b=booz["G_b"],
+            I_b=booz["I_b"], nfp=booz["nfp"], s_b=s_b, pitch=p, s0=self.s0,
+            **self.residual_options) for p in self.pitch]
+        soft_max = jnp.stack([jax.nn.logsumexp(self.sharpness * o["s"], axis=-1)
+                              / self.sharpness for o in orbits])
+        hinge = jnp.maximum(soft_max - self.s_limit, 0.0)
+        j0 = jnp.stack([o["action"][:, 0] for o in orbits])[..., None]
+        j_limit = jnp.stack([o["j_map"][self.limit_index] for o in orbits])[:, None, :]
+        side = jnp.sign(jnp.nanmean(j_limit, axis=-1, keepdims=True) - j0)
+        barrier = jnp.maximum(-side * (j_limit - j0) / jnp.abs(j0), 0.0)
+        orbit_rows = self.hinge_cap * jnp.tanh(hinge / self.hinge_cap)
+        missing = jnp.stack([jnp.mean(~jnp.isfinite(o["j_map"]), axis=-1) for o in orbits])
+        residuals1d = jnp.concatenate([
+            jnp.ravel(jnp.where(jnp.isfinite(orbit_rows), orbit_rows, self.hinge_cap)),
+            self.barrier_weight * jnp.ravel(jnp.where(jnp.isfinite(barrier), barrier, 0.0)),
+            self.hinge_cap * jnp.ravel(missing)])
+        return {"residuals1d": residuals1d, "total": jnp.sum(residuals1d ** 2),
+                "orbits": orbits, "s_max": jnp.stack([o["s_max"] for o in orbits])}

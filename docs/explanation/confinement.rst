@@ -360,6 +360,47 @@ the published :math:`g_J`: it establishes a favorable direction without
 asking a local optimizer to cross actual-well topology changes. The final
 :class:`~vmex.core.maxj.MaximumJResidual` remains the physical certificate.
 
+Drift surfaces
+~~~~~~~~~~~~~~
+
+Maximum-J is a local statement about :math:`\partial J/\partial s`. The
+global statement is that bounce centres stay inside the plasma. For positive
+charge in :math:`\mathbf B=\nabla\psi\times\nabla\alpha`, the bounce-centre
+motion of a trapped particle of fixed pitch is
+
+.. math::
+
+   \frac{ds}{dt} = \frac{1}{\tau}\frac{\partial J}{\partial\alpha},
+   \qquad
+   \frac{d\alpha}{dt} = -\frac{1}{\tau}\frac{\partial J}{\partial s},
+
+with :math:`\tau` the bounce time and the dimensionless time
+:math:`t = t_{\rm phys}\,m v^2/(Z e\,\psi_{\rm edge})`; the opposite charge or
+orientation reverses the direction of travel and leaves the curves unchanged
+(W. Sengupta, A. Bhattacharjee and S. Buller, "Symmetry-agnostic stellarators
+for collisionless confinement", arXiv:2608.20042 (2026), Eq. (4)). The ratio
+of the two equations is the action-transport law :math:`dJ/d\alpha=0`, so
+orbits follow contours of :math:`J(s,\alpha)`: the drift surfaces. An orbit
+that reaches :math:`s=1` is a lost particle.
+
+:func:`~vmex.core.maxj.drift_surfaces_from_boozer` samples :math:`J` and
+:math:`\tau` on the Boozer surfaces and a uniform :math:`\alpha` grid
+(the first complete well of each traced line, since later wells on the same line belong to other field-line labels), and
+:func:`~vmex.core.maxj.drift_orbits` fits them with a Fourier series in
+:math:`\alpha` times a polynomial in :math:`s` and integrates the equations
+with fixed-step RK4. Everything is ``jnp``, so the largest orbit radius
+``s_max`` and the conservation of :math:`J` along each orbit are
+differentiable functions of the Boozer spectrum. The field-line trace must
+close a poloidal transit: the default ``num_periods=12`` covers
+:math:`\iota \gtrsim n_{fp}/12`; a shorter trace leaves :math:`J` undefined
+and the orbit NaN. :class:`~vmex.core.maxj.DriftConfinementResidual` turns
+this into an objective: one hinge row per orbit on a smooth maximum of its
+radius above ``s_limit``, zero when every launched orbit closes inside the
+limit. From a minimal seed this objective does not yet converge: orbits
+that leave the plasma give a rough, badly scaled landscape. Start it from a
+configuration whose drift surfaces are already nearly closed. ``drift_surfaces.py`` shows the orbits of a quasi-axisymmetric
+equilibrium and the gradient of ``s_max``.
+
 ``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
 equilibrium, retains a magnetic-well target, and ramps a negative slope
 margin in the actual field. Its research ladder recomputes a common physical

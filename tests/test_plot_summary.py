@@ -110,10 +110,10 @@ def test_summary_panel_inventory(summary_figure):
 
 
 def test_summary_contours_and_colormaps(summary_figure):
-    """The J disk is filled; Boozer |B| contours are unfilled and jet-mapped."""
+    """J and Boozer |B| contours are unfilled; |B| is jet-mapped."""
     _, meta = summary_figure
     j_sets = _contour_sets(meta["axes"]["j_invariant"])
-    assert any(cs.filled for cs in j_sets)
+    assert j_sets and not any(cs.filled for cs in j_sets)
     for name in ("boozer_mid", "boozer_lcfs"):
         sets = _contour_sets(meta["axes"][name])
         assert sets, f"panel {name!r} has no contour set"
@@ -772,6 +772,7 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     def _fake_bounce(*, alpha, pitch, **_kwargs):
         shape = (1, len(alpha), 1, 1)
         return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "bounce_time": jax.numpy.ones(shape),
                 "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)

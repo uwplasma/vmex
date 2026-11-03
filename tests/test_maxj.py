@@ -380,3 +380,63 @@ def test_maximum_j_implicit_boundary_gradient_matches_reconverged_fd():
     relative = abs(implicit - finite_difference) / max(
         abs(implicit), abs(finite_difference))
     assert relative < 3.0e-3
+
+
+def _synthetic_drift(eps=0.1, nalpha=32, ns=8):
+    s = jnp.linspace(0.2, 0.9, ns)
+    alpha = jnp.arange(nalpha) * (2.0 * jnp.pi / nalpha)
+    action = s[:, None] * (1.0 + eps * jnp.cos(alpha))[None, :]
+    return s, alpha, action, jnp.ones_like(action)
+
+
+def test_drift_orbits_follow_analytic_j_contour_and_sign_convention():
+    eps, s0 = 0.1, 0.5
+    s, alpha, action, tau = _synthetic_drift(eps)
+    orb = maxj.drift_orbits(action, tau, s, alpha, s0, 0.0, nsteps=128)
+    j0 = s0 * (1.0 + eps)
+    assert float(jnp.max(jnp.abs(orb["action"] / j0 - 1.0))) < 1.0e-6
+    expected = j0 / (1.0 + eps * jnp.cos(orb["alpha"][0]))
+    np.testing.assert_allclose(orb["s"][0], expected, rtol=1.0e-6)
+    assert float(orb["s_max"][0]) == pytest.approx(j0 / (1.0 - eps), rel=1.0e-4)
+    # ds/dt = dJ/dalpha / tau = -eps s sin(alpha): negative at alpha = pi/2.
+    down = maxj.drift_orbits(action, tau, s, alpha, s0, jnp.pi / 2, nsteps=8)
+    assert float(down["s"][0, 1] - down["s"][0, 0]) < 0.0
+
+
+def test_drift_orbits_alpha_independent_action_is_a_flux_surface():
+    s, alpha, _, tau = _synthetic_drift()
+    action = jnp.broadcast_to((2.0 * s)[:, None], tau.shape)
+    orb = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.3, t_final=1.5, nsteps=32)
+    assert float(jnp.max(jnp.abs(orb["s"] - 0.5))) < 1.0e-10
+    assert float(orb["s_max"][0]) == pytest.approx(0.5, abs=1.0e-10)
+    assert float(orb["alpha"][0, -1]) == pytest.approx(0.3 - 2.0 * 1.5, abs=1.0e-8)
+
+
+def test_drift_orbits_gradient_and_nan_rows():
+    s, alpha, action, tau = _synthetic_drift()
+
+    def s_max(a):
+        return maxj.drift_orbits(a, tau, s, alpha, 0.5, 0.0, nsteps=64)["s_max"][0]
+
+    grad = jax.grad(s_max)(action)
+    assert bool(jnp.all(jnp.isfinite(grad)))
+    h = 1.0e-6
+    bump = jnp.zeros_like(action).at[3, 5].set(h)
+    fd = (s_max(action + bump) - s_max(action - bump)) / (2.0 * h)
+    assert float(grad[3, 5]) == pytest.approx(float(fd), rel=1.0e-4, abs=1.0e-8)
+    clean = s_max(action)
+    dirty = s_max(action.at[4].set(jnp.nan))
+    assert bool(jnp.isfinite(dirty)) and float(dirty) == pytest.approx(float(clean), rel=1.0e-4)
+
+
+def test_drift_confinement_residual_hinges_on_s_limit(monkeypatch):
+    booz = _boozer(1.02)
+    monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    eq = SimpleNamespace(state=object(), runtime=object())
+    options = dict(mboz=2, nboz=2, nalpha=8, points_per_period=32, num_periods=2,
+                   max_wells=4, nsteps=16, t_final=0.1)
+    inside = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], s_limit=2.0, **options)
+    below = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], s_limit=0.1, **options)
+    assert float(jnp.max(jnp.abs(inside(eq)))) == 0.0
+    assert float(below(eq)[0]) > 0.0  # the orbit row; barrier rows follow

@@ -1227,6 +1227,7 @@ def _j_invariant_map(
 
     alpha = np.linspace(0.0, 2.0 * np.pi, int(nalpha), endpoint=False)
     j_map = np.full((nsurf, alpha.size), np.nan)
+    tau_map = np.full((nsurf, alpha.size), np.nan)
     for k in range(nsurf):  # per-surface loop keeps the phase tables small
         if not trapped_surface[k]:
             continue
@@ -1241,16 +1242,31 @@ def _j_invariant_map(
             max_wells=max_wells,
             bmns_b=None if booz["bmns_b"] is None else booz["bmns_b"][k : k + 1],
             quadrature_order=int(quadrature_order),
+            drift_integrands={},
         )
         action = np.asarray(out["action"])[0, :, 0, :]       # (nalpha, nwells)
         usable = np.asarray(out["usable_mask"])[0, :, 0, :]
-        count = usable.sum(axis=-1)
-        total = np.where(usable, np.where(np.isfinite(action), action, 0.0), 0.0).sum(axis=-1)
-        j_map[k] = np.where(count > 0, total / np.maximum(count, 1), np.nan)
+        # Later wells on the line belong to other labels: keep the first one.
+        first = np.argmax(usable, axis=-1)[:, None]
+        found = usable.any(axis=-1)
+        j_map[k] = np.where(found, np.take_along_axis(action, first, -1)[:, 0], np.nan)
+        tau = np.asarray(out["bounce_time"])[0, :, 0, :]
+        tau_map[k] = np.where(found, np.take_along_axis(tau, first, -1)[:, 0], np.nan)
+    # Drift surfaces: bounce-centre orbits of the same particles (eq. of
+    # motion in vmex.core.maxj.drift_orbits), launched on the trapped surfaces.
+    rows = np.flatnonzero(np.all(np.isfinite(j_map) & np.isfinite(tau_map), axis=1))
+    orbits = None
+    if rows.size >= 4:
+        from .maxj import drift_orbits
+        launch = np.asarray(booz["s_b"])[rows[:: max(1, rows.size // 5)]]
+        orbits = {key: np.asarray(value) for key, value in drift_orbits(
+            j_map, tau_map, booz["s_b"], alpha, launch).items()}
     return {
         "alpha": alpha,
         "s_b": booz["s_b"],
         "j_map": j_map,
+        "tau_map": tau_map,
+        "orbits": orbits,
         "pitch": float(pitch_array[0]),
         "pitch_inverse": float(b_star),
         "pitch_fraction": float(pitch_fraction),
@@ -1338,7 +1354,12 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 
 
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
-    """Velasco-style polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``."""
+    """Velasco-style polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
+
+    Unfilled ``J`` contours carry the colorbar; dashed curves are the drift
+    surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over about
+    one precession turn, and the grey circle is the LCFS ``s = 1``.
+    """
     length_scale = abs(float(r_major))
     if not np.isfinite(length_scale) or length_scale <= np.finfo(float).tiny:
         length_scale = 1.0
@@ -1358,12 +1379,20 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     alpha2d, s2d = np.meshgrid(alpha, j_info["s_b"])
     x, y = s2d * np.cos(alpha2d), s2d * np.sin(alpha2d)
     levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
-    filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
-    ax.contour(x, y, periodic, levels=levels, colors="0.25", linewidths=0.35, alpha=0.65)
-    fig.colorbar(filled, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
+    lines = ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=1.0)
+    fig.colorbar(lines, ax=ax, pad=0.02, label=r"$J\,/\,(v R_0)$")
+    orbits = j_info.get("orbits")
+    for k, (s_orbit, a_orbit) in enumerate(
+            zip(*(orbits["s"], orbits["alpha"])) if orbits else ()):
+        ax.plot(s_orbit * np.cos(a_orbit), s_orbit * np.sin(a_orbit), "k--",
+                linewidth=0.9, label="drift surfaces" if k == 0 else None)
+    if orbits:
+        ax.legend(loc="lower left", framealpha=0.8)
     radius = max(1.0, float(np.max(j_info["s_b"])))
-    ax.axhline(0.0, color="white", linewidth=0.6, alpha=0.75)
-    ax.axvline(0.0, color="white", linewidth=0.6, alpha=0.75)
+    from matplotlib.patches import Circle
+    ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.4", linewidth=0.8))
+    ax.axhline(0.0, color="0.6", linewidth=0.5)
+    ax.axvline(0.0, color="0.6", linewidth=0.5)
     ax.set_xlim(-radius, radius); ax.set_ylim(-radius, radius)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$s\cos\alpha$"); ax.set_ylabel(r"$s\sin\alpha$")
