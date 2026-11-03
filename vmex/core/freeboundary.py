@@ -853,11 +853,15 @@ def _vacuum_executables(resolution, *, mf: int, nf: int, signgs: int, wint,
         lasym=bool(resolution.lasym), wint=wint,
     )
     solver_vac = make_vacuum_solver(basis, signgs=int(signgs))
-    fused = replace(_make_fused_vacuum(
+    fused = _make_fused_vacuum(
         basis, modes=modes, signgs=int(signgs), solver_vac=solver_vac,
         axis_r0=axis_r0, axis_z0=axis_z0, solve_device=solve_device,
         output_device=plasma_device if solve_device is not None else None,
-    ), cache_key=key)
+    )
+    # The key determines every closed-over table, so the full update reloads
+    # across processes like the vacuum lane built on it.
+    fused = replace(fused, cache_key=key,
+                    full=AotLane(fused.full.__wrapped__, identity=repr(key)))
     lane = _make_vacuum_lane(fused, use_fft=use_fft)
     _VACUUM_EXECUTABLE_CACHE[key] = (basis, fused, lane)
     return basis, fused, lane

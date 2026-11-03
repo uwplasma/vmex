@@ -8,6 +8,8 @@ skip when the required hardware is unavailable.
 from __future__ import annotations
 
 import contextlib
+import gc
+import weakref
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -587,6 +589,142 @@ def test_host_callback_is_not_pinned_across_platforms():
     same = im._callback_sharding(
         dataclasses.replace(cfg, device=jax.devices(here)[0]))
     assert isinstance(same, jax.sharding.SingleDeviceSharding)
+def test_host_call_leaves_the_accelerator_only_for_concrete_calls(monkeypatch):
+    """A concrete call on a GPU config dispatches on the CPU; a traced one cannot."""
+    import dataclasses
+
+    from vmex.core import implicit as im
+
+    class _FakeGpu:
+        platform = "gpu"
+
+    cfg = dataclasses.replace(
+        im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True),
+        device=_FakeGpu())
+    pinned = []
+    monkeypatch.setattr(im, "_device_pin", lambda _, tree: pinned.append(
+        jax.config.jax_default_device) or tree)
+    shape = jax.ShapeDtypeStruct((2,), jnp.float64)
+    x = jnp.ones(2)
+    double = lambda v: np.asarray(v) * 2.0  # noqa: E731
+
+    np.testing.assert_array_equal(im._host_call(cfg, double, shape, x), [2.0, 2.0])
+    assert pinned == [jax.devices("cpu")[0]]
+    monkeypatch.setattr(im.jax, "default_backend", lambda: "gpu")
+    with pytest.raises(ValueError, match="deadlock"):
+        jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
+    assert len(pinned) == 1
+    monkeypatch.setattr(im, "_LAST_SOLVE", {cfg: "seed solve"})
+    monkeypatch.setattr(im, "_callback_sharding", lambda _: None)
+    jax.jit(lambda v: im._host_call(cfg, double, shape, v))(x)
+
+
+@pytest.mark.parametrize("recommended, backend, chosen", [
+    ("gpu", "gpu", "gpu"), ("gpu", "tpu", None), ("cpu", "gpu", None)])
+def test_free_boundary_auto_takes_the_gpu_only_when_large(
+        monkeypatch, recommended, backend, chosen):
+    import dataclasses
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+    from vmex.core import implicit as im
+
+    base = im.make_config(VmecInput.from_file(DATA / "input.solovev"), multigrid=True)
+    monkeypatch.setattr(fbi.jax, "devices", lambda _: ["gpu"])
+    monkeypatch.setattr(fbi, "resolve_implicit_device", lambda *_: "cpu")
+    monkeypatch.setattr(fbi, "recommended_device", lambda _: recommended)
+    monkeypatch.setattr(fbi.jax, "default_backend", lambda: backend)
+    monkeypatch.setattr(fbi, "free_boundary_resolution", lambda *_, **__: base.resolution)
+    monkeypatch.setattr(fbi, "_vacuum_program", lambda _: "program")
+    monkeypatch.setattr(im, "make_config", lambda _, **k: dataclasses.replace(base, device=k["device"]))
+
+    made = fbi.make_free_boundary_config(SimpleNamespace(lfreeb=True), object(), device="auto")
+    assert made.implicit.device == "cpu"
+    assert (made.concrete and made.concrete.implicit.device) == chosen
+    if made.concrete is not None:  # the fallback map must not keep dropped configs alive
+        sibling = weakref.ref(made.concrete)
+        del made
+        gc.collect()
+        assert sibling() is None and not fbi._AUTO_OF
+
+
+def test_free_boundary_auto_gpu_is_for_eager_calls_and_falls_back(monkeypatch):
+    """Eager values and gradients take the GPU sibling, jit the CPU; GPU exhaustion falls back once."""
+    from vmex.core import freeboundary_implicit as fbi
+
+    gpu = type("Gpu", (), {"concrete": None})()
+    cfg = type("Auto", (), {"concrete": gpu})()
+    seen = []
+
+    def solve(p, f, c):
+        seen.append(c)
+        if c is gpu and f is not None:
+            raise RuntimeError(f"INTERNAL: CpuCallback error: {f}: Out of memory")
+        return p * 2.0
+
+    monkeypatch.setattr(fbi, "_GPU_EXHAUSTED", set())
+    placed = fbi._auto_placed(solve)
+    assert jax.grad(lambda p: placed(p, None, cfg))(1.0) == 2.0
+    jax.jit(lambda p: placed(p, None, cfg))(1.0)
+    jax.vmap(lambda p: placed(p, None, cfg))(jnp.ones(2))
+    assert seen == [gpu, cfg, cfg]
+    with monkeypatch.context() as patch:  # AD tracers kept by a future JAX degrade to the CPU
+        patch.setattr(fbi.jax.lax, "stop_gradient", lambda leaf: leaf)
+        jax.grad(lambda p: placed(p, None, cfg))(1.0)
+    assert seen.pop() is cfg
+    with pytest.raises(RuntimeError, match="INVALID_ARGUMENT"):
+        placed(1.0, "INVALID_ARGUMENT", cfg)
+    with pytest.warns(RuntimeWarning, match="GPU memory"):
+        assert placed(1.0, "RESOURCE_EXHAUSTED", cfg) == 2.0
+    assert placed(1.0, None, cfg) == 2.0 and seen[4:] == [gpu, cfg, cfg]
+
+
+@pytest.mark.parametrize("error", ["RESOURCE_EXHAUSTED: Out of memory", "INVALID_ARGUMENT"])
+def test_free_boundary_auto_gradient_falls_back_to_the_cpu(monkeypatch, error):
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+
+    cpu = jax.devices("cpu")[0]
+    gpu, auto = type("Gpu", (), {"implicit": SimpleNamespace(device=cpu)})(), type("Auto", (), {})()
+    calls = []
+
+    def bwd(cfg, saved, state_bar):
+        calls.append(cfg)
+        if cfg is gpu:
+            raise RuntimeError(error)
+        return jnp.ones(2), None
+
+    monkeypatch.setattr(fbi, "_placed_bwd", bwd)
+    monkeypatch.setattr(fbi, "_AUTO_OF", {gpu: auto})
+    monkeypatch.setattr(fbi, "_GPU_EXHAUSTED", set())
+    if error.startswith("INVALID"):
+        with pytest.raises(RuntimeError, match=error):
+            fbi._solve_bwd(gpu, "saved", "bar")
+        return
+    with pytest.warns(RuntimeWarning, match="gradient ran out of GPU memory"):
+        params_bar, _ = fbi._solve_bwd(gpu, "saved", "bar")
+    assert calls == [gpu, auto] and fbi._GPU_EXHAUSTED == {auto} and params_bar.devices() == {cpu}
+
+
+def test_free_boundary_callbacks_use_the_host_call(monkeypatch):
+    from types import SimpleNamespace
+
+    from vmex.core import freeboundary_implicit as fbi
+    from vmex.core import implicit as im
+
+    cfg = SimpleNamespace(implicit="implicit")
+    monkeypatch.setattr(fbi, "_baseline_struct", lambda _: ("rcon", "zcon"))
+    monkeypatch.setattr(im, "_state_struct", lambda _: "state")
+    monkeypatch.setattr(im, "_host_callable", lambda fn, _: fn)
+    monkeypatch.setattr(im, "_host_call", lambda *call: call)
+
+    for callback, host in ((fbi._callback, fbi._host_solve_and_mask),
+                           (fbi._callback_status, fbi._host_solve_and_mask_status)):
+        implicit, called, _, *args = callback("params", "field", cfg)
+        assert (implicit, called, args) == ("implicit", host, ["params", "field"])
+
+
 def test_host_callback_reuses_main_thread_executables():
     """A lane traced on the main thread is not traced again in a callback.
 
