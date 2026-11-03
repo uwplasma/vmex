@@ -1,7 +1,7 @@
 # VMEX
 
 [![PyPI version](https://img.shields.io/pypi/v/vmex.svg)](https://pypi.org/project/vmex/)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmex)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmex/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmex/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
@@ -56,8 +56,9 @@ radial preconditioner, polishing least squares, GMRES) and
 prints the interpreter, package versions and JAX devices; `vmex --test` solves a bundled QH deck
 end to end and writes its figures to `./vmex_test/`.
 
-Python 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, so a 3.11 environment
-resolves an older JAX; 3.12 or newer is recommended.
+Python 3.10, 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, JAX 0.7 and
+later need 3.11, and SciPy 1.16 needs 3.11, so an older interpreter resolves an older JAX and
+SciPy; 3.12 or newer is recommended. The `coils`, `neoclassical`, `turbulence` and `all` extras need Python 3.11 or newer.
 
 ### Optional packages for the full capabilities
 
