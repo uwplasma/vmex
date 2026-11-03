@@ -11,8 +11,8 @@ The defaults should cover most runs. They do the following:
 
 - **Precision and cache.** float64, and a compilation cache under `~/.cache/vmex/jax_cache`, split per machine.
 - **CPU threads.** One solve uses XLA's thread pool over the CPUs the process may use.
-- **Device.** `auto` chooses per stage from problem size (below). Optimization gradients, mirror
-  solves and the dense vacuum factor stay on CPU.
+- **Device.** `auto` chooses per stage from problem size (below). Mirror solves and the dense vacuum
+  factor stay on CPU.
 - **GPU memory.** Allocated on demand, so several processes can share a GPU.
 - **Several GPUs.** A solve uses the first GPU unless you pass a `jax.Device`. VMEX does not shard one
   solve across GPUs, and no multi-GPU speedup of one solve has been measured.
@@ -22,10 +22,10 @@ The defaults should cover most runs. They do the following:
 
 | Setting | Default | Change it when |
 | --- | --- | --- |
-| `device=` / `--device` | `auto` | Your timing shows the other device wins: the crossover varies by machine |
+| `device=` / `--device` | `auto` | Your timing shows the other device wins: the crossover varies by machine. `auto` runs eager free-boundary gradients on the GPU when the problem is large, and falls back to the CPU if GPU memory runs out |
 | `device=jax.devices("gpu")[i]` | first GPU | You assign independent cases to separate GPUs |
 | `workers=` | available CPUs, at most one per case | Sharing a node, or the case count exceeds what the cores can run well: each worker also uses XLA threads |
-| `adjoint_solver=` (free boundary) | `coupled_gcrot` | Use `boundary_schur` for free-boundary gradients, unless you need the certified Krylov path |
+| `adjoint_solver=` (free boundary) | `boundary_schur` | Use `coupled_gcrot` only to cross-check a gradient, or when the banded factor does not fit host memory |
 | `jac_chunk_size=` | `auto` | Memory runs out (smaller), or memory is ample and Jacobians are slow (larger) |
 | `NPROC`, `OPENBLAS_NUM_THREADS` | not set | Several processes share a node: give each its share before starting Python |
 | `VMEX_COMPILATION_CACHE_DIR` | under `~/.cache` | The home filesystem is slow or small, or a cluster needs a shared path; `disabled` turns the cache off |
