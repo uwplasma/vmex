@@ -545,8 +545,8 @@ class ConstructedMaximumJResidual(MaximumJResidual):
 
 
 def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
-                 t_final=None, nsteps: int = 256, degree: int = 3,
-                 clamp: bool = False) -> dict[str, Array]:
+                 t_final=None, length=None, nsteps: int = 256,
+                 degree: int = 3, clamp: bool = False) -> dict[str, Array]:
     """Integrate the bounce-averaged drift ``(s(t), alpha(t))`` of one pitch.
 
     With ``J`` the action and ``tau`` the bounce time, both per unit speed
@@ -568,9 +568,17 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
     integrated with ``nsteps`` RK4 steps, all in ``jnp``, so every output is
     differentiable in the inputs. ``t_final=None`` closes one turn of all
     but the slowest tenth of the grid, ``2 pi / percentile_10 |dalpha/dt|``.
-    Each initial condition ``(s0, alpha0)`` (broadcast together) gives one orbit; ``s_max`` is its
-    largest radius, and ``action`` the fitted ``J`` along it, constant up to
-    the integration error. ``clamp=True`` evaluates the fit at the radius
+    With ``length`` the contour is traced by arc length in the
+    ``(s cos alpha, s sin alpha)`` plane instead, and ``t`` is that arc
+    length. ``tau`` then drops out, every orbit gets the same resolution
+    whatever its drift speed, and ``s_max`` is the reach of the drift surface
+    along ``length``; time-based reach needs many RK4 steps per precession
+    turn and ill-conditions the gradient. The LCFS absorbs: past ``s = 1`` the drift fades out over ``0.05`` in
+    ``s``, so a lost orbit stops there rather than following the
+    extrapolated fit. Each initial condition ``(s0, alpha0)`` (broadcast
+    together) gives one orbit; ``s_max`` is its largest radius, and
+    ``action`` the fitted ``J`` along it, constant up to the integration
+    error inside the plasma. ``clamp=True`` evaluates the fit at the radius
     clipped to the finite surfaces, so an orbit that leaves the window where
     the well exists meets frozen edge fields instead of the polynomial's
     extrapolation.
@@ -607,15 +615,29 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
         return (jnp.real(j_k @ phase), jnp.real((dsp @ cj) @ phase),
                 jnp.real((1j * k * j_k) @ phase), jnp.real(tau_k @ phase))
 
-    def rhs(y):
+    def velocity(y):
         _, j_s, j_alpha, tau = fields(y)
         return jnp.stack([j_alpha, -j_s]) / tau
 
-    if t_final is None:
-        grid = jnp.stack(jnp.broadcast_arrays(
-            s[:, None], jnp.asarray(alpha, dtype=dtype)[None, :]), -1).reshape(-1, 2)
-        rate = jnp.abs(jax.vmap(rhs)(grid)[:, 1])
-        rate = jnp.where(jnp.repeat(finite, nalpha), rate, jnp.nan)
+    def rhs(y):
+        # The LCFS absorbs: the drift fades out over 0.02 in s beyond it, so a
+        # lost orbit stops near s = 1 instead of following an extrapolated J.
+        v = velocity(y)
+        if length is not None:  # unit speed in the (s cos alpha, s sin alpha) plane
+            # slow down near stagnation points of J, where the direction is undefined
+            v = v / jnp.sqrt(v[0] ** 2 + (y[0] * v[1]) ** 2 + (0.1 * speed) ** 2)
+        return (0.5 - 0.5 * jnp.tanh((jnp.abs(y[0]) - 1.0) / 0.02)) * v
+
+    grid = jnp.stack(jnp.broadcast_arrays(
+        s[:, None], jnp.asarray(alpha, dtype=dtype)[None, :]), -1).reshape(-1, 2)
+    grid_velocity = jax.vmap(velocity)(grid)
+    usable = jnp.repeat(finite, nalpha)
+    speed = jnp.nanmedian(jnp.where(usable, jnp.hypot(
+        grid_velocity[:, 0], grid[:, 0] * grid_velocity[:, 1]), jnp.nan))
+    if length is not None:
+        t_final = length
+    elif t_final is None:
+        rate = jnp.where(usable, jnp.abs(grid_velocity[:, 1]), jnp.nan)
         t_final = 2.0 * jnp.pi / jnp.nanpercentile(rate, 10.0)
     dt = jnp.asarray(t_final, dtype=dtype) / nsteps
 
@@ -642,7 +664,7 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
 
 def drift_surfaces_from_boozer(
     *, bmnc_b, xm_b, xn_b, iota_b, G_b, I_b, nfp: int, s_b, pitch, s0,
-    alpha0=0.0, bmns_b=None, t_final=None, nsteps: int = 256, degree: int = 3,
+    alpha0=0.0, bmns_b=None, t_final=None, length=None, nsteps: int = 256, degree: int = 3,
     nalpha: int = 32, points_per_period: int = 64, num_periods: int = 12,
     max_wells: int | None = None, quadrature_order: int = 32, clamp: bool = False,
 ) -> dict[str, Array]:
@@ -679,7 +701,8 @@ def drift_surfaces_from_boozer(
 
     j_map, tau_map = first_well(out["action"]), first_well(out["bounce_time"])
     orbits = drift_orbits(j_map, tau_map, s_b, alpha, s0, alpha0,
-                          t_final=t_final, nsteps=nsteps, degree=degree, clamp=clamp)
+                          t_final=t_final, length=length, nsteps=nsteps, degree=degree,
+                          clamp=clamp)
     b_max, b_min = jnp.max(out["bmag"], axis=(1, 2)), jnp.min(out["bmag"], axis=(1, 2))
     return {**orbits, "j_map": j_map, "tau_map": tau_map, "alpha_grid": alpha,
             "s_grid": jnp.asarray(s_b), "mirror": (b_max - b_min) / (b_max + b_min)}
@@ -711,10 +734,11 @@ class DriftConfinementResidual(MaximumJResidual):
     every sampled surface and line; they need no orbit integration but
     reward a large ``|d<J>/ds|``, so keep them a weak regulariser. Orbits
     whose launch point has no trapped well add nothing: those particles
-    are passing. Choose ``t_final`` as the physical window in the
-    dimensionless time of :func:`drift_orbits` (about 4000 for 10 ms of a
-    3.5 MeV alpha at reactor scale); the bounce-averaged model has no
-    finite orbit width, so keep ``s0`` well inside and cross-check with
+    are passing. Orbits are traced by arc length (``length=8``, see
+    :func:`drift_orbits`), which reaches the end of every drift surface once
+    and keeps the gradient well conditioned; pass ``t_final`` to follow
+    physical time instead. The bounce-averaged model has no finite orbit
+    width, so keep ``s0`` well inside and cross-check with
     guiding-centre tracing.
 
     Three optional terms, all off by default, address what the bounce-averaged
@@ -749,6 +773,8 @@ class DriftConfinementResidual(MaximumJResidual):
         self.s_limit, self.floor = float(s_limit), float(floor)
         self.mirror_target, self.mirror_weight = mirror_target, float(mirror_weight)
         self.fow, self.fow_weight = fow, float(fow_weight)
+        if "t_final" not in drift_options:
+            drift_options.setdefault("length", 8.0)
         self.residual_options = drift_options
 
     def compute_state(self, state, rt):
