@@ -48,6 +48,10 @@ links to the module that documents it.
   / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
 - :func:`~vmex.core.scaling.axis_field` / :func:`~vmex.core.scaling.match_b0` —
   ``|B|`` on the magnetic axis, and the scaled deck that sets it
+- :func:`~vmex.core.scaling.estimate_axis_field` /
+  :func:`~vmex.core.scaling.probe_axis_field` /
+  :func:`~vmex.core.scaling.match_b0_from_input` — the same field from the
+  input alone (no solve) or two coarse solves, to set ``PHIEDGE`` before the run
 - :func:`~vmex.core.setup.boundary_volume` — input-boundary volume, the
   ``TVOLUME`` that holds an optimized plasma at its seed size
 
@@ -339,6 +343,9 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # dimensional scaling
     "axis_field": (".core.scaling", "axis_field"),
     "match_b0": (".core.scaling", "match_b0"),
+    "estimate_axis_field": (".core.scaling", "estimate_axis_field"),
+    "probe_axis_field": (".core.scaling", "probe_axis_field"),
+    "match_b0_from_input": (".core.scaling", "match_b0_from_input"),
     "scale_input": (".core.scaling", "scale_input"),
     "boundary_volume": (".core.setup", "boundary_volume"),
     "scale_mgrid": (".core.scaling", "scale_mgrid"),
