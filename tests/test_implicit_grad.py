@@ -28,6 +28,7 @@ import os
 import pickle
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -445,6 +446,67 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
     forward = sum(float(jnp.vdot(c, s)) for c, s in
                   zip(jax.tree.leaves(cotangent), jax.tree.leaves(tangent)))
     assert abs(reverse - forward) <= 1e-10 * abs(forward)
+
+
+def _cancelling_block_system(ns=5, bs=2):
+    """A block-tridiagonal raw Jacobian whose diagonal blocks nearly cancel.
+
+    Each diagonal block is ``[[1, 1], [1, 1 + 1e-9]]``, so ``J^T mu`` with
+    ``mu = (1, -1)`` is 1e-9 against the 2 that the products add up from: the
+    adjoint of an objective that is stationary at the equilibrium (``wb``).
+    Plain arrays stand in for the spectral state.
+    """
+    eye = jnp.eye(bs)
+    near = jnp.array([[1.0, 1.0], [1.0, 1.0 + 1.0e-9]])
+    diagonal = jnp.tile(near, (ns, 1, 1))
+    lower = jnp.zeros((ns, bs, bs)).at[1:].set(1.0e-12 * eye)
+    upper = jnp.zeros((ns, bs, bs)).at[:-1].set(1.0e-12 * eye)
+    ones = jnp.ones((ns, bs))
+    identity = lambda tree: tree  # noqa: E731
+    system = im._RawBlockSystem(
+        im.block_thomas_factor(lower, diagonal, upper), identity, identity, identity,
+        None, None, None, None, lower, diagonal, upper, ones, ones)
+
+    def pullback(mu):
+        return im.block_tridiag_matvec(
+            jnp.zeros_like(upper).at[1:].set(jnp.swapaxes(upper[:-1], -1, -2)),
+            jnp.swapaxes(diagonal, -1, -2),
+            jnp.zeros_like(lower).at[:-1].set(jnp.swapaxes(lower[1:], -1, -2)), mu)
+
+    return system, pullback, jnp.tile(jnp.array([1.0, -1.0]), (ns, 1))
+
+
+def test_block_adjoint_acceptance_stops_at_the_roundoff_of_the_residual():
+    """A block adjoint at round-off is accepted however small its rhs is.
+
+    ``adjoint_tol = 1e-11`` once rejected the adjoint of ``wb`` (nfp2_QA, ns 31:
+    residual 2.8e-15 against ``10 tol ||b|| = 2.8e-16``) and the GCROT fallback
+    then stalled for 30,000 iterations.  The acceptance now has a floor at
+    10 eps ``|| |J|^T |mu| ||``.  A multiplier that solves the wrong system
+    still misses it.
+    """
+    system, exact, mu_true = _cancelling_block_system()
+    b = exact(mu_true)
+
+    def pullback(mu):  # the raw VJP carries round-off of the size of its terms
+        return exact(mu) + 1.0e-16 * jnp.ones_like(mu)
+
+    cfg = SimpleNamespace(adjoint_tol=1.0e-11)
+    mu, residual, tolerance = im._block_adjoint(system, pullback, b, cfg, 1.0e-11)
+    # the rhs is 1e-9 against products of 2: the old relative test could not pass
+    assert float(residual) > im._ADJOINT_RESIDUAL_SLACK * 1.0e-11 * float(im._tree_norm(b))
+    assert float(residual) <= float(tolerance)
+    assert float(tolerance) < 1.0e-12 * float(im._tree_norm(mu))
+    # a looser tolerance is unchanged: the floor only ever raises the bound
+    _, _, loose = im._block_adjoint(system, pullback, b, cfg, 1.0e-2)
+    assert float(loose) == pytest.approx(
+        im._ADJOINT_RESIDUAL_SLACK * 1.0e-2 * float(im._tree_norm(b)))
+
+    def wrong(mu):  # a pullback of a different system than the factored one
+        return 1.01 * pullback(mu)
+
+    _, bad_residual, bad_tolerance = im._block_adjoint(system, wrong, b, cfg, 1.0e-11)
+    assert float(bad_residual) > float(bad_tolerance)
 
 
 def test_adjoint_tolerance_change_reuses_every_executable(solovev):
