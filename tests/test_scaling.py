@@ -616,3 +616,41 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
     )
     assert abs(scaled_wout.volavgB / 5.8646 - 1.0) <= 2.0 * declared_error
     assert scaled_wout.Aminor_p == pytest.approx(1.7044, rel=2e-12)
+
+
+@pytest.mark.parametrize("name, ns", [
+    ("input.circular_tokamak", [9, 13]),      # AM = 0: V = 2 pi^2 R0 a^2 = 48 pi^2 exactly
+    ("input.solovev_analytical", [15, 21]),   # finite beta and toroidal current
+    ("input.nfp2_QA_finite_beta", [7, 11]),   # 3D, finite beta
+])
+def test_tvolume_run_is_the_dilation_of_the_unscaled_run(name, ns):
+    """A boundary dilated by lambda is the boundary rescaled to TVOLUME = lambda^3 V.  With
+    B -> B / lambda^2 (phiedge fixed, p ~ B^2, I ~ B R) the equilibrium is self-similar:
+    iota, beta and the aspect ratio are unchanged and the volume is the target.  The deck
+    below keeps the unscaled boundary and axis, so only TVOLUME carries the dilation."""
+    base = VmecInput.from_file(DATA / name)
+    base = dataclasses.replace(base, ns_array=np.array(ns), ftol_array=np.full(2, 1e-11),
+                               niter_array=np.full(2, 4000))
+    lam = 1.4
+
+    def solve(deck):
+        result = solve_multigrid(deck, verbose=False, device="cpu")
+        assert result.converged
+        return wout_from_state(inp=deck, state=result.state, fsqr=float(result.fsqr),
+                               fsqz=float(result.fsqz), fsql=float(result.fsql),
+                               niter=int(result.iterations), converged=True)
+
+    ref = solve(base)
+    if name.endswith("circular_tokamak"):
+        assert ref.volume_p == pytest.approx(48 * np.pi**2, rel=1e-12)
+    dilated = dataclasses.replace(
+        scale_input(base, b_scale=lam**-2, r_scale=lam), rbc=base.rbc, rbs=base.rbs,
+        zbc=base.zbc, zbs=base.zbs, raxis_c=base.raxis_c, raxis_s=base.raxis_s,
+        zaxis_c=base.zaxis_c, zaxis_s=base.zaxis_s, tvolume=lam**3 * ref.volume_p)
+    got = solve(dilated)
+    assert got.volume_p == pytest.approx(lam**3 * ref.volume_p, rel=1e-12)
+    np.testing.assert_allclose(got.iotaf, ref.iotaf, rtol=0.0, atol=1e-8)
+    for key in ("betatotal", "aspect"):
+        assert getattr(got, key) == pytest.approx(getattr(ref, key), rel=1e-8)
+    assert got.Aminor_p == pytest.approx(lam * ref.Aminor_p, rel=1e-9)
+    assert got.b0 == pytest.approx(ref.b0 / lam**2, rel=1e-8)

@@ -772,8 +772,7 @@ def _boundary_from_params(params: ImplicitParams, cfg: ImplicitConfig):
 
     rbc, rbs, zbc, zbs = (jnp.asarray(a) for a in
                           (params.rbc, params.rbs, params.zbc, params.zbs))
-    if cfg.inp.tvolume > 0.0:
-        rbc, rbs, zbc, zbs = rescale_boundary_volume(rbc, rbs, zbc, zbs, cfg.inp)
+    rbc, rbs, zbc, zbs = rescale_boundary_volume(rbc, rbs, zbc, zbs, cfg.inp)
     if lasym:
         rbc, rbs, zbc, zbs = _lasym_delta_rotation_traceable(
             rbc, rbs, zbc, zbs, cfg, mpol=mpol, ntor=ntor)

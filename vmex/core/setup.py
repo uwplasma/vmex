@@ -272,7 +272,8 @@ def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
     ``(tvolume/V)^(1/3)``.  With it the ``m = 0`` harmonics (axis shape and
     major radius) are held and the ``m > 0`` harmonics are scaled by ``c``,
     with ``V(c) = A c^2 + B c^3`` solved exactly by Newton's method, where
-    VMEC2000 uses the Pappus estimate ``c = sqrt(tvolume/V)``.  Traceable:
+    VMEC2000 uses the Pappus estimate ``c = sqrt(tvolume/V)``.  Like VMEC2000,
+    it does nothing for a free-boundary run (``lfreeb``).  Traceable:
     the scale factor carries the derivative of the volume constraint.
 
     An optimizer's raw boundary coefficients therefore hold a null direction:
@@ -282,8 +283,10 @@ def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
     coefficient fixed for a nonsingular Jacobian (a fixed ``RBC(0,0)`` already
     does so without ``lvolume_rfix``).
     """
-    mpol, ntor, nfp = int(inp.mpol), int(inp.ntor), int(inp.nfp)
+    if inp.tvolume <= 0.0 or inp.lfreeb:  # VMEC2000 skips free boundary: the coils fix the size
+        return rbc, rbs, zbc, zbs
     rbc, rbs, zbc, zbs = (jnp.asarray(a, dtype=float) for a in (rbc, rbs, zbc, zbs))
+    mpol, ntor, nfp = int(inp.mpol), int(inp.ntor), int(inp.nfp)
     theta = 2.0 * np.pi * np.arange(3 * mpol + 2) / (3 * mpol + 2)
     zeta = 2.0 * np.pi * np.arange(3 * ntor + 1) / ((3 * ntor + 1) * nfp)
     m = np.arange(mpol)
@@ -353,9 +356,8 @@ def _internal_blocks_from_input(inp: VmecInput) -> tuple[dict[str, np.ndarray], 
     rbs = np.asarray(inp.rbs, dtype=float).copy()
     zbc = np.asarray(inp.zbc, dtype=float).copy()
     zbs = np.asarray(inp.zbs, dtype=float).copy()
-    if inp.tvolume > 0.0:
-        rbc, rbs, zbc, zbs = (np.array(a) for a in
-                              rescale_boundary_volume(rbc, rbs, zbc, zbs, inp))
+    rbc, rbs, zbc, zbs = (np.array(a) for a in
+                          rescale_boundary_volume(rbc, rbs, zbc, zbs, inp))
     if lasym:
         rbc, rbs, zbc, zbs = _lasym_delta_rotation(rbc, rbs, zbc, zbs,
                                                    mpol=mpol, ntor=ntor)

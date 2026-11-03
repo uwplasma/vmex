@@ -34,6 +34,7 @@ from vmex.core.input import VmecInput
 from vmex.core.setup import (
     rescale_boundary_volume,
     _geometry_state_arrays,
+    _internal_blocks_from_input,
     interior_guess,
     run_setup,
 )
@@ -309,3 +310,73 @@ def test_tvolume_rescales_boundary_to_the_exact_volume(rfix, tmp_path):
     assert float(jnp.max(jnp.abs(jax.grad(volume)(rbc)))) < 1e-12
     held = rescale_boundary_volume(rbc, inp.rbs, inp.zbc, inp.zbs, inp)[0][:, 0]
     assert np.allclose(held, rbc[:, 0]) == rfix
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+@pytest.mark.parametrize("nfp, lasym, flip", [(1, False, 1.0), (5, False, -1.0), (2, True, 1.0)])
+def test_tvolume_elliptical_torus_closed_form(rfix, nfp, lasym, flip):
+    """R = R0 + a cos u + s sin u, Z = b sin u + e cos u encloses 2 pi^2 R0 (a b - s e)
+    for any nfp and orientation.  Scaling every harmonic gives lambda^3 V = T; holding
+    m = 0 gives c^2 V = T, where Pappus' theorem is exact (the centroid stays at R0)."""
+    r0, a, b, (s, e), target = 3.0, 0.8, 1.3, ((0.2, 0.3) if lasym else (0.0, 0.0)), 40.0
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.circular_tokamak"), nfp=nfp, lasym=lasym,
+        tvolume=target, lvolume_rfix=rfix)
+    mode = lambda m, v: np.eye(1, inp.mpol, m) * v  # noqa: E731
+    rbc, rbs = mode(0, r0) + mode(1, a), mode(1, s)
+    zbs, zbc = flip * mode(1, b), flip * mode(1, e)
+    volume = 2 * np.pi**2 * r0 * (a * b - s * e)
+    scale = np.sqrt(target / volume) if rfix else np.cbrt(target / volume)
+    out = rescale_boundary_volume(rbc, rbs, zbc, zbs, inp)
+    held = np.eye(1, inp.mpol, 0)
+    for got, ref in zip(out, (rbc, rbs, zbc, zbs)):
+        want = scale * ref + ((1 - scale) * ref * held if rfix else 0.0)
+        np.testing.assert_allclose(got, want, rtol=0.0, atol=1e-13)
+
+
+@pytest.mark.parametrize("tvolume, lfreeb", [(-1.0, False), (0.0, False), (4.0, True)])
+def test_tvolume_is_a_noop_when_off_or_free_boundary(tvolume, lfreeb):
+    """Missing, zero and negative targets leave the boundary alone; so does a free-boundary
+    run (VMEC2000 RESCALE_BOUNDARY requires .not. lfreeb): the coils set the size."""
+    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
+    inp = dataclasses.replace(inp, tvolume=tvolume, lfreeb=lfreeb, mgrid_file="mgrid.nc")
+    arrays = (inp.rbc, inp.rbs, inp.zbc, inp.zbs)
+    for got, ref in zip(rescale_boundary_volume(*arrays, inp), arrays):
+        np.testing.assert_array_equal(np.asarray(got), np.asarray(ref))
+    base = _internal_blocks_from_input(dataclasses.replace(inp, tvolume=-1.0))[0]
+    for name, block in _internal_blocks_from_input(inp)[0].items():
+        np.testing.assert_array_equal(block, base[name])
+
+
+def _vmec2000_rescale(inp, rbc, zbs):
+    """Port of RESCALE_BOUNDARY (STELLOPT VMEC2000, vmec_input.f), stellarator symmetric:
+    volume 2 pi |<R Z dR/du>| and area |<Z dR/du>| on a (u, v) fraction grid, Pappus
+    major radius V / (2 pi A), and all harmonics scaled before the m = 0 row is restored."""
+    u, v = np.meshgrid(np.arange(64) / 64, np.arange(64) / 64, indexing="ij")
+    n = np.arange(-inp.ntor, inp.ntor + 1)[:, None]
+    ang = 2 * np.pi * (np.arange(inp.mpol) * u[..., None, None] - n * v[..., None, None])
+    rz = lambda r, z: (np.sum(r * np.cos(ang), (-2, -1)), np.sum(z * np.sin(ang), (-2, -1)),  # noqa: E731
+                       -2 * np.pi * np.sum(np.arange(inp.mpol) * r * np.sin(ang), (-2, -1)))
+    r, z, ru = rz(rbc, zbs)
+    vol, area = 2 * np.pi * abs(np.mean(r * z * ru)), abs(np.mean(z * ru))
+    if not inp.lvolume_rfix:
+        return rbc * np.cbrt(inp.tvolume / vol), zbs * np.cbrt(inp.tvolume / vol), vol
+    ar00 = vol / (2 * np.pi * area)
+    f = np.sqrt(inp.tvolume / (2 * np.pi * ar00) / area)
+    keep = np.zeros_like(rbc, dtype=bool)
+    keep[inp.ntor:, 0] = True
+    return np.where(keep, rbc, rbc * f), np.where(keep, zbs, zbs * f), vol
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_tvolume_matches_the_vmec2000_reference_formula(rfix):
+    """Without LVOLUME_RFIX VMEX equals the VMEC2000 harmonics to round-off.  With it
+    VMEC2000 is a Pappus estimate (volume off the target at the percent level for a
+    shaped 3D boundary); VMEX is exact, and the two agree to that estimate's error."""
+    inp = dataclasses.replace(VmecInput.from_file(DATA_DIR / "input.li383_low_res"),
+                              tvolume=4.0, lvolume_rfix=rfix)
+    rbc_ref, zbs_ref, _ = _vmec2000_rescale(inp, np.asarray(inp.rbc), np.asarray(inp.zbs))
+    rbc, _, _, zbs = rescale_boundary_volume(inp.rbc, inp.rbs, inp.zbc, inp.zbs, inp)
+    tol = 2e-3 if rfix else 1e-13
+    np.testing.assert_allclose(rbc, rbc_ref, rtol=0.0, atol=tol)
+    np.testing.assert_allclose(zbs, zbs_ref, rtol=0.0, atol=tol)
