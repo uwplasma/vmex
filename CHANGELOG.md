@@ -6,6 +6,7 @@ record under `benchmarks/` names the revision it was measured at.
 
 ## Unreleased
 
+- **Self-consistent bootstrap at the ambipolar E_r.** `examples/optimization/QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to DKX's `<j.B>` at each surface's ambipolar `E_r` (`KineticBootstrapMismatch(ambipolar=True)`) with QI shape stages, and asserts that the final equilibrium current matches DKX within 5 % rms on the kinetic surfaces. `self_consistent_bootstrap` gains `current_model` and `initial_state`. Needs `dkx>=2.12.0`, now the floor of the `dkx` extra.
 - `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
 
 ## 0.12.0 - 2026-10-21
