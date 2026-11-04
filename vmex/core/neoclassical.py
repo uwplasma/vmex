@@ -1391,10 +1391,20 @@ def conserving_stellarator_proxy(
         rhs = jnp.where(regular[..., None], rhs / scale, 0.)
         cross = jnp.where(regular, cross, 0.)
         trial = (rhs - cross[..., None] * rhs[..., ::-1]) / jnp.where(regular, determinant, 1.)[..., None] / scale
-        positive = jnp.concatenate((trial, one[..., None]), -1)
-        negative = jnp.concatenate((-trial, one[..., None]), -1)
-        upper = nu * jnp.einsum("...i,...ij,...j->...", positive, collision, positive)
-        upper += jnp.einsum("...i,...ij,...j->...", negative, residual, negative) / nu
+        def positive_functional(case):
+            field_e, frequency, macro, flow_constant = case
+            re = (even[..., 3, :] - flow_constant * even[..., 2, :]
+                  - macro * (field_e * even[..., 0, :] + field_e**3 * even[..., 1, :]))
+            ro = (field_e * (odd[..., 4, :] - flow_constant * odd[..., 3, :])
+                  - macro * (odd[..., 0, :] + field_e**2 * odd[..., 1, :] + field_e**4 * odd[..., 2, :]))
+            heat = macro * (field_e * c1 + field_e**3 * c3) + np.sqrt(5) * (p + flow_constant) / 2
+            dissipated = (16 * s / 15 * jnp.mean(heat**2)
+                          + 8 * s / 5 * jnp.mean(jacobian * (macro * field_e**2 * a2)**2))
+            defect = jnp.mean(jnp.einsum("...v,vw,...w->...", re, even_metric, re) * w3)
+            defect += jnp.mean(jnp.einsum("...v,vw,...w->...", ro, odd_metric, ro) * w4)
+            return (frequency * dissipated + defect / frequency) / center
+        cases = jnp.stack((electric, nu, trial[..., 0], trial[..., 1]), -1)
+        upper = jax.lax.map(positive_functional, cases.reshape((-1, 4))).reshape(nu.shape)
         source_free = jnp.all(ej == 0)
         upper = jnp.where(source_free, 0., upper)
         valid &= macro_chart & (regular | source_free)
@@ -1414,7 +1424,7 @@ class ConservingHeatBound(_ResidualTerm):
     Γ=(Z*e)^4*logΛ/(8*pi*epsilon0²); they are not Lorentz deflection rates.
     ``radial_electric_fields`` are −dΦ/dr in V/m. The flux radius is
     r=minor_radius*sqrt(psi/psi_edge), with psi the signed toroidal flux/(2π).
-    The source uses the pure-temperature force with zero electrochemical force X1.
+    The source uses the temperature force with independent pressure force A1=0.
 
     Fits a finite Fourier J=Bhat⁻² on a fixed grid and reports its sampled field
     error separately. Increase ``geometry_order``, ``fit_grid`` and Boozer

@@ -1085,8 +1085,31 @@ single-species Landau upper bound directly from the equilibrium's Boozer
 spectrum. It includes the test-particle and field-particle collision terms,
 parallel streaming, mirror trapping and the incompressible DKES electric
 drift. Tangential magnetic drift and interspecies collisions are outside
-this objective. The scalar response is the heat coefficient for the
-temperature force with the other thermodynamic force set to zero.
+this objective. To specify the physical response, write the distribution
+as a Maxwellian plus a perturbation, :math:`f=F_M+f_1`, and use the standard
+pressure and temperature forces
+
+.. math::
+
+   A_1=\frac{d\ln p}{d\psi}+\frac{Ze\Phi'}{T},\qquad
+   A_2=\frac{d\ln T}{d\psi},\qquad
+   \frac{\partial_\psi F_M|_{\mathcal E}}{F_M}
+      =A_1+\left(\frac{mv^2}{2T}-\frac52\right)A_2.
+
+Here :math:`\mathcal E=mv^2/2+Ze\Phi` and temperature is in energy units.
+The conductive heat flux is
+
+.. math::
+
+   Q^\psi=\left\langle\int\left(\frac{mv^2}{2}-\frac{5T}{2}\right)
+                (\boldsymbol v_d\cdot\nabla\psi)f_1\,d^3v\right\rangle_\psi,
+   \qquad Q^\psi/T=-L_{21}A_1-L_{22}A_2.
+
+The objective bounds :math:`\chi_r=(L_{22}/n)(dr/d\psi)^2` at
+:math:`A_1=0`, so :math:`Q^r=-n\chi_r\,dT/dr`. Setting the particle flux
+to zero would require a different combination of transport coefficients.
+These conventions and the incompressible trajectory choice follow
+`Landreman et al. (2014) <https://doi.org/10.1063/1.4870077>`_.
 
 The underlying :func:`vmex.core.neoclassical.conserving_stellarator_proxy`
 takes a finite Fourier representation of :math:`J=\widehat B^{-2}` in
@@ -1169,6 +1192,10 @@ The selected affine branch is differentiated directly, with no minimum
 switch between two objectives. It reports ``scalar_upper`` for comparison
 and retains the original lower endpoint. Grid forms are assembled once;
 only small polynomial matrices depend on each collision/field scenario.
+After solving for the coefficients, the implementation combines the
+residual fields before evaluating their positive norms. This avoids
+cancellation in an expanded quadratic when two trial contributions
+nearly cancel; no clipping or change of the bound is required.
 The moment constraints hold by construction; the positive two-variable
 solve is checked before returning a valid result. As with the scalar bound, geometry-fitting and
 floating-point errors remain separate.
@@ -1215,7 +1242,10 @@ The state objective returns heat diffusivity in m\ :sup:`2`/s. With
 Here ``collision_strengths`` means
 :math:`\nu_C=n(Ze)^4\ln\Lambda/(8\pi\epsilon_0^2m^2v_t^3)` in
 s\ :sup:`-1`, and ``radial_electric_fields`` means :math:`E_r=-d\Phi/dr`
-in V/m. VMEX supplies the signed toroidal flux :math:`\psi=\Phi_t/(2\pi)`.
+in V/m. The adapter uses the signed toroidal flux recorded in ``psi_b``
+and its corresponding ``psi_edge``. A native WOUT reader may choose the
+opposite radial orientation: compare the same physical :math:`E_r` after
+converting it separately in each chart, rather than copying :math:`E_*`.
 The flux radius :math:`r=a\sqrt{\psi/\psi_{\rm edge}}` fixes its derivative
 even when the computational radial mesh uses a nonlinear flux profile.
 The loss is the smooth upper envelope over the selected surfaces,

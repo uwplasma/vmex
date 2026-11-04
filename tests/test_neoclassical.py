@@ -751,6 +751,13 @@ def test_full_coulomb_heat_bracket_and_maxwell_flux_lift():
                                    [15 / (16 * root * frequency), 16 * root / (5 * frequency)], rtol=2e-13)
         # The one-mode collision inverse is a continuum lower bound only.
         assert float(out['upper'] / out['lower']) == pytest.approx(512 / (75 * np.pi))
+    # The two-Sonine ion heat trial recovers the standard Braginskii 125/32
+    # parallel-conductivity coefficient, with ion-electron collisions omitted.
+    collision = root * np.array([[16 / 15, 8 * np.sqrt(7) / 35], [8 * np.sqrt(7) / 35, 12 / 7]])
+    inverse = root * np.array([[16 / 5, -16 * np.sqrt(7) / 35], [-16 * np.sqrt(7) / 35, 304 / 105]])
+    out = conserving_transport_bounds(collision, np.zeros((2, 2)), [1., 0.], [1., 0.], inverse)
+    assert out['valid']
+    np.testing.assert_allclose((10 / 3) * root * out['lower'], 125 / 32, rtol=2.e-14)
 
 
 def test_signed_goal_retains_antisymmetric_response_missed_by_polarization():
