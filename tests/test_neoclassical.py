@@ -1539,6 +1539,165 @@ def test_full_coulomb_state_objective_flux_units_and_equilibrium_derivatives(mon
             neoclassical.ConservingHeatBound(**(options | dict(surfaces=[.5]) | update))
 
 
+def test_full_coulomb_macro_matches_complete_velocity_polynomials():
+    """Full degree-four velocity closure independently checks the reduced affine bound."""
+    wave = np.array([[0, 0], [1, 0], [0, 1], [1, -1]])
+    coefficient = np.array([1.2, .18, .013j, .006])
+    options = dict(iota=.41, G_b=3., I_b=.02, nfp=2, collision_frequency=10., electric_field=.01)
+    count, mean, e, nu = 97, 1.2, .012, 10.
+    x, y = np.meshgrid(*(2 * np.pi * np.arange(count) / count,) * 2, indexing="ij")
+    phase = np.exp(1j * (x[..., None] * wave[:, 0] + y[..., None] * wave[:, 1]))
+    kd, ke = wave @ np.array([.41, 2.]), wave @ np.array([3., -.04]) / (3. + .41 * .02)
+    pcoef = np.divide(ke, kd, out=np.zeros_like(kd), where=kd != 0) * coefficient
+    J, p, dj, ej = [np.real(phase @ v) for v in (coefficient, pcoef, 1j * kd * coefficient, 1j * ke * coefficient)]
+    fx, fy = np.meshgrid(*(np.rint(np.fft.fftfreq(count) * count),) * 2, indexing="ij")
+    along, across = .41 * fx + 2 * fy, (3 * fx - .04 * fy) / (3. + .41 * .02)
+
+    def derivative(value, frequency):
+        factor = (1j * frequency).reshape((count, count) + (1,) * (value.ndim - 2))
+        return np.fft.ifft2(np.fft.fft2(value, axes=(0, 1)) * factor, axes=(0, 1)).real
+
+    def primitive(value):
+        support = (abs(fx) <= 5) & (abs(fy) <= 5) & ((fx != 0) | (fy != 0))
+        factor = np.divide(1., 1j * along, out=np.zeros_like(along, dtype=complex), where=support)
+        return np.fft.ifft2(np.fft.fft2(value) * factor).real
+
+    u = (J - mean) / mean
+    phi = (1 - 3 * u + 6 * u**2) * primitive(p) / mean**3
+    psi = J**3 * phi
+    density, flow = -derivative(psi, along), e * derivative(psi, across)
+    r = e * (3 * ej * phi + J * derivative(phi, across))
+    force = -e * (J * derivative(r, across) + 1.5 * ej * r)
+    correction = -4 * np.mean(force) / np.mean(dj**2)
+    pressure = primitive(force + .25 * correction * dj**2)
+    energy = 3 * pressure + correction * J * dj
+    heat_flow = -e * primitive(derivative(energy, across))
+    pe, po = np.zeros((count, count, 3, 6)), np.zeros((count, count, 3, 6))
+    pe[..., 0, 0], pe[..., 0, 2] = density, np.sqrt(1.5) * (density - 2 * energy / 3)
+    pe[..., 0, 3] = (3 * pressure - energy) / np.sqrt(3)
+    po[..., 0, 1], po[..., 0, 4] = np.sqrt(2) * flow, np.sqrt(5) * (flow - 2 * heat_flow / 5)
+    po[..., 1, 4], po[..., 2, 4] = np.sqrt(5) / 2, np.sqrt(5) * p / 2
+
+    # Gaussian quadrature derives all streaming/mirror/source matrix entries,
+    # including invariant and ell=4 components omitted by the reduced runtime.
+    z, wz = np.polynomial.hermite.hermgauss(7)
+    vperp2, wp = np.polynomial.laguerre.laggauss(7)
+    z, vperp2 = np.meshgrid(z, vperp2, indexing="ij")
+    z, vperp2, weight = z.ravel(), vperp2.ravel(), np.outer(wz, wp).ravel() / np.sqrt(np.pi)
+    q, zero = z**2 + vperp2, np.zeros_like(z)
+    basis = np.stack((np.ones_like(z), np.sqrt(2) * z, np.sqrt(2 / 3) * (1.5 - q),
+        (3 * z**2 - q) / np.sqrt(3), 2 * z * (2.5 - q) / np.sqrt(5),
+        np.sqrt(2 / 15) * z * (5 * z**2 - 3 * q), np.sqrt(2 / 15) * (q**2 - 5 * q + 15 / 4),
+        np.sqrt(2 / 21) * (3 * z**2 - q) * (3.5 - q),
+        (35 * z**4 - 30 * z**2 * q + 3 * q**2) / (2 * np.sqrt(105))), -1)
+    mirror_values = -.5 * vperp2[:, None] * np.stack((zero, np.sqrt(2) * np.ones_like(z), zero,
+        2 * np.sqrt(3) * z, 2 * (2.5 - q) / np.sqrt(5), 3 * np.sqrt(2 / 15) * (5 * z**2 - q)), -1)
+    np.testing.assert_allclose(basis.T @ (weight[:, None] * basis), np.eye(9), atol=4.e-14)
+    stream = basis.T @ ((weight * z)[:, None] * basis[:, :6])
+    mirror = basis.T @ (weight[:, None] * mirror_values)
+    source = basis.T @ (weight * .5 * (q + z**2) * (q - 2.5))
+    embed = np.eye(9, 6)
+    re = (J[..., None, None] * (derivative(po, along) @ stream.T)
+          - .5 * dj[..., None, None] * (po @ (stream + mirror).T)
+          + e * J[..., None, None] * (derivative(pe, across) @ embed.T))
+    ro = (J[..., None, None]**2 * (derivative(pe, along) @ stream.T)
+          - .5 * (J * dj)[..., None, None] * (pe @ mirror.T)
+          + e * J[..., None, None] * (derivative(po, across) @ embed.T)
+          - .5 * e * ej[..., None, None] * (po @ embed.T))
+    re[..., 2, :] = -.5 * (J * ej)[..., None] * source - re[..., 2, :]
+    ro[..., 2, :] *= -1
+    assert max(np.max(abs(re[..., [0, 1, 2, 8]])), np.max(abs(ro[..., [0, 1, 2, 8]]))) < 3.e-11
+    s = np.sqrt(2 / np.pi)
+    metric = s * np.diag([0., 0., 0., 32 / 15, 16 / 5, 64 / 45, 16 / 5, 3856 / 1715, 6224 / 5145])
+    metric[3, 7] = metric[7, 3] = -48 * np.sqrt(14) * s / 245
+
+    def gram(values, matrix, angular_weight):
+        return np.einsum("abiv,vw,abjw,ab->ij", values, matrix, values, angular_weight, optimize=True) / (count**2 * mean)
+
+    collision = gram(pe, s * np.diag([0., 0., 0., 8 / 5, 0., 0.]), J)
+    collision += gram(po, s * np.diag([0., 0., 0., 0., 16 / 15, 0.]), np.ones_like(J))
+    inverse = gram(re, metric, J**-3) + gram(ro, metric, J**-4)
+    trial = np.linalg.solve(nu * collision[:2, :2] + inverse[:2, :2] / nu,
+                            inverse[:2, 2] / nu - nu * collision[:2, 2])
+    plus, minus = np.r_[trial, 1.], np.r_[-trial, 1.]
+    reference = nu * plus @ collision @ plus + minus @ inverse @ minus / nu
+    result = neoclassical.conserving_stellarator_proxy(wave, coefficient, macro_order=2, integration_order=24, **options)
+    coarse = neoclassical.conserving_stellarator_proxy(wave, coefficient, macro_order=2, integration_order=0, **options)
+    assert result["valid"] and coarse["valid"] and coarse["upper"] > reference
+    np.testing.assert_allclose(result["upper"], reference, rtol=3.e-11)
+    assert 0 < result["upper"] < .99 * result["scalar_upper"]
+    sharper = neoclassical.conserving_stellarator_proxy(wave, coefficient, macro_order=2, integration_order=24,
+                                                       stress_inverse_bound=2.1, **options)
+    np.testing.assert_allclose(sharper["upper"], result["upper"], rtol=2.e-14)
+    assert sharper["scalar_upper"] < result["scalar_upper"]
+
+
+def test_full_coulomb_macro_jvp_vjp_and_field_broadcasting():
+    """Geometry, iota, collision and electric-field derivatives share one fixed chart."""
+    wave, coefficients = np.array([[0, 0], [1, 0], [0, 1]]), jnp.array([1.2, .18, .013j])
+
+    @jax.jit
+    def response(v):
+        return neoclassical.conserving_stellarator_proxy(wave, coefficients.at[1].set(v[0]), iota=v[1],
+            G_b=3., I_b=.02, nfp=2, collision_frequency=v[2], electric_field=v[3],
+            integration_order=16, macro_order=2, rho_bound=.3)["upper"]
+
+    parameters, direction, step = jnp.array([.18, .41, 10., .01]), jnp.array([.02, .03, .7, .003]), 1.e-5
+    value, forward = jax.jvp(response, (parameters,), (direction,))
+    _, pullback = jax.vjp(response, parameters)
+    reverse = pullback(jnp.asarray(1.))[0] @ direction
+    finite = (response(parameters + step * direction) - response(parameters - step * direction)) / (2 * step)
+    assert np.isfinite(value)
+    np.testing.assert_allclose(forward, reverse, rtol=2.e-12)
+    np.testing.assert_allclose(forward, finite, rtol=3.e-7)
+    batched = neoclassical.conserving_stellarator_proxy(wave, coefficients, iota=.41, G_b=3., I_b=.02, nfp=2,
+        collision_frequency=jnp.array([.1, 1., 10.])[:, None], electric_field=jnp.array([-.01, 0., .01])[None, :],
+        integration_order=16, macro_order=2)
+    assert np.all(batched["valid"]) and batched["upper"].shape == (3, 3)
+    np.testing.assert_allclose(batched["upper"][:, 0], batched["upper"][:, 2], rtol=2.e-13)
+    assert np.all(batched["upper"] <= batched["scalar_upper"] * (1 + 2.e-13))
+
+
+def test_full_coulomb_macro_degenerate_sources_and_expanded_chart_guards():
+    """Zero sources are regular; resonant or numerically singular trial charts reject."""
+    proxy = neoclassical.conserving_stellarator_proxy
+    options = dict(iota=.41, G_b=1., I_b=0., macro_order=2, integration_order=8)
+    uniform = proxy([[0, 0]], [1.], electric_field=.01, **options)
+    assert uniform["valid"] and uniform["upper"] == uniform["lower"] == uniform["scalar_upper"] == 0
+    assert jax.grad(lambda x: proxy([[0, 0]], jnp.array([x]), **options)["upper"])(1.) == 0
+    no_drive = proxy([[0, 0], [0, 1]], [1., .1], electric_field=.01, **options)
+    assert no_drive["valid"] and no_drive["upper"] == 0
+    resonant = proxy([[0, 0], [1, 0], [0, 1]], [1., .2, .01], **(options | dict(iota=.5)))
+    assert not resonant["valid"] and jnp.isinf(resonant["upper"]) and jnp.isfinite(resonant["scalar_upper"])
+    singular = proxy([[0, 0], [1, 0]], [1., 1.e-200], **options)
+    assert not singular["valid"] and jnp.isinf(singular["upper"]) and singular["lower"] == 0
+    invalid = proxy([[0, 0], [1, 0]], [1., .2], collision_frequency=0., **options)
+    assert not invalid["valid"] and jnp.isinf(invalid["upper"]) and jnp.isinf(invalid["scalar_upper"])
+    for order in (-1, .5, [2], 2j, np.inf):
+        with pytest.raises(ValueError, match="macro_order"):
+            proxy([[0, 0]], [1.], **(options | dict(macro_order=order)))
+
+
+def test_full_coulomb_macro_state_adapter_preserves_diagnostic_units(monkeypatch):
+    """The optional refinement and scalar comparison use the same physical units."""
+    def transform(self, state, rt):
+        return dict(bmnc_b=jnp.array([[2., state, .001]]), bmns_b=jnp.zeros((1, 3)),
+                    xm_b=np.array([0, 1, 1]), xn_b=np.array([0, 0, 2]),
+                    iota_b=jnp.array([.413]), G_b=jnp.array([5.]), I_b=jnp.array([.02]), nfp=2,
+                    psi_b=jnp.array([-.3]), psi_edge=jnp.array(-2.), s_b=jnp.array([.5]))
+    monkeypatch.setattr(neoclassical.ConservingHeatBound, "_boozer", transform)
+    monkeypatch.setattr(neoclassical, "_aspect_scalars", lambda state, rt: (1., None, None, None))
+    options = dict(temperature_ev=1000., collision_strengths=[100., 1000.], radial_electric_fields=[0., 30.],
+                   geometry_order=(2, 1), fit_grid=32, integration_order=16, rho_bound=.4)
+    scalar = neoclassical.ConservingHeatBound([.5], **options).compute_state(.2, None)
+    term = neoclassical.ConservingHeatBound([.5], macro_order=2, **options)
+    out = term.compute_state(.2, None)
+    assert np.all(out["valid"]) and out["upper"].shape == out["scalar_upper"].shape == (1, 2, 2)
+    np.testing.assert_allclose(out["scalar_upper"], scalar["upper"], rtol=3.e-12)
+    assert np.all(out["upper"] <= out["scalar_upper"] * (1 + 3.e-13))
+    np.testing.assert_allclose(term(SimpleNamespace(state=.2, runtime=None))**2, out["total"])
+
+
 def test_continuous_energy_route_retains_geometry_gradients_and_its_distinct_schema():
     """The optional full-Maxwell branch is usable through the Boozer proxy API."""
     inputs = _spectrum()

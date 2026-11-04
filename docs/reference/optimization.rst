@@ -827,6 +827,12 @@ an inexpensive full-Coulomb upper bound directly from the Boozer spectrum:
        fit_grid=128, helicity=0, scale=1.)
    # As with other terms, pass heat.total_state to VmecProblem.from_loss.
 
+Set ``macro_order=6`` to use the correlated upper refinement. It solves a
+two-variable quadratic on exactly feasible flow functions and reports
+``scalar_upper`` alongside the selected upper endpoint, in the same m²/s
+units. The option is fixed during optimization. Gradients require a fixed
+nonresonant Fourier chart and an independent trial pair.
+
 The strengths are the Landau prefactor :math:`\Gamma n/(m^2v_t^3)` in s⁻¹,
 not Lorentz deflection rates. The returned intervals have shape
 ``(surface, collision_strength, electric_field)`` and units m²/s. It retains
@@ -841,6 +847,8 @@ Set ``VMEX_HEAT_BOUND_MODEL=coulomb`` when running the same optimization
 example to select this objective. It checks the equilibrium adjoint against
 re-solved finite differences, then refines the equilibrium and finite-J fit
 at both endpoints. No full drift-kinetic matrix solve occurs inside the loss.
+Set ``VMEX_HEAT_BOUND_MACRO_ORDER=6`` as well to select the correlated
+refinement in that same example; omitting it retains the scalar objective.
 
 Resources and reproducibility
 -----------------------------

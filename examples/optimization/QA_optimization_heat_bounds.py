@@ -26,6 +26,7 @@ OUTPUT = Path(os.environ.get("VMEX_HEAT_BOUNDS_OUTPUT", "."))
 SURFACES = (.5,)
 TEMPERATURE_EV = 1000.
 MODEL = os.environ.get("VMEX_HEAT_BOUND_MODEL", "lorentz")
+MACRO_ORDER = os.environ.get("VMEX_HEAT_BOUND_MACRO_ORDER")
 COLLISION_FREQUENCIES = (100., 1000.)          # thermal Lorentz rates, s^-1
 COLLISION_STRENGTHS = (1.e4, 1.e5)            # Coulomb Gamma*n/(m²*vth³), s^-1
 RADIAL_ELECTRIC_FIELDS = (-250., 0., 250.)     # Er = -dPhi/dr, V/m
@@ -60,7 +61,8 @@ seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
 shared = dict(temperature_ev=TEMPERATURE_EV,
               radial_electric_fields=RADIAL_ELECTRIC_FIELDS)
 if MODEL == "coulomb":
-    shared.update(collision_strengths=COLLISION_STRENGTHS)
+    shared.update(collision_strengths=COLLISION_STRENGTHS,
+                  macro_order=int(MACRO_ORDER) if MACRO_ORDER else None)
     term = vj.ConservingHeatBound(SURFACES, geometry_order=(3, 1), fit_grid=64,
                                  mboz=6, nboz=6, **shared)
 elif MODEL == "lorentz":
@@ -144,7 +146,8 @@ for label, equilibrium in (("seed", seed), ("candidate", candidate)):
     if not np.all(response["valid"]):
         raise RuntimeError(f"{label}: invalid refined reference geometry")
     records[label] = {key: np.asarray(response[key]).tolist()
-                      for key in ("lower", "upper", "relative_gap")}
+                      for key in ("lower", "upper", "relative_gap", "scalar_upper")
+                      if key in response}
     diagnostic = (response["geometry_fit_error_sampled"] if MODEL == "coulomb" else
                   response["geometry"]["reference_perturbation_well_max"])
     records[label]["geometry_diagnostic"] = np.asarray(diagnostic).tolist()
@@ -161,6 +164,7 @@ if candidate_upper >= (seed_upper if MODEL == "coulomb" else seed_lower):
 records.update(
     model=("single-species full Coulomb; incompressible ExB; no tangential magnetic drift" if MODEL == "coulomb"
            else "single-reference-well Lorentz; positive discrete speed rule"),
+    macro_order=int(MACRO_ORDER) if MODEL == "coulomb" and MACRO_ORDER else None,
     gradient_check={"ad": ad, "fd": fd, "relative_error": gradient_error},
     optimizer={"iterations": int(result.nit), "converged": bool(result.success),
                "message": str(result.message), "initial_loss": float(seed_value),

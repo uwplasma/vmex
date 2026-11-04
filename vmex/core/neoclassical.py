@@ -1198,7 +1198,7 @@ def conserving_stellarator_proxy(
     modes, coefficients, *, iota, G_b, I_b, nfp=1, helicity=0,
     collision_frequency=1., electric_field=0., integration_order=32,
     heat_inverse_bound=4 * np.sqrt(2 / np.pi),
-    stress_inverse_bound=9368 * np.sqrt(2 / np.pi) / 2205, rho_bound=None,
+    stress_inverse_bound=9368 * np.sqrt(2 / np.pi) / 2205, rho_bound=None, macro_order=None,
 ):
     r"""Cheap continuous full-Coulomb heat bound for a finite Boozer Jacobian.
 
@@ -1217,12 +1217,23 @@ def conserving_stellarator_proxy(
     A nontrivial lower endpoint is available at zero electric field only.
 
     The periodic grid integrates polynomials through degree
-    ``(integration_order+4)*max(abs(modes))`` exactly; a positive binomial-tail
+    ``(integration_order+4)*max(abs(modes))`` exactly, or
+    ``(integration_order+2*L+12)*max(abs(modes))`` with ``macro_order=L``;
+    a positive binomial-tail
     correction bounds the remaining rational-weight quadrature error. Floating
     point rounding and the error of fitting J to another field remain separate.
     Gradients are local to a fixed nonresonant Fourier chart. A fixed
     ``rho_bound`` above the relative Fourier l1 amplitude makes the tail smooth
     even when a coefficient vanishes. Invalid charts return ``[0, infinity]``.
+
+    ``macro_order=L`` adds a correlated conserved-moment trial, using a finite
+    degree-L polynomial for J^-3, and returns its smooth affine upper bound.
+    Its complete even collision-inverse block uses the Maxwell flux majorant;
+    ``stress_inverse_bound`` then applies only to the ``scalar_upper`` diagnostic.
+    With the default compatible inverse constants the affine trial space
+    contains the scalar trial family. Sharper scalar stress constants need not
+    preserve that ordering. The extended Fourier primitive chart must remain
+    nonresonant, and source-free fields return zero without a singular solve.
     """
     wave = np.asarray(modes)
     if (wave.ndim != 2 or wave.shape[1] != 2 or not len(wave)
@@ -1234,6 +1245,11 @@ def conserving_stellarator_proxy(
             or int(integration_order) != integration_order or integration_order < 0):
         raise ValueError("require positive integer nfp, helicity a multiple of nfp, and nonnegative integration_order")
     wave, order = wave.astype(int), int(integration_order)
+    if macro_order is not None:
+        if (np.ndim(macro_order) or np.iscomplexobj(macro_order) or not np.isfinite(macro_order)
+                or int(macro_order) != macro_order or macro_order < 0):
+            raise ValueError("macro_order must be a nonnegative integer or None")
+        macro_order = int(macro_order)
     coefficient = jnp.asarray(coefficients) + 0.
     if coefficient.shape != (len(wave),):
         raise ValueError("coefficients must have one entry per Fourier mode")
@@ -1261,7 +1277,8 @@ def conserving_stellarator_proxy(
     rho, coefficient = jnp.where(chart, rho, 0.), jnp.where(chart, coefficient, zero.astype(float))
     kd, ke = jnp.where(chart, kd, 0.), jnp.where(chart, ke, 0.)
     primitive = jnp.where(zero, 0., ke / jnp.where(zero | (kd == 0), 1., kd)) * coefficient
-    shape = tuple((order + 4) * np.max(np.abs(wave), axis=0) + 1)
+    band = np.max(np.abs(wave), axis=0)
+    shape = tuple((order + (4 if macro_order is None else 2 * macro_order + 12)) * band + 1)
     spectra = jnp.stack((coefficient, 1j * kd * coefficient, 1j * ke * coefficient,
                         primitive, 1j * ke * primitive))
     grid = jnp.zeros((5, *shape), dtype=jnp.result_type(spectra, 1j))
@@ -1277,6 +1294,8 @@ def conserving_stellarator_proxy(
     even, odd = jacobian * ej - p * dj, jacobian * ep - .5 * p * ej
     valid = chart & jnp.isfinite(nu) & (nu > 0) & jnp.isfinite(field)
     nu, field = jnp.where(valid, nu, 1.), jnp.where(valid, field, 0.)
+    if macro_order is not None:
+        field = jnp.where(jnp.all(ej == 0), 0., field)
     a, b, d = nu * (4 * np.sqrt(2 / np.pi) / 3), 9 * mu2 / (16 * nu), (field * center)**2 * mu1 / nu
     quadratic = a + b * jnp.mean(dj**2 * w3) + .25 * d * jnp.mean(ej**2 * w4)
     linear = a * jnp.mean(p) - b * jnp.mean(even * dj * w3) - .5 * d * jnp.mean(odd * ej * w4)
@@ -1287,11 +1306,105 @@ def conserving_stellarator_proxy(
              + d * jnp.mean((odd - .5 * c * ej)**2 * w4, axis=(-2, -1))) / center
     geometric = jnp.mean(p**2) / center
     lower = jnp.where(field == 0, 25 * nu * geometric / (16 * mu1), 0.)
+    extra = {}
+    if macro_order is not None:
+        # Correlated moments satisfy local conservation as polynomial identities.
+        # Field-independent Gram generators keep operating-point batches small.
+        scalar_upper = upper
+        scalar_valid = valid & jnp.isfinite(upper) & (upper >= lower)
+        fx, fy = np.meshgrid(*(np.rint(np.fft.fftfreq(n) * n) for n in shape), indexing="ij")
+        along = (iota - helicity) * fx + nfp * fy
+        across = ((G_b + helicity * I_b) * fx - nfp * I_b * fy) / covariant
+        active = ((np.abs(fx) <= (macro_order + 3) * band[0])
+                  & (np.abs(fy) <= (macro_order + 3) * band[1]) & ((fx != 0) | (fy != 0)))
+        nonzero = jnp.abs(along) > 64 * jnp.finfo(center.dtype).eps * (1 + jnp.abs(across))
+        macro_chart = jnp.all(jnp.isfinite(along) & jnp.isfinite(across)) & jnp.all(~active | nonzero)
+        def derivative(value, frequency):
+            return jnp.fft.ifft2(jnp.fft.fft2(value) * (1j * jnp.where(jnp.isfinite(frequency), frequency, 0.))).real
+        def primitive(value, support):
+            mask = active & (np.abs(fx) <= support[0]) & (np.abs(fy) <= support[1]) & nonzero
+            factor = jnp.where(mask, 1 / (1j * jnp.where(mask, along, 1.)), 0.)
+            return jnp.fft.ifft2(jnp.fft.fft2(value) * factor).real
+        polynomial, term = jnp.ones_like(jacobian), jnp.ones_like(jacobian)
+        for k in range(1, macro_order + 1):
+            term *= -(jacobian - center) / center * (k + 2) / k
+            polynomial += term
+        phi = polynomial * primitive(p, band) / center**3
+        psi = jacobian**3 * phi
+        density, flow = -derivative(psi, along), derivative(psi, across)
+        r = 3 * ej * phi + jacobian * derivative(phi, across)
+        force = -(jacobian * derivative(r, across) + 1.5 * ej * r)
+        dj2 = jnp.mean(dj**2)
+        correction = -4 * jnp.mean(force) / jnp.where(dj2 > 0, dj2, 1.)
+        pressure = primitive(force + .25 * correction * dj**2, (macro_order + 3) * band)
+        energy = 3 * pressure + correction * jacobian * dj
+        heat_flow = -primitive(derivative(energy, across), (macro_order + 3) * band)
+        a2, h0, h2 = (3 * pressure - energy) / np.sqrt(3), np.sqrt(1.5) * density, -np.sqrt(2 / 3) * energy
+        b1, c1, c3 = np.sqrt(2) * flow, np.sqrt(5) * flow, -2 * heat_flow / np.sqrt(5)
+        zero = jnp.zeros_like(jacobian)
+        def even_residual(bv, cv, av):
+            db, dc = derivative(bv, along), derivative(cv, along)
+            return jnp.stack((jacobian * (np.sqrt(6) * db / 3 - 2 * np.sqrt(15) * dc / 15)
+                - dj * (np.sqrt(6) * bv / 4 - np.sqrt(15) * cv / 10) + jacobian * derivative(av, across),
+                -np.sqrt(6) * jacobian * dc / 3,
+                np.sqrt(210) * (jacobian * dc / 15 - dj * cv / 20)), -1)
+        def odd_residual(hv, av, cv):
+            dh, da = derivative(hv, along), derivative(av, along)
+            return jnp.stack((jacobian**2 * (np.sqrt(30) * dh / 6 - 2 * np.sqrt(15) * da / 15)
+                - np.sqrt(15) * jacobian * dj * av / 10 + jacobian * derivative(cv, across) - .5 * ej * cv,
+                3 * np.sqrt(10) * (jacobian**2 * da - .5 * jacobian * dj * av) / 10), -1)
+        stress = jnp.asarray([np.sqrt(3) / 4, 0., -np.sqrt(42) / 8])
+        even = jnp.stack((even_residual(b1, c1, zero), even_residual(zero, c3, a2),
+                         dj[..., None] * stress, (jacobian * ej - p * dj)[..., None] * stress), -2)
+        odd = jnp.stack((odd_residual(h0, zero, zero), odd_residual(h2, a2, c1), odd_residual(zero, zero, c3),
+                        jnp.stack((-np.sqrt(5) * ej / 4, zero), -1),
+                        jnp.stack((-np.sqrt(5) * (jacobian * ep - .5 * p * ej) / 2, zero), -1)), -2)
+        s = np.sqrt(2 / np.pi)
+        even_metric = s * jnp.asarray([[32 / 15, 0., -48 * np.sqrt(14) / 245],
+            [0., 16 / 5, 0.], [-48 * np.sqrt(14) / 245, 0., 3856 / 1715]])
+        odd_metric = jnp.diag(jnp.stack((4 * mu1 / 5, jnp.asarray(64 * s / 45))))
+        def gram(values, metric, weight):
+            values = values.reshape((-1, values.shape[-2], values.shape[-1]))
+            return jnp.einsum("piv,vw,pjw,p->ij", values, metric, values, weight.ravel()) / (np.prod(shape) * center)
+        even_gram, odd_gram = gram(even, even_metric, w3), gram(odd, odd_metric, w4)
+        collision_modes = jnp.stack((c1, c3, np.sqrt(5) * jnp.ones_like(p) / 2, np.sqrt(5) * p / 2), -1)[..., None]
+        collision_gram = 16 * s / 15 * gram(collision_modes, jnp.ones((1, 1)), jnp.ones_like(jacobian))
+        stress_collision = 8 * s / 5 * jnp.mean(jacobian * a2**2) / center
+        electric = field * center
+        z, one = jnp.zeros_like(electric), jnp.ones_like(electric)
+        even_map = jnp.stack((jnp.stack((electric, electric**3, z, z), -1),
+                             jnp.stack((z, z, one, z), -1), jnp.stack((z, z, z, one), -1)), -1)
+        odd_map = jnp.stack((jnp.stack((one, electric**2, electric**4, z, z), -1),
+                            jnp.stack((z, z, z, electric, z), -1), jnp.stack((z, z, z, z, electric), -1)), -1)
+        residual = jnp.einsum("...ki,kl,...lj->...ij", even_map, even_gram, even_map)
+        residual += jnp.einsum("...ki,kl,...lj->...ij", odd_map, odd_gram, odd_map)
+        collision = jnp.einsum("...ki,kl,...lj->...ij", even_map, collision_gram, even_map)
+        collision = collision.at[..., 0, 0].add(electric**4 * stress_collision)
+        hessian = nu[..., None, None] * collision[..., :2, :2] + residual[..., :2, :2] / nu[..., None, None]
+        rhs = residual[..., :2, 2] / nu[..., None] - nu[..., None] * collision[..., :2, 2]
+        diagonal = jnp.diagonal(hessian, axis1=-2, axis2=-1)
+        scale = jnp.sqrt(jnp.where(diagonal > 0, diagonal, 1.))
+        cross = hessian[..., 0, 1] / (scale[..., 0] * scale[..., 1])
+        determinant = 1 - cross**2
+        regular = (jnp.all(jnp.isfinite(hessian), axis=(-2, -1)) & jnp.all(diagonal > 0, axis=-1)
+                   & (determinant > 256 * jnp.finfo(center.dtype).eps) & jnp.all(jnp.isfinite(rhs), axis=-1))
+        rhs = jnp.where(regular[..., None], rhs / scale, 0.)
+        cross = jnp.where(regular, cross, 0.)
+        trial = (rhs - cross[..., None] * rhs[..., ::-1]) / jnp.where(regular, determinant, 1.)[..., None] / scale
+        positive = jnp.concatenate((trial, one[..., None]), -1)
+        negative = jnp.concatenate((-trial, one[..., None]), -1)
+        upper = nu * jnp.einsum("...i,...ij,...j->...", positive, collision, positive)
+        upper += jnp.einsum("...i,...ij,...j->...", negative, residual, negative) / nu
+        source_free = jnp.all(ej == 0)
+        upper = jnp.where(source_free, 0., upper)
+        valid &= macro_chart & (regular | source_free)
+        constant = trial[..., 1]
+        extra["scalar_upper"] = jnp.where(scalar_valid, scalar_upper, jnp.inf)
     valid &= jnp.isfinite(upper) & (upper >= lower)
     return dict(lower=jnp.where(valid, lower, 0.), upper=jnp.where(valid, upper, jnp.inf),
                 valid=valid, relative_gap=jnp.where(valid, (upper - lower) / jnp.where(upper > 0, upper, 1.), 1.),
                 geometric_heat_factor=geometric, optimal_heat_flow_constant=constant,
-                integration_remainders=jnp.stack(tails), relative_fourier_amplitude=relative_amplitude)
+                integration_remainders=jnp.stack(tails), relative_fourier_amplitude=relative_amplitude, **extra)
 
 
 class ConservingHeatBound(_ResidualTerm):
@@ -1372,6 +1485,8 @@ class ConservingHeatBound(_ResidualTerm):
             result["valid"] &= usable
             result["lower"] = jnp.where(result["valid"], factor * result["lower"], 0.)
             result["upper"] = jnp.where(result["valid"], factor * result["upper"], jnp.inf)
+            if "scalar_upper" in result:
+                result["scalar_upper"] = jnp.where(usable, factor * result["scalar_upper"], jnp.inf)
             result["relative_gap"] = jnp.where(result["valid"], result["relative_gap"], 1.)
             records.append(result)
         out = jax.tree.map(lambda *values: jnp.stack(values), *records)

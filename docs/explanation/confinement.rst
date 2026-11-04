@@ -1143,6 +1143,36 @@ alone is insufficient. At :math:`E_*=0`, an isobaric trial also gives
 At finite electric field this compact objective returns the universal
 lower endpoint zero.
 
+An optional ``macro_order`` adds a correlated flow to the upper trial.
+For a finite polynomial generator :math:`\varphi`, set
+:math:`\Psi=J^3\varphi`, with density and parallel-flow moments
+:math:`n=-D\Psi` and :math:`j=eD_\perp\Psi`, where
+:math:`e=E_*\langle J\rangle`. Parallel stress and energy moments are
+completed by periodic parallel primitives so that the local particle,
+momentum and energy balances hold identically. The resulting homogeneous
+trial :math:`w=P_e+\widehat B P_o` has velocity degree three; its complete
+orbit image has degree four. A finite binomial polynomial for
+:math:`J^{-3}` times :math:`D^{-1}P_0` supplies the scalar generator.
+The expanded primitive band must also be nonresonant.
+
+The affine family is :math:`h=h_0+c_0(-\widehat Bq_1)+c_1w`, with
+:math:`h_0=-\widehat BP_0q_1`. Its two coefficients minimize the same
+positive collision and residual functional. Static Maxwell-kernel flux
+identities supply the complete degree-four inverse majorant, including
+the coupled stress modes. The heat block can use ``heat_inverse_bound``;
+``stress_inverse_bound`` applies to the scalar diagnostic only, since a
+single stress norm does not determine that complete block. With the
+compatible default constants, this affine family contains the scalar
+family and can improve its upper bound.
+
+The selected affine branch is differentiated directly, with no minimum
+switch between two objectives. It reports ``scalar_upper`` for comparison
+and retains the original lower endpoint. Grid forms are assembled once;
+only small polynomial matrices depend on each collision/field scenario.
+The moment constraints hold by construction; the positive two-variable
+solve is checked before returning a valid result. As with the scalar bound, geometry-fitting and
+floating-point errors remain separate.
+
 Rational angular weights have an explicit integration correction. Write
 :math:`J=j_0(1-r_J)` and establish
 :math:`\|r_J\|_\infty\le\rho<1` from the Fourier amplitudes. For integer
@@ -1161,6 +1191,9 @@ The scalar minimization uses these corrected weights. A fixed
 ``rho_bound`` above the current relative Fourier amplitude makes this
 tail correction differentiable when a Fourier coefficient crosses zero.
 Floating-point rounding remains separate from the analytic bound.
+For generator order :math:`L`, the correlated refinement uses
+:math:`(M+2L+12)K_i+1` points in each angular direction to resolve its
+complete polynomial products before applying the same weight-tail bound.
 
 ``ConservingHeatBound`` fits :math:`J` on the chosen grid and reports the
 sampled relative magnetic-field fitting error. The interval applies to
