@@ -700,6 +700,270 @@ returns one row :math:`\max(\lambda-\lambda_0,0)` per line (Gaur *et al.*
 usage recipe is in :doc:`/reference/objectives`.
 
 
+
+.. _neoclassical-heat-bounds:
+
+Neoclassical heat bounds
+-------------------------
+
+:class:`vmex.core.neoclassical.NeoclassicalHeatBound` minimizes an upper
+bound for a bounce-averaged, single-reference-well Lorentz model, retaining
+pitch diffusion and magnetic/electric tangential precession. The upper–lower gap
+bounds the remaining trial-space error. See the
+:ref:`optimization recipe <heat-bound-optimization>` and
+``examples/optimization/QA_optimization_heat_bounds.py``.
+
+The reference response vanishes in exact quasisymmetry, while ordinary
+neoclassical transport and bootstrap current remain. This objective does
+not certify total heat loss or an additive positive part of it. Passing
+particles, momentum-conserving collisions, finite orbit width, surface
+potential variation and multiple-well coupling require a fuller model.
+Orbit/Fourier errors and rounding are outside the variational interval.
+
+The two functionals
+~~~~~~~~~~~~~~~~~~~
+
+For periodic label :math:`\alpha` and pitch :math:`\lambda\in[a,b]`, write
+
+.. math::
+
+   (A+K)g=S,\qquad
+   A=-\frac{\nu_D}{w}\partial_\lambda(p\partial_\lambda),\qquad
+   K=\omega(\lambda)\partial_\alpha .
+
+The measure is :math:`w\,d\lambda\,d\alpha/(2\pi)`. Positive :math:`w,p`,
+:math:`\nu_D>0`, :math:`g(a)=0` and natural :math:`p g'(b)=0` make
+:math:`A` positive and self-adjoint. :math:`K` is skew-adjoint because
+:math:`w\omega` is independent of :math:`\alpha`. The response is
+:math:`D=\operatorname{Re}\langle S,g\rangle=\|g\|_A^2`.
+For admissible trials,
+
+.. math::
+
+   L[u]&=2\operatorname{Re}\langle S,u\rangle
+          -\|u\|_A^2-\|Ku\|_{A^{-1}}^2,\\
+   U[h]&=\|h\|_A^2+\|S-Kh\|_{A^{-1}}^2,\qquad L[u]\le D\le U[h].
+
+With :math:`z=(A-K)^{-1}S`, the exact trials are
+:math:`u_*=(g+z)/2` and :math:`h_*=(g-z)/2`. Completing squares gives
+
+.. math::
+
+   D-L[u]&=\|u-u_*\|_A^2+\|K(u-u_*)\|_{A^{-1}}^2,\\
+   U[h]-D&=\|h-h_*\|_A^2+\|K(h-h_*)\|_{A^{-1}}^2.
+
+These error identities establish the enclosure. The residual identity
+
+.. math::
+
+   U-L=\|S-Au-Kh\|_{A^{-1}}^2+\|Ah+Ku\|_{A^{-1}}^2
+
+measures its width. No division by precession occurs at resonance.
+This follows the complementary variational principle of
+`van Rij and Hirshman (1989) <https://doi.org/10.1063/1.859116>`_.
+
+The collision inverse is evaluated continuously:
+
+.. math::
+
+   \|r\|_{A^{-1}}^2=\frac1{\nu_D}\int_a^b\frac1{p(\lambda)}
+       \left|\int_\lambda^b w(t)r(t)\,dt\right|^2d\lambda .
+
+Piecewise-constant coefficients and continuous P1 trials make the cell
+integrands quartic; three-point Gauss integration is exact in real
+arithmetic. The bound encloses that differential equation, not just its
+discrete matrix. The mean Fourier response is integrated directly without
+a redundant solve. Enriching the trial space tightens both endpoints.
+
+For an analytical limit on each retained Fourier block, set
+:math:`T=A^{-1/2}KA^{-1/2}`, :math:`s=A^{-1/2}S` and
+:math:`C=\|s\|^2`. Then
+
+.. math::
+
+   D=\langle s,(I-T^2)^{-1}s\rangle,\qquad
+   C/(1+\Gamma^2)\le D\le C,\quad \Gamma\ge\|T\|.
+
+For small :math:`\Gamma`, :math:`D=C-\|Ts\|^2+R` with
+:math:`0\le R\le\Gamma^4 C`. This explains the collision-dominated limit
+and precession suppression while retaining pitch coupling.
+
+Geometry and heat normalization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Project the Boozer field onto a one-dimensional :math:`B_0` with
+:math:`dl_0=C_B/B_0\,d\zeta`. The QA/QH chart retains :math:`n=mN`
+harmonics; the toroidal chart retains :math:`m=0`. For one well,
+
+.. math::
+
+   J_0&=2\int\sqrt{1-\lambda B_0}\,dl_0,\qquad
+   \tau_g=2\int\frac{dl_0}{\sqrt{1-\lambda B_0}},\\
+   \delta J&=-2\int\frac{\delta B}{B_0}
+       \frac{1-\lambda B_0/2}{\sqrt{1-\lambda B_0}}\,dl_0,\\
+   J_{\psi0}&=\frac{C_{B,\psi}}{C_B}J_0
+       -2\int\frac{B_{0,\psi}}{B_0}
+       \frac{1-\lambda B_0/2}{\sqrt{1-\lambda B_0}}\,dl_0,\\
+   w&=\tau_g/2,\qquad
+   p=2\lambda\int\frac{\sqrt{1-\lambda B_0}}{B_0}\,dl_0 .
+
+Here :math:`\psi` is signed toroidal flux divided by :math:`2\pi`.
+For energy :math:`\mathcal E`, charge :math:`q` and periodic-label factor
+:math:`c=d\alpha/d\alpha_{\rm canonical}`,
+
+.. math::
+
+   S=\frac{dr}{d\psi}\frac{2\mathcal E}{q}
+          \frac{c\,\partial_\alpha\delta J}{\tau_g},\qquad
+   \omega=-\frac{2\mathcal E}{q}\frac{c\,J_{\psi0}}{\tau_g}
+           -c\,\frac{dr}{d\psi}E_r .
+
+The helical chart has :math:`c=-N_{\rm fp}/(\iota-N)`; the toroidal chart
+has :math:`c=1`. The first variation is valid at regular interior pitch;
+it supplies no uniform remainder near moving trapping boundaries.
+
+The conjugate forces are :math:`X_1=-d\ln(nT)/dr+qE_r/T` and
+:math:`X_T=-d\ln T/dr`. With :math:`x=mv^2/(2T)` and
+:math:`I_B=\int dl_0/B_0`,
+
+.. math::
+
+   \chi_T=\frac1{\sqrt{\pi}I_B}\int_0^\infty
+       \sqrt{x}e^{-x}(x-5/2)^2D_x\,dx .
+
+This is the pressure-force diagonal heat coefficient in m²/s. Signed
+heat flux, zero-particle-flux heat transport and fixed-speed diffusion
+are different quantities. The default positive speed rule returns matrix
+and Schur-complement intervals. ``continuous_energy=True`` integrates
+the entire Maxwell axis for exactly :math:`\nu_D(x)=\nu_{\rm th}x^{-3/2}`,
+including infinity; it returns heat and binwise intervals. Its static
+energy bins control trial approximation, not energy quadrature.
+
+JIT/JVP/VJP derivatives pass through equilibrium, Boozer geometry, bounce
+roots and trial solves on a fixed regular well branch. Normalized
+``pitch_fractions`` follow the whole reference trapping interval.
+Invalid topology, unresolved transverse modes and nonfinite data return
+an infinite objective. Fix the scale and trial topology within each stage.
+
+Near-axis limits
+~~~~~~~~~~~~~~~~~
+
+For first-order QS let :math:`\epsilon=\eta r` and
+
+.. math::
+
+   B/B_*=1-\epsilon\cos\chi+
+       \epsilon^2[b_0+b_2\cos2\chi+\widetilde b(\alpha,\chi)]
+       +O(\epsilon^3).
+
+With :math:`\kappa=k^2`, complete elliptic integrals :math:`K,E`,
+:math:`F=E-(1-\kappa)K` and :math:`\ell=|G_0|/(B_*|\iota_0-N|)`,
+
+.. math::
+
+   J_0=8\sqrt2\,\ell\sqrt\epsilon\,F[1+O(\epsilon)],\qquad
+   \tau_g=\frac{4\sqrt2\,\ell}{\sqrt\epsilon}K[1+O(\epsilon)],\qquad
+   A=\frac{\nu_D}{\epsilon}
+       [-K^{-1}\partial_\kappa(F\partial_\kappa)]+O(\nu_D).
+
+The trapped measure is :math:`O(\sqrt\epsilon)`. Second-order symmetry
+breaking gives :math:`\delta J=O(\epsilon^{3/2})` and
+:math:`S=O(\epsilon)`; magnetic precession is :math:`O(\epsilon^{-1})`.
+At fixed positive collision frequency and drift prefactors,
+
+.. math::
+
+   g=O(\epsilon^2),\qquad D_{\rm ref}=O(\epsilon^{7/2}).
+
+This is a model asymptotic. Physical bounce averaging also requires
+:math:`\nu_D\ell/v\ll\epsilon^{3/2}` and small orbit width; fixed physical
+parameters violate these conditions sufficiently close to the axis.
+Joint limits can change the response power.
+
+The first and second precession terms are derived by
+`Rodríguez and Mackenbach (2023) <https://doi.org/10.1017/S0022377823001125>`_.
+Regular :math:`\Phi(\psi)` gives :math:`E_r=O(r)` and electric precession
+:math:`O(1)`. Fixed nonzero :math:`E_r` is a different annular ordering.
+A common fractional power in particle fluxes cancels from ambipolarity;
+it does not itself imply fractional powers of :math:`E_r`.
+
+Two numerical choices follow:
+
+* ``radial_interpolation="radius"`` differentiates a quadratic interpolant
+  in :math:`r=a\sqrt{s}`, then applies :math:`dr/d\psi`. It reproduces
+  the radial derivative of :math:`B_0+rB_1+r^2B_2` exactly. The default
+  ``"flux"`` preserves earlier results.
+* Well-relative diagnostics compare :math:`\delta B` with
+  :math:`B_{0,\max}-B_{0,\min}`. Small :math:`\delta B/B_0` alone is
+  insufficient when the well shrinks.
+
+Generic QI has finite on-axis variation :math:`B_0(\varphi)` and different
+power counting. Its second-order action contains both
+:math:`\delta J[B_2]` and :math:`\tfrac12\delta^2J[B_1,B_1]`.
+The linear-action adapter omits the latter; an exactly translated well
+demonstrates the missing cancellation. It is not a controlled
+second-order QI model.
+
+The effective trapped fraction has :math:`f_t\sim1.4624\sqrt{\eta r}`
+in the QS outer limit. A half-power bootstrap expansion requires a
+separate momentum-conserving closure; this even-in-parallel-velocity
+response cannot calculate bootstrap current. The source-dependent
+potato-orbit region requires the nonlocal treatment discussed by
+`Helander (2000) <https://doi.org/10.1063/1.874137>`_.
+
+Validation and design use
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The reference campaign encloses 832/832 independent exact-cell responses:
+169 manufactured and 221 each for QA, QH and a toroidal QI projection.
+At all 17 sampled fields from −1 to +1 kV/m, the 12-node speed-rule width
+is at most 10% on sampled collision rows 10–100 s⁻¹ for QA and
+0.1–100 s⁻¹ for QH/QI. Three continuous-energy widths are
+5.85%, 6.66% and 5.95%. These are sampled-grid/model statements.
+
+An eight-iteration, three-coefficient QA optimization gives continuous-energy
+intervals for the maximum over six scenarios:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Shape
+     - Lower (m²/s)
+     - Upper (m²/s)
+   * - Seed
+     - 0.0100217194
+     - 0.0104519299
+   * - Candidate
+     - 0.0008243780
+     - 0.0008826379
+
+The intervals establish a 91.19% decrease of the maximum reference response;
+pointwise guaranteed decreases are 82.72–92.36%. AD differs from re-solved
+finite differences by 0.08925%. The run reaches its iteration budget.
+A higher Boozer bandwidth changes one candidate upper endpoint by 11%,
+so a narrow variational interval does not establish geometry convergence.
+
+Independent DKX fixed-speed Lorentz diffusion at 1 keV and zero electric
+field changes by −5.8815% at 100 s⁻¹ and +0.1254% at 1000 s⁻¹; the
+adverse sign survives angular refinement. A separate QA result is
+4.73 million times the reference upper endpoint. These comparisons
+establish no uniform reduction of physical heat transport.
+
+Near-axis checks use second-order QA/QH equilibrium coefficients from QSC.
+All 48 model intervals enclose exact-cell references. Last-three-radius
+exponents 3.5033 (QA) and 3.5039 (QH) approach 7/2. Independent orbit
+integrals show first-order relative errors proportional to :math:`\epsilon`
+and second-order errors proportional to :math:`\epsilon^2` for action
+and precession. These validate the stated reference equation, not a
+full-transport closure.
+
+Acceptance needs separate variational, orbit/radial/Fourier and fuller
+kinetic checks. A fuller theorem must establish the collision nullspace
+and positive/skew split, include trapped–passing coupling, retain the QI
+second variation and well network, and treat finite-orbit-width/source
+effects where locality fails. A guessed background floor supplies none
+of these missing proofs.
+
 Bootstrap current (Redl)
 ------------------------
 

@@ -13,16 +13,18 @@ Produces (into ``docs/_static/figures/``):
   ``benchmarks/convergence_nfp4_ns51.json``; delete it to re-run the codes.
 - ``readme_precond.webp``              — 2D block vs 1D radial preconditioner
   iteration counts on stiff cases (R10.2 measurements).
+- ``readme_neoclassical_bounds.webp`` — variational gaps and exact-cell
+  references; requires an external campaign JSON via --bounds-record.
 - ``readme_equilibrium_showcase.webp`` — flux surfaces, 3-D boundary geometry
   coloured by ``|B|``, and ``|B|`` in Boozer coordinates on the LCFS (jet),
   for the bundled quick-start case (solves it in-process).
 Usage:
     python docs/_static/figures/sources/make_readme_figures.py
-        [--only runtime,convergence,precond,showcase]
+        [--only runtime,convergence,precond,showcase,bounds] [--bounds-record FILE]
         [--outdir docs/_static/figures]
 
-Figures are written straight to lossless WebP, so re-running this script
-reproduces the committed bytes for any figure whose inputs have not changed.
+Figures use lossless WebP, except the bounds scan (quality 55 to meet the media
+budget). Inputs and rendering dependencies determine the resulting bytes.
 Their provenance rows are in ``docs/_static/figures/figures.json``; refresh
 them with ``python tools/update_figure_manifest.py`` after regenerating.
 """
@@ -464,16 +466,69 @@ def make_showcase_figure(out: Path) -> None:
     print("wrote", out)
 
 
+
+# --------------------------------------------------------------------------
+# Reference-model heat bounds (the detailed campaign remains external).
+# --------------------------------------------------------------------------
+
+def make_bounds_figure(out: Path, record: str) -> None:
+    from matplotlib.colors import LogNorm
+
+    cases = json.loads(Path(record).read_text())["real_geometry"]
+    with plt.rc_context({"font.family": "DejaVu Sans"}):
+        fig, axes = plt.subplots(2, len(cases), figsize=(5.1 * len(cases), 7.),
+                                 squeeze=False, layout="constrained")
+        for column, case in enumerate(cases):
+            er = np.asarray(case["radial_electric_fields_V_per_m"]) / 1000
+            nu = np.asarray(case["collision_frequencies_s_inv"])
+            lo, hi, exact = (np.asarray(case[f"{key}_m2_per_s"])
+                             for key in ("lower", "upper", "exact"))
+            gap = np.maximum((hi - lo) / hi, 1.e-4)
+            ax = axes[0, column]
+            plot = ax.pcolormesh(er, nu, gap, norm=LogNorm(1.e-4, 1.),
+                                 cmap="viridis", shading="nearest")
+            ax.contour(er, nu, gap, [.1], colors="white", linewidths=1.3)
+            name = case["name"] + (" projection" if case["name"] == "QI" else "")
+            ax.set(yscale="log", xlabel=r"$E_r$ [kV/m]",
+                   ylabel=r"$\nu_D(v_{\rm th})$ [s$^{-1}$]",
+                   title=name + ": relative width")
+            fig.colorbar(plot, ax=ax, label=r"$(U-L)/U$; white = 10%")
+            ax = axes[1, column]
+            for target, color in ((.01, "#bc5090"), (1., "#00798c"), (100., "#d89000")):
+                row = int(np.argmin(abs(np.log10(nu) - np.log10(target))))
+                ax.fill_between(er, np.maximum(lo[row], 1.e-30), hi[row], color=color, alpha=.18)
+                ax.plot(er, exact[row], color=color, linewidth=1.7,
+                        label=rf"$\nu_D={nu[row]:g}$ s$^{{-1}}$")
+            ax.set(yscale="log", xlabel=r"$E_r$ [kV/m]",
+                   ylabel=r"Reference heat coefficient [m$^2$/s]",
+                   title="Exact-cell ODE and bound intervals")
+            ax.grid(alpha=.2)
+            ax.legend(fontsize=8)
+            for ax in axes[:, column]:
+                ax.set_xticks(np.linspace(er.min(), er.max(), 5))
+        fig.suptitle("Bounce-averaged reference response: precession retained\n"
+                     "Continuous pitch bound; sampled speed rule; no full-DKE error certificate",
+                     fontsize=14)
+        fig.savefig(out, dpi=80, pil_kwargs={"quality": 55, "method": 6})
+        plt.close(fig)
+    print("wrote", out)
+
+
 # --------------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="runtime,convergence,precond,showcase")
+    ap.add_argument("--bounds-record", help="external neoclassical_bounds_summary.json")
     ap.add_argument("--outdir", default=str(REPO / "docs" / "_static" / "figures"))
     args = ap.parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     apply_style()
     which = set(args.only.split(","))
+    if "bounds" in which:
+        if not args.bounds_record:
+            ap.error("--only bounds requires --bounds-record")
+        make_bounds_figure(outdir / "readme_neoclassical_bounds.webp", args.bounds_record)
     if "runtime" in which:
         make_runtime_figure(outdir / "readme_runtime_compare.webp")
     if "convergence" in which:

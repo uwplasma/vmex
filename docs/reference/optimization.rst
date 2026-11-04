@@ -701,6 +701,79 @@ coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.
 
+.. _heat-bound-optimization:
+
+Reference-model heat bounds
+---------------------------
+
+:class:`vmex.core.neoclassical.NeoclassicalHeatBound` minimizes a
+smooth maximum of upper heat-diffusivity bounds over prescribed surfaces,
+collision frequencies and electric fields. It retains reference bounce
+geometry, Lorentz pitch diffusion and magnetic/electric tangential precession.
+The upper–lower gap bounds the uncertainty remaining from
+the trial space. The mathematical scope and proof are in
+:ref:`neoclassical-heat-bounds`.
+
+.. code-block:: python
+
+   heat = vmex.NeoclassicalHeatBound(
+       surfaces=[0.5], pitch_fractions=np.linspace(0.0, 1.0, 49),
+       temperature_ev=1000.0, collision_frequencies=[100.0, 1000.0],
+       radial_electric_fields=[-250.0, 0.0, 250.0],
+       helicity_m=1, helicity_n=0, well_center=0.0,
+       mboz=6, nboz=6, nalpha=13, nenergy=8,
+       scale=reference_diffusivity,
+   )
+
+   def loss(state, runtime):
+       return heat.total_state(state, runtime) + shape_constraints(state, runtime)
+
+   problem = opt.VmecProblem.from_loss(inp, loss, max_mode=1)
+
+``temperature_ev`` is in eV, collision frequencies in s\ :sup:`-1`, electric
+fields in V/m, and diffusivities in m\ :sup:`2`/s. The default speed law
+is the stated cold-scatterer Lorentz model; other positive deflection
+frequencies can be supplied with ``collision_factors``. The objective's
+``scale`` is a fixed positive reference diffusivity. It must not change with
+the candidate geometry.
+
+Full normalized pitch fractions include the current reference well's whole
+trapped interval at every shape. Fixed physical ``pitch_edges`` are also
+supported, but a restricted interval changes the boundary-value problem and
+cannot certify omitted populations. Insufficient transverse Fourier
+resolution and changes to the selected well branch reject a candidate.
+
+``compute_state`` returns both bounds, the relative gap, transport-matrix
+and zero-particle-flux heat intervals, and reference-geometry diagnostics.
+The default uses a positive discrete speed rule. To enclose the continuous
+Maxwellian integral for the exact cold-scatterer Lorentz law, set
+``continuous_energy=True`` and supply static ``energy_edges`` beginning at
+zero and ending at infinity. The analytic mode returns heat and per-bin
+intervals instead of monoenergetic, matrix and Schur-complement fields.
+Refine the energy trial bins until their bound gap is useful, then hold
+them fixed during differentiation and optimization. A small discrete-speed
+gap does not certify that an energy resonance has been integrated accurately.
+The smooth maximum bounds the sampled scenarios; a scan alone does not
+certify every collision frequency and electric field between its samples.
+The certificate excludes the reference-field approximation, passing and
+exactly omnigenous background transport, finite orbit width, continuous
+energy quadrature in the default mode, and floating-point rounding. A general QI field need not
+be close to the chosen one-dimensional reference.
+
+Run ``examples/optimization/QA_optimization_heat_bounds.py`` for a boundary
+optimization with an independently re-solved directional derivative check,
+refined orbit/pitch/energy evaluation, and a final radial-resolution check.
+The example writes the candidate input, matched final-grid WOUTs and a compact
+JSON result. It evaluates the refined bound at both endpoints; tighter energy
+trial bins and orbit/Fourier resolution are separate convergence checks.
+Use ``radial_interpolation="radius"`` for near-axis radial stencils and inspect
+``reference_perturbation_well_rms`` and ``reference_perturbation_well_max``.
+These diagnose closeness relative to the shrinking well depth.
+
+The independent full-angle comparison in :ref:`neoclassical-heat-bounds`
+shows why a fuller kinetic check over the intended operating range is
+required before adopting a boundary.
+
 Resources and reproducibility
 -----------------------------
 

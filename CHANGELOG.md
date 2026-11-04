@@ -2,6 +2,14 @@
 
 Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
 
+## Unreleased
+
+- Add entropy bounds for a continuous pitch-angle equation with cellwise orbit coefficients and tangential precession.
+  A differentiable Boozer reference-well adapter supplies a conservative sampled-scenario heat objective for boundary optimization.
+  The certificate applies to the stated local Lorentz reference model; analytic Maxwell moments remove energy quadrature error, while geometry/model errors remain separate.
+  The documentation includes derivations, optimization results and adverse independent kinetic checks.
+  The bound kernels share their exact trial assembly without changing values or derivatives.
+
 ## 0.13.0 - 2026-11-03
 
 - Add pwO vacuum, finite-beta and coil examples with independent transport checks.
@@ -187,14 +195,6 @@ A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
 features; XLA rejected the other node's executables ("Target machine feature
 ... is not supported on the host machine") and recompiled on every run.
 
-## 0.11.1 - 2026-09-23
-
-Free-boundary trials are anchored on the coupled root their gradients
-differentiate (#432), the exterior field is accurate next to the plasma
-surface, optimization results are the states the objective scored (#427), and
-the optimization examples were re-tuned against a five-minute budget. Full
-notes in the GitHub release.
-
-## 0.11.0 and earlier
+## 0.11.1 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).

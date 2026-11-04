@@ -788,6 +788,23 @@
         "README.md"
       ],
       "note": "NFP 3 vacuum pwO_optimization.py defaults (modes 1-3, no magnetic well) against its near-circular seed, both re-solved at ns 71: boundary cross sections, |B| on the boundary, Boozer contours, NEO effective ripple and |iota| profiles."
+    },
+    {
+      "path": "docs/_static/figures/readme_neoclassical_bounds.webp",
+      "sha256": "7a26ff21dcda895d8bb3ed8cbb511bceb9a8fb5be87291b1f27eea0e5c4c21ba",
+      "bytes": 40694,
+      "generator": "docs/_static/figures/sources/make_readme_figures.py",
+      "command": "python docs/_static/figures/sources/make_readme_figures.py --only bounds --bounds-record /path/to/neoclassical_bounds_summary.json",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-11-04",
+      "hardware": "x86_64 Linux CPU",
+      "reproducible": "external-data",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The 832-point reference-model campaign is distributed separately; record SHA256 e5095211cb950aac1ddfeabd8ccbbfedebd84fc884c11f21095c68bbf072fbcf. This renderer uses its 663 QA/QH/QI-projection points and performs no kinetic solve. 1224x560 WebP, quality55; variational gaps do not certify full-DKE model error."
     }
   ]
 }

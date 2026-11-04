@@ -438,6 +438,24 @@ the step adaptively) against SIMPLE, FIRM3D, SIMSOPT and DESC on 256 matched 3.5
 
 ## Neoclassical transport
 
+For optimization, `vmex.NeoclassicalHeatBound` supplies a differentiable
+upper heat-transport objective with a complementary lower bound. The
+bounce-averaged reference model retains magnetic and electric tangential
+precession. Its certificate covers the specified reference equation;
+`continuous_energy=True` also integrates the full Maxwellian analytically
+for the cold-scatterer Lorentz law. It does not certify total neoclassical
+heat loss. See the [derivation and model scope](docs/explanation/confinement.rst#neoclassical-heat-bounds)
+and [boundary optimization example](examples/optimization/QA_optimization_heat_bounds.py).
+
+![Reference-model heat bounds: variational widths and exact-cell comparisons for QA, QH and a QI projection](docs/_static/figures/readme_neoclassical_bounds.webp)
+
+The intervals enclose all 832 independent reference-equation checks.
+White contours mark a 10% relative width; shaded bands show the bounds.
+An eight-iteration QA demonstration reduces the maximum represented response
+by at least 91.19%. The fuller DKX check improves at one collision frequency
+and worsens at another; the [theory and validation](docs/explanation/confinement.rst#neoclassical-heat-bounds)
+explain the model's scope and the independent acceptance checks.
+
 A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
 field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
 loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver
