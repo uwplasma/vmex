@@ -4,11 +4,11 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- Add entropy bounds for a continuous pitch-angle equation with cellwise orbit coefficients and tangential precession.
-  A differentiable Boozer reference-well adapter supplies a conservative sampled-scenario heat objective for boundary optimization.
-  The certificate applies to the stated local Lorentz reference model; analytic Maxwell moments remove energy quadrature error, while geometry/model errors remain separate.
-  The documentation includes derivations, optimization results and adverse independent kinetic checks.
-  The bound kernels share their exact trial assembly without changing values or derivatives.
+- Add a differentiable Boozer reference-well heat objective with retained pitch diffusion and tangential precession.
+  Continuous-pitch bounds and analytic Maxwell moments enclose the stated Lorentz response; geometry and model errors remain separate.
+  Shared trial assembly preserves the validated values and derivatives.
+- Add conserving collision-form and signed-response bounds with local conserved-moment constraints.
+  Continuous inverse-norm majorants and differentiable fixed-rank charts support full Coulomb collision models.
 
 ## 0.13.0 - 2026-11-03
 

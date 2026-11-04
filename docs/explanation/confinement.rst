@@ -958,11 +958,122 @@ and precession. These validate the stated reference equation, not a
 full-transport closure.
 
 Acceptance needs separate variational, orbit/radial/Fourier and fuller
-kinetic checks. A fuller theorem must establish the collision nullspace
-and positive/skew split, include trapped–passing coupling, retain the QI
-second variation and well network, and treat finite-orbit-width/source
-effects where locality fails. A guessed background floor supplies none
-of these missing proofs.
+kinetic checks. A physical application of the conserving theorem below must
+establish its orbit measure and skew operator, include the relevant
+trapped–passing coupling, and resolve geometry and finite-orbit-width effects.
+
+.. _conserving-collision-bounds:
+
+Conserving Coulomb collision forms
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`vmex.core.neoclassical.conserving_transport_bounds` evaluates the
+complementary construction for supplied collision and orbit forms, retaining
+the local conserved moments. It accepts rectangular orbit images so that a
+continuous residual can be represented in a larger space than the trials.
+This API supplies the constrained algebra; the Boozer objective above
+continues to use its stated Lorentz model.
+
+For Maxwellians :math:`M_a` at a common temperature and common flow, the
+full linearized Landau collision form is
+
+.. math::
+
+   a_C(f,g)=\frac12\sum_{a,b}\gamma_{ab}\int
+       \frac{M_aM_b'}{|\boldsymbol u|}
+       (\Pi_{\boldsymbol u}\Delta_{ab}f)^*\cdot
+       (\Pi_{\boldsymbol u}\Delta_{ab}g)\,d\mu_x\,d^3v\,d^3v',
+
+where :math:`\boldsymbol u=\boldsymbol v-\boldsymbol v'`,
+:math:`\Pi_{\boldsymbol u}=I-\boldsymbol u\boldsymbol u^T/u^2`,
+:math:`\Delta_{ab}g=\nabla_vg_a/m_a-\nabla_{v'}g_b/m_b`, and the symmetric
+coefficients :math:`\gamma_{ab}` contain the Coulomb constants.
+Both test-particle and field-particle terms are included. Write
+:math:`a_C(f,g)=\langle\mathcal B f,\mathcal B g\rangle`, so
+:math:`A_C=\mathcal B^*\mathcal B`. At each position the kernel contains
+species densities, common momentum and common energy. Streaming couples
+these local fields to the dissipative velocity sector.
+
+Let :math:`(A_C+K)g=S` with :math:`K^*=-K` in the stated kinetic measure.
+Choose collision pair fluxes satisfying
+:math:`\mathcal B^*F_u=Ku` and :math:`\mathcal B^*F_h=S-Kh`. Then
+
+.. math::
+
+   L&=2\operatorname{Re}\langle S,u\rangle
+        -\|\mathcal B u\|^2-\|F_u\|^2,\\
+   U&=\|\mathcal B h\|^2+\|F_h\|^2,\\
+   D-L&=\|\mathcal B g-\mathcal B u+F_u\|^2,\qquad
+   U-D=\|\mathcal B h+F_h-\mathcal B g\|^2.
+
+These identities establish the continuum bounds without a Coulomb spectral
+gap. Flux feasibility requires :math:`PKu=0` and :math:`P(S-Kh)=0`, where
+:math:`P` projects onto the local collision kernel. Removing all of that
+kernel changes the response. For example,
+
+.. math::
+
+   A=\begin{pmatrix}0&0\\0&\nu\end{pmatrix},\qquad
+   K=\begin{pmatrix}0&k\\-k&0\end{pmatrix}
+
+gives :math:`D=\nu/k^2` for :math:`S=(1,0)^T`, but :math:`D=0` for
+:math:`S=(0,1)^T`. An unconstrained pseudoinverse gives a false zero upper
+in the first case and a false positive lower in the second.
+The first balance grows with collision frequency because the source acts
+on a conserved moment whose flux is set by streaming.
+
+An explicit continuous inverse-norm majorant follows from auxiliary Landau
+forms :math:`a_p` with kernel :math:`|u|^p\Pi_u`, for even
+:math:`p=2,4,\ldots`. Their operators map complete degree-:math:`d`
+velocity polynomials to degree at most :math:`d+p-2`. A polynomial flux
+
+.. math::
+
+   F=\sum_p |u|^{p+1}\mathcal B q_p,\qquad
+   \sum_p A_pq_p=r
+
+therefore satisfies :math:`\mathcal B^*F=r` throughout velocity space when
+all resulting polynomial coefficients match. Its norm is
+:math:`\sum_{p,q}a_{p+q+1}(q_p,q_q)`. Minimizing this finite quadratic form
+gives a Gram matrix :math:`G` such that :math:`\|r\|_{A_C^\dagger}^2\le r^*Gr`.
+The Maxwell kernel :math:`p=2` supplies a feasible initial lift; enriching
+the flux space can tighten the bound. A truncated Coulomb matrix inverse
+does not supply this continuum majorant.
+
+The committed tests include exact low-degree brackets. For unit mass,
+density and pair coefficient at :math:`T=1/2`, the normalized parallel-heat
+polynomial has :math:`a_C=16\sqrt{2/\pi}/15`, :math:`a_2=8` and
+:math:`a_5=1024\sqrt{2/\pi}/5`. Its one-trial lower and Maxwell-flux upper
+are :math:`15/[16\sqrt{2/\pi}]` and :math:`16\sqrt{2/\pi}/5`, respectively.
+The tests also check invariant coupling, nested trial and inverse-majorant
+spaces, complex Fourier data and derivatives of moving constraint charts.
+
+Signed observables require an adjoint estimate. For
+:math:`(A_C-K)z=J`, feasible primal and adjoint residual fluxes with norms
+:math:`\eta_g,\eta_z` give
+
+.. math::
+
+   \left|\operatorname{Re}\langle J,g\rangle-c\right|
+       \le\eta_g\eta_z,\qquad
+   c=\operatorname{Re}\{\langle J,g_0\rangle+
+               \langle z_0,S-(A_C+K)g_0\rangle\}.
+
+:func:`vmex.core.neoclassical.conserving_goal_interval` evaluates this
+interval. Polarizing dissipative bounds alone omits the antisymmetric
+cross response. The physical current moment and its kinetic model remain
+caller inputs.
+
+Full-Fokker–Planck variational transport predates this implementation:
+see `Taguchi (1982) <https://doi.org/10.1143/JPSJ.51.1630>`_ and
+`van Rij and Hirshman (1989) <https://doi.org/10.1063/1.859116>`_.
+The common-temperature assumption is essential for this exact Landau
+entropy form; unequal-temperature symmetry-restoring operators are
+different models, as discussed by
+`Sugama et al. (2019) <https://doi.org/10.1063/1.5115440>`_.
+``valid`` checks the supplied finite algebra and conservation chart. The
+caller must establish the exact orbit images, continuous inverse majorant,
+measure and boundary conditions; rounding remains outside the theorem.
 
 Bootstrap current (Redl)
 ------------------------

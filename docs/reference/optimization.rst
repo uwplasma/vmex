@@ -774,6 +774,47 @@ The independent full-angle comparison in :ref:`neoclassical-heat-bounds`
 shows why a fuller kinetic check over the intended operating range is
 required before adopting a boundary.
 
+For conserving collision models, the low-level
+:func:`vmex.core.neoclassical.conserving_transport_bounds` accepts a trial
+collision Gram, exact rectangular orbit images, source coefficients, source
+loads and a continuous collision-inverse majorant. The construction and
+full-Landau assumptions are in :ref:`conserving-collision-bounds`.
+The residual basis can differ from the trial basis; its metric belongs in
+``inverse_bound``. The columns of ``invariants`` encode its local conserved
+moments. For example, the smallest streaming-coupled invariant problem is:
+
+.. code-block:: python
+
+   from vmex.core.neoclassical import conserving_transport_bounds
+
+   collision = jnp.diag(jnp.array([0., 1.]))
+   source = jnp.array([1., 0.])
+
+   def upper(k):
+       orbit = jnp.array([[0., k], [-k, 0.]])
+       return conserving_transport_bounds(
+           collision, orbit, source, source, collision,
+           invariants=jnp.array([[1.], [0.]]),
+           constraint_rows=(0,), constraint_columns=(1,),
+       )["upper"]
+
+Here ``upper(k)=1/k**2`` and ``jax.grad(upper)(k)=-2/k**3`` for nonzero
+``k``. A truncated collision inverse suffices for this finite-dimensional
+example; a continuous Coulomb model requires a feasible pair-flux majorant.
+Select independent constraint rows and pivot columns at the start of a
+stage and keep their indices fixed. The chart itself remains differentiable.
+Remove only joint collision/orbit gauges from the trial basis. Singular
+charts, incompatible conserved moments and nonpositive reduced forms reject
+the evaluation; damping a collision invariant changes the model.
+
+For a signed observable, evaluate the same forms for its source ``J`` and
+pass both results, their source loads and the weak orbit Gram to
+:func:`vmex.core.neoclassical.conserving_goal_interval`. It returns primal–adjoint
+error bounds on the complete signed response, including its antisymmetric
+part. A collapsed interval radius can be nonsmooth. These kernels accept
+full collision forms; they do not replace the Lorentz geometry adapter with
+an implicit full drift-kinetic solve.
+
 Resources and reproducibility
 -----------------------------
 

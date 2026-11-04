@@ -456,6 +456,11 @@ by at least 91.19%. The fuller DKX check improves at one collision frequency
 and worsens at another; the [theory and validation](docs/explanation/confinement.rst#neoclassical-heat-bounds)
 explain the model's scope and the independent acceptance checks.
 
+The [conserving collision-form API](docs/explanation/confinement.rst#conserving-collision-bounds)
+retains local density, momentum and energy constraints and supplies signed
+adjoint-response intervals. Continuous Coulomb bounds require the supplied
+orbit forms and a feasible collision-flux majorant.
+
 A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
 field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
 loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver

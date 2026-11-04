@@ -7,6 +7,8 @@ certify its continuous pitch equation with piecewise orbit coefficients;
 optional analytic Maxwell moments also include the full energy axis for the
 cold-scatterer collision law. Geometry, reference-model and rounding errors
 remain separate. General omnigenity need not be close to this reference.
+The conserving collision-form API accepts continuous inverse-norm majorants
+and retains local invariant constraints for full Coulomb collision models.
 """
 
 from __future__ import annotations
@@ -34,6 +36,8 @@ __all__ = [
     "thermal_transport_bounds",
     "ambipolar_current_interval",
     "continuous_lorentz_heat_bounds",
+    "conserving_transport_bounds",
+    "conserving_goal_interval",
     "reference_pitch_grid_from_boozer",
     "bounce_geometry_from_boozer",
     "neoclassical_heat_bounds_from_geometry",
@@ -373,6 +377,156 @@ def ambipolar_current_interval(lower, upper, signed_weights) -> tuple[Any, Any]:
     lo, hi, coefficients = (jnp.asarray(a) for a in (lower, upper, signed_weights))
     return (jnp.sum(jnp.where(coefficients >= 0, coefficients * lo, coefficients * hi)),
             jnp.sum(jnp.where(coefficients >= 0, coefficients * hi, coefficients * lo)))
+
+
+def conserving_transport_bounds(
+    collision, drift, source, source_load, inverse_bound, *, invariants=None,
+    constraint_rows: tuple[int, ...] = (), constraint_columns: tuple[int, ...] = (),
+) -> dict[str, Any]:
+    r"""Optimize complementary bounds while retaining collision invariants.
+
+    ``collision(n,n)`` is the trial collision Gram matrix. ``drift(r,n)``
+    contains the exact images of these trials under the skew orbit operator,
+    in a linearly independent residual basis. ``source(r)`` and ``source_load(n)``
+    are its source coefficients and trial inner products. The positive
+    semidefinite ``inverse_bound(r,r)`` must majorize the continuous collision
+    inverse norm on the residual space. A feasible Coulomb pair-flux lift
+    supplies such a matrix; inverting a truncated collision matrix does not.
+
+    Columns of ``invariants(r,k)`` encode the local conserved-moment
+    functionals in residual coordinates. Lower trials obey
+    ``invariants.conj().T @ drift @ u = 0``; upper trials obey the same
+    constraint with right-hand side ``invariants.conj().T @ source``.
+    Static ``constraint_rows`` and ``constraint_columns`` select a nonsingular
+    square pivot of that constraint matrix. Empty tuples require all these
+    constraints to be redundant. Remove joint collision/drift gauges from
+    the trial space first. All omitted constraints are checked afterwards.
+    The pivot chart is differentiated, so JIT/JVP/VJP remain valid while its
+    rank is fixed. No collision damping or invariant projection is added.
+
+    The caller establishes the skew operator, exact residual representation,
+    and continuum inverse majorant. ``valid`` checks finite algebra, positive
+    forms, the pivot chart, and conservation constraints; it cannot establish
+    those physical premises. Roundoff and geometry errors are excluded.
+    Invalid algebra returns zero lower and infinite upper. Shapes and static
+    pivot errors raise ValueError.
+    """
+    arrays = tuple(jnp.asarray(x) for x in (collision, drift, source, source_load, inverse_bound))
+    dtype = jnp.result_type(*arrays, jnp.float64, 0. if invariants is None else jnp.asarray(invariants))
+    c, b, s, f, g = (x.astype(dtype) for x in arrays)
+    if (c.ndim != 2 or c.shape[0] < 1 or c.shape[1] != c.shape[0]
+            or b.ndim != 2 or b.shape[0] < 1 or b.shape[1] != c.shape[0]
+            or s.shape != (b.shape[0],) or f.shape != (c.shape[0],)
+            or g.shape != (b.shape[0], b.shape[0])):
+        raise ValueError("expected collision(n,n), drift(r,n), source(r), source_load(n), inverse_bound(r,r)")
+    p = jnp.zeros((b.shape[0], 0), dtype=dtype) if invariants is None else jnp.asarray(invariants, dtype=dtype)
+    if p.ndim != 2 or p.shape[0] != b.shape[0]:
+        raise ValueError("invariants must have shape (r,k)")
+    rows, columns = np.asarray(constraint_rows), np.asarray(constraint_columns)
+    for indices, size in ((rows, p.shape[1]), (columns, c.shape[0])):
+        if (indices.ndim != 1 or (indices.size and not np.issubdtype(indices.dtype, np.integer))
+                or len(np.unique(indices)) != indices.size
+                or np.any(indices < 0) or np.any(indices >= size)):
+            raise ValueError("constraint pivots must be distinct integer indices in range")
+    if rows.size != columns.size:
+        raise ValueError("constraint rows and columns must have equal lengths")
+    rows, columns = rows.astype(int), columns.astype(int)
+    free = np.setdiff1d(np.arange(c.shape[0]), columns)
+    eps = 256 * np.finfo(np.float64).eps * (c.shape[0] + b.shape[0] + p.shape[1])
+    valid = jnp.all(jnp.stack([jnp.all(jnp.isfinite(x)) for x in (c, b, s, f, g, p)]))
+    c, b, s, f, g, p = (jnp.where(valid, x, fallback) for x, fallback in
+                         ((c, jnp.eye(c.shape[0])), (b, 0.), (s, 0.), (f, 0.),
+                          (g, jnp.eye(g.shape[0])), (p, 0.)))
+    for matrix in (c, g):
+        scale = jnp.maximum(jnp.linalg.norm(matrix), 1.)
+        valid &= jnp.isfinite(scale)
+        valid &= (jnp.linalg.norm(matrix - matrix.conj().T) <= eps * scale)
+        valid &= (jnp.linalg.eigvalsh(matrix)[0] >= -eps * scale)
+    e, target = p.conj().T @ b, p.conj().T @ s
+    z = jnp.eye(c.shape[0], dtype=dtype)[:, jnp.asarray(free)]
+    h0 = jnp.zeros_like(f)
+    if rows.size:
+        er = e[jnp.asarray(rows)]
+        pivot = er[:, jnp.asarray(columns)]
+        singular = jnp.linalg.svd(pivot, compute_uv=False)
+        chart_valid = singular[-1] > eps * singular[0]
+        valid &= chart_valid
+        pivot = jnp.where(chart_valid, pivot, jnp.eye(rows.size, dtype=dtype))
+        rhs = jnp.concatenate((-er[:, jnp.asarray(free)], target[jnp.asarray(rows), None]), axis=1)
+        solution = jnp.linalg.solve(pivot, rhs)
+        z = z.at[jnp.asarray(columns)].set(solution[:, :-1])
+        h0 = h0.at[jnp.asarray(columns)].set(solution[:, -1])
+    chart_defect = jnp.linalg.norm(e @ z) + jnp.linalg.norm(e @ h0 - target)
+    chart_scale = 1 + jnp.linalg.norm(e) * (jnp.linalg.norm(z) + jnp.linalg.norm(h0)) + jnp.linalg.norm(target)
+    valid &= jnp.isfinite(chart_defect) & jnp.isfinite(chart_scale) & (chart_defect <= eps * chart_scale)
+    q = c + b.conj().T @ g @ b
+    rhs = jnp.stack((f, b.conj().T @ g @ s - q @ h0), axis=1)
+    if free.size:
+        reduced = z.conj().T @ q @ z
+        positive = jnp.all(jnp.isfinite(jnp.linalg.cholesky(reduced)))
+        valid &= positive
+        reduced = jnp.where(positive, reduced, jnp.eye(free.size, dtype=dtype))
+        coefficients = z @ jnp.linalg.solve(reduced, z.conj().T @ rhs)
+    else:
+        coefficients = jnp.zeros((c.shape[0], 2), dtype=dtype)
+    u, h = coefficients[:, 0], h0 + coefficients[:, 1]
+    residual = s - b @ h
+    lower = jnp.maximum(2 * jnp.real(jnp.vdot(f, u)) - jnp.real(jnp.vdot(u, q @ u)), 0.)
+    upper = jnp.real(jnp.vdot(h, c @ h) + jnp.vdot(residual, g @ residual))
+    defect = jnp.linalg.norm(e @ u) + jnp.linalg.norm(e @ h - target)
+    scale = 1 + jnp.linalg.norm(e) * (jnp.linalg.norm(u) + jnp.linalg.norm(h)) + jnp.linalg.norm(target)
+    valid &= jnp.isfinite(defect) & jnp.isfinite(scale) & (defect <= eps * scale)
+    valid &= jnp.isfinite(lower) & jnp.isfinite(upper)
+    valid &= lower <= upper + eps * jnp.maximum(jnp.abs(upper), 1.)
+    errors = []
+    for trial, sign in ((u + h, -1), (u - h, 1)):
+        remainder = s + sign * (b @ trial)
+        error = jnp.real(jnp.vdot(trial, c @ trial) + jnp.vdot(remainder, g @ remainder)
+                         - 2 * jnp.vdot(f, trial))
+        valid &= jnp.isfinite(error) & (error >= -eps * (1 + upper + jnp.abs(jnp.vdot(f, trial))))
+        errors.append(jnp.maximum(error, 0.))
+    upper = jnp.maximum(upper, lower)
+    return {"lower": jnp.where(valid, lower, 0.), "upper": jnp.where(valid, upper, jnp.inf),
+            "relative_gap": jnp.where(valid, (upper - lower) / jnp.where(upper > 0, upper, 1.), jnp.inf),
+            "lower_trial": u, "upper_trial": h, "conservation_defect": defect,
+            "primal_error_squared": errors[0], "adjoint_error_squared": errors[1], "valid": valid}
+
+
+def conserving_goal_interval(collision, orbit_gram, source_load, goal_load,
+                             source_bounds, goal_bounds) -> dict[str, Any]:
+    r"""Bound a signed response using primal and adjoint collision-flux errors.
+
+    The two results must come from :func:`conserving_transport_bounds` with
+    the same collision, orbit, residual metric and trial basis, and respective
+    sources S and J. ``orbit_gram(i,j)=<trial_i,K trial_j>`` is skew-Hermitian.
+    Return an interval for ``Re<J,(A+K)^(-1)S>``. This includes the
+    antisymmetric response omitted by polarization of dissipative bounds.
+    ``orbit_gram`` must describe the same orbit images as the two bound
+    calls. Derivatives are valid on a fixed chart at positive interval radius;
+    a collapsed radius can have a norm cusp. The caller defines the physical
+    current or other observable J; this
+    operation alone does not supply a bootstrap closure.
+    """
+    arrays = tuple(jnp.asarray(x) for x in (collision, orbit_gram, source_load, goal_load))
+    dtype = jnp.result_type(*arrays, jnp.float64)
+    c, w, f, j = (x.astype(dtype) for x in arrays)
+    primal = source_bounds['lower_trial'] + source_bounds['upper_trial']
+    adjoint = goal_bounds['lower_trial'] - goal_bounds['upper_trial']
+    if (f.ndim != 1 or j.shape != f.shape or primal.shape != f.shape or adjoint.shape != f.shape
+            or c.shape != (f.size, f.size) or w.shape != c.shape):
+        raise ValueError("goal forms and both bound results must use the same trial basis")
+    center = jnp.real(jnp.vdot(j, primal) + jnp.vdot(adjoint, f - (c + w) @ primal))
+    product = source_bounds['primal_error_squared'] * goal_bounds['adjoint_error_squared']
+    radius = jnp.where(product > 0, jnp.sqrt(jnp.where(product > 0, product, 1.)), 0.)
+    skew_error, orbit_norm = jnp.linalg.norm(w + w.conj().T), jnp.linalg.norm(w)
+    skew = (jnp.isfinite(skew_error) & jnp.isfinite(orbit_norm)
+            & (skew_error <= 256 * np.finfo(float).eps * f.size * (1 + orbit_norm)))
+    valid = (source_bounds['valid'] & goal_bounds['valid'] & skew & jnp.isfinite(center)
+             & jnp.isfinite(product) & (product >= 0) & jnp.isfinite(radius))
+    return {"lower": jnp.where(valid, center - radius, -jnp.inf),
+            "upper": jnp.where(valid, center + radius, jnp.inf),
+            "center": center, "radius": radius, "valid": valid}
+
 
 _DEFAULT_ENERGY_EDGES = (0., .25, .5, 1., 1.5, 2., 2.5, 3., 4., 5., 7., 10., 16., 24., np.inf)
 _POWERS = (3., 3.5, 4., 4.5, 5., 6., 7., 8.)

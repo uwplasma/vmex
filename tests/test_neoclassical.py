@@ -19,6 +19,8 @@ from vmex.core import neoclassical
 from vmex.core.neoclassical import (
     ambipolar_current_interval,
     bounce_transport_bounds,
+    conserving_transport_bounds,
+    conserving_goal_interval,
     continuous_lorentz_heat_bounds,
     thermal_transport_bounds,
 )
@@ -437,7 +439,7 @@ def _interval_contains(result, reference, rtol=2e-10):
     assert float(result["lower"]) <= reference + eps
     assert float(result["upper"]) >= reference - eps
     assert float(result["lower"]) >= 0
-    assert float(result["upper"]) <= float(result["collision_only"]) + eps
+    assert float(result["upper"]) <= float(result.get("collision_only", np.inf)) + eps
 
 
 @pytest.mark.parametrize("nu", [1e-4, 1e-2, 1., 1e2])
@@ -629,6 +631,215 @@ def test_ambipolar_signed_interval_equals_all_corner_extrema():
     corners = [np.dot(c, np.where(choice, hi, lo)) for choice in product([False, True], repeat=3)]
     assert float(lower) == pytest.approx(min(corners))
     assert float(upper) == pytest.approx(max(corners))
+
+
+@pytest.mark.parametrize("k", [.2, 1., 3.])
+@pytest.mark.parametrize("frequency", [1., 5.])
+@pytest.mark.parametrize("source", [[1., 0.], [0., 1.]])
+def test_conserving_bounds_retain_streaming_coupled_collision_invariants(k, frequency, source):
+    # Dropping the undamped first mode gives zero upper for the first source,
+    # or a false positive lower for the second source.
+    c, inverse = np.diag([0., frequency]), np.diag([0., 1 / frequency])
+    b = np.array([[0., k], [-k, 0.]])
+    s = np.array(source)
+    out = conserving_transport_bounds(c, b, s, s, inverse, invariants=np.eye(2)[:, :1],
+                                     constraint_rows=(0,), constraint_columns=(1,))
+    exact = s @ np.linalg.solve(c + b, s)
+    assert exact == pytest.approx(frequency / k**2 if source[0] else 0.)
+    _interval_contains(out, exact)
+    np.testing.assert_allclose([out['lower'], out['upper']], exact, atol=1e-12)
+    assert float(out['conservation_defect']) < 1e-13
+
+
+def _conserving_case(parameter=0., ntrial=5, slack=0.):
+    c = jnp.diag(jnp.array([0., 0., 1. + .1 * parameter, 2., 3.]))
+    raw = jnp.array([[0., .3, .8, .2, .5], [0., 0., .1, 1., .3],
+                     [0., 0., 0., .2, -.3], [0., 0., 0., 0., .4], [0., 0., 0., 0., 0.]])
+    raw = raw.at[0, 2].add(.2 * parameter).at[1, 3].add(-.15 * parameter)
+    k = raw - raw.T
+    s = jnp.array([.3, -.2, .8, 1. + parameter, -.4])
+    inverse = jnp.diag(jnp.array([0., 0., 1. / c[2, 2] + slack, .5 + slack, 1. / 3 + slack]))
+    t = jnp.eye(5)[:, :ntrial]
+    return (t.T @ c @ t, k @ t, s, t.T @ s, inverse), {
+        'invariants': jnp.eye(5)[:, :2], 'constraint_rows': (0, 1), 'constraint_columns': (2, 3)}, c, k
+
+
+def test_conserving_rectangular_images_and_nested_majorants_enclose_full_response():
+    endpoints = []
+    for ntrial, slack in [(4, .6), (5, .6), (5, .1), (5, 0.)]:
+        args, kwargs, c, k = _conserving_case(ntrial=ntrial, slack=slack)
+        out = conserving_transport_bounds(*args, **kwargs)
+        exact = np.asarray(args[2]) @ np.linalg.solve(np.asarray(c + k), np.asarray(args[2]))
+        _interval_contains(out, exact)
+        endpoints.append([float(out['lower']), float(out['upper'])])
+    endpoints = np.asarray(endpoints)
+    assert np.all(np.diff(endpoints[:, 0]) >= -1e-12)
+    assert np.all(np.diff(endpoints[:, 1]) <= 1e-12)
+    np.testing.assert_allclose(endpoints[-1], exact, rtol=1e-12)
+
+
+def test_conserving_chart_derivative_includes_moving_constraints():
+    def objective(parameter):
+        args, kwargs, _, _ = _conserving_case(parameter, ntrial=4, slack=.1)
+        return conserving_transport_bounds(*args, **kwargs)['upper']
+
+    at, step = .2, 2e-5
+    eager, tangent = jax.jvp(objective, (jnp.asarray(at),), (jnp.asarray(1.),))
+    compiled = jax.jit(objective)(at)
+    _, pullback = jax.vjp(objective, jnp.asarray(at))
+    fd = (objective(at + step) - objective(at - step)) / (2 * step)
+    np.testing.assert_allclose(eager, compiled, rtol=2e-13)
+    np.testing.assert_allclose([tangent, pullback(jnp.asarray(1.))[0]], fd, rtol=2e-8, atol=1e-10)
+    values = jax.jit(jax.vmap(objective))(jnp.array([-.1, 0., .1]))
+    assert np.isfinite(values).all()
+
+
+def test_conserving_complex_fourier_response_and_complete_constraints():
+    c = np.diag([0., 1., 2.])
+    k = np.array([[.2j, 1., .3j], [-1., .5j, .4], [.3j, -.4, -.7j]])
+    s = np.array([.3j, 1., -.4 + .2j])
+    inverse = np.diag([0., 1., .5])
+    out = conserving_transport_bounds(c, k, s, s, inverse, invariants=np.eye(3)[:, :1],
+                                     constraint_rows=(0,), constraint_columns=(1,))
+    exact = np.vdot(s, np.linalg.solve(c + k, s)).real
+    _interval_contains(out, exact)
+    np.testing.assert_allclose([out['lower'], out['upper']], exact, rtol=2e-12)
+    # A complex moment covector with otherwise real forms must retain its dtype.
+    # The single trial fixed by conservation leaves no free coordinates.
+    out = conserving_transport_bounds([[1.]], [[1.], [0.]], [2., 0.], [0.],
+                                     [[0., 0.], [0., 1.]], invariants=[[1j], [0.]],
+                                     constraint_rows=(0,), constraint_columns=(0,))
+    assert bool(out['valid'])
+    np.testing.assert_allclose([out['lower'], out['upper']], [0., 4.])
+
+
+def test_full_coulomb_heat_bracket_and_maxwell_flux_lift():
+    # Exact degree-three Landau brackets for a unit-density, unit-mass Maxwellian
+    # at T=1/2. Mode order: density, parallel momentum, energy, stress, heat, l=3.
+    root = np.sqrt(2 / np.pi)
+    collision = root * np.array([0., 0., 0., 8 / 5, 16 / 15, 12 / 5])
+    maxwell = np.array([0., 0., 0., 12., 8., 18.])
+    fifth = root * np.array([0., 0., 0., 1536 / 5, 1024 / 5, 2304 / 5])
+    inverse = np.diag(np.divide(fifth, maxwell**2, out=np.zeros(6), where=maxwell > 0))
+    for frequency in [.1, 1., 10.]:
+        out = conserving_transport_bounds([[frequency * collision[4]]], np.zeros((6, 1)),
+                                         np.eye(6)[4], [1.], inverse / frequency,
+                                         invariants=np.eye(6)[:, :3])
+        assert bool(out['valid'])
+        np.testing.assert_allclose([out['lower'], out['upper']],
+                                   [15 / (16 * root * frequency), 16 * root / (5 * frequency)], rtol=2e-13)
+        # The one-mode collision inverse is a continuum lower bound only.
+        assert float(out['upper'] / out['lower']) == pytest.approx(512 / (75 * np.pi))
+
+
+def test_signed_goal_retains_antisymmetric_response_missed_by_polarization():
+    c = np.diag([0., 1.])
+    k = np.array([[0., 1.], [-1., 0.]])
+    s, j = np.eye(2)
+    kwargs = dict(invariants=np.eye(2)[:, :1], constraint_rows=(0,), constraint_columns=(1,))
+    source = conserving_transport_bounds(c, k, s, s, c, **kwargs)
+    goal = conserving_transport_bounds(c, k, j, j, c, **kwargs)
+    interval = conserving_goal_interval(c, k, s, j, source, goal)
+    assert bool(interval['valid'])
+    np.testing.assert_allclose([interval['lower'], interval['upper']], 1., atol=1e-13)
+    inverse = np.linalg.inv(c + k)
+    assert j @ ((inverse + inverse.T) / 2) @ s == pytest.approx(0.)
+    assert j @ inverse @ s == pytest.approx(1.)
+    # Promote integer forms before C+K; int32 addition would silently overflow.
+    c = np.array([[2_000_000_000, 1_000_000_000], [1_000_000_000, 2_000_000_000]], dtype=np.int32)
+    k = np.array([[0, 2_000_000_000], [-2_000_000_000, 0]], dtype=np.int32)
+    s, j = np.array([3.e9, 2.e9]), np.array([1., 0.])
+    inverse = np.linalg.inv(c.astype(float))
+    source = conserving_transport_bounds(c, k, s, s, inverse)
+    goal = conserving_transport_bounds(c, k, j, j, inverse)
+    interval = conserving_goal_interval(c, k, s, j, source, goal)
+    assert bool(interval['valid'])
+    np.testing.assert_allclose([interval['lower'], interval['upper']], 0., atol=2e-12)
+
+
+def test_signed_goal_interval_encloses_independent_full_matrix_solve_and_differentiates():
+    goal_vector = jnp.array([.5, .1, -.2, .7, 1.])
+
+    def evaluate(parameter):
+        args, kwargs, c, k = _conserving_case(parameter, ntrial=4, slack=.1)
+        source = conserving_transport_bounds(*args, **kwargs)
+        goal = conserving_transport_bounds(args[0], args[1], goal_vector, goal_vector[:4], args[4], **kwargs)
+        interval = conserving_goal_interval(args[0], k[:4, :4], args[3], goal_vector[:4], source, goal)
+        return interval, jnp.real(goal_vector @ jnp.linalg.solve(c + k, args[2]))
+
+    interval, direct = evaluate(.2)
+    assert bool(interval['valid'])
+    assert float(interval['lower']) <= float(direct) <= float(interval['upper'])
+    compiled, _ = jax.jit(evaluate)(.2)
+    np.testing.assert_allclose(compiled['center'], interval['center'], rtol=1e-12)
+    def objective(x):
+        return evaluate(x)[0]['upper']
+    step = 2e-5
+    np.testing.assert_allclose(jax.grad(objective)(.2), (objective(.2 + step) - objective(.2 - step)) / (2 * step),
+                               rtol=3e-8, atol=1e-9)
+    args, kwargs, _, k = _conserving_case(ntrial=4, slack=.1)
+    source = conserving_transport_bounds(*args, **kwargs)
+    with pytest.raises(ValueError, match='same trial basis'):
+        conserving_goal_interval(args[0], k, args[3], args[3], source, source)
+    for bad_orbit in (np.eye(4), 1e200 * np.eye(4)):
+        invalid = conserving_goal_interval(args[0], bad_orbit, args[3], args[3], source, source)
+        assert not bool(invalid['valid'])
+        assert np.isneginf(invalid['lower']) and np.isposinf(invalid['upper'])
+
+
+@pytest.mark.parametrize("kind", ['nan', 'negative', 'nonsymmetric', 'gauge', 'pivot', 'omitted', 'inverse',
+                                 'overflow_invariants', 'overflow_inverse'])
+def test_invalid_conserving_algebra_is_not_certified(kind):
+    c, b, s, g = np.eye(2), np.zeros((2, 2)), np.ones(2), np.eye(2)
+    f = s
+    kwargs = {}
+    if kind == 'nan':
+        s[0] = np.nan
+    elif kind == 'negative':
+        c[0, 0] = -1.
+    elif kind == 'nonsymmetric':
+        g[0, 1] = .3
+    elif kind == 'gauge':
+        c[0, 0] = 0.
+    elif kind in ('pivot', 'omitted'):
+        b = np.array([[0., 1.], [-1., 0.]])
+        kwargs = {'invariants': np.eye(2)[:, :1]}
+        if kind == 'pivot':
+            kwargs.update(constraint_rows=(0,), constraint_columns=(0,))
+        else:
+            s[:] = 0.  # The chart must be valid beyond this one source.
+    elif kind == 'overflow_invariants':
+        c, b, s, f, g = np.eye(1), np.array([[1.], [0.]]), np.array([1., 2.]), np.array([2.]), np.diag([0., 1.])
+        kwargs = {'invariants': np.array([[1e200], [0.]])}
+    elif kind == 'overflow_inverse':
+        c, b, s, f = np.array([[1e-200]]), np.zeros((2, 1)), np.array([1., np.sqrt(2.)]) * 1e-100, np.array([1e-100])
+        g = np.diag([-1e200, 1e200])
+    else:
+        g *= .1
+    out = conserving_transport_bounds(c, b, s, f, g, **kwargs)
+    assert not bool(out['valid'])
+    assert float(out['lower']) == 0. and np.isposinf(float(out['upper']))
+
+
+@pytest.mark.parametrize("kwargs", [
+    {'constraint_rows': (0,), 'constraint_columns': ()},
+    {'constraint_rows': (0, 0), 'constraint_columns': (0, 1)},
+    {'constraint_rows': (0,), 'constraint_columns': (2,)},
+    {'constraint_rows': (.5,), 'constraint_columns': (0,)},
+])
+def test_malformed_conserving_chart_rejected(kwargs):
+    with pytest.raises(ValueError, match='constraint'):
+        conserving_transport_bounds(np.eye(2), np.eye(2), np.ones(2), np.ones(2), np.eye(2),
+                                    invariants=np.ones((2, 1)), **kwargs)
+
+
+@pytest.mark.parametrize("argument", ['collision', 'drift', 'source', 'source_load', 'inverse_bound', 'invariants'])
+def test_conserving_shape_errors_are_explicit(argument):
+    args = dict(collision=np.eye(2), drift=np.eye(2), source=np.ones(2),
+                source_load=np.ones(2), inverse_bound=np.eye(2), invariants=np.ones((2, 1)))
+    args[argument] = np.ones(3)
+    with pytest.raises(ValueError, match='expected|invariants'):
+        conserving_transport_bounds(**args)
 
 
 def test_integer_pitch_edges_do_not_truncate_real_physics_inputs():
