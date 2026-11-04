@@ -1252,6 +1252,48 @@ The loss is the smooth upper envelope over the selected surfaces,
 collision strengths and electric fields; ``scale`` is a fixed positive
 diffusivity scale in m\ :sup:`2`/s.
 
+Checking an optimized boundary
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Compare seed and candidate at the same physical density, temperature and
+electric field. Their normalized :math:`\nu`, :math:`E_*` and diffusivity
+units generally differ. If separate feasible trials give a seed lower
+value :math:`L_s` and candidate upper value :math:`U_c` in m²/s, then
+:math:`\chi_c/\chi_s\le U_c/L_s` when :math:`L_s>0`.
+This comparison measures the response decrease independently of how tight
+the inexpensive optimization objective is.
+
+A 48-coefficient vacuum QA boundary search from the unperturbed
+`Landreman--Paul configuration <https://doi.org/10.1103/PhysRevLett.128.035001>`_
+uses six fixed deuterium operating points at 100 eV and 1 keV. Eighty
+L-BFGS-B iterations with augmented Lagrangian constraints reduce the
+refined scalar upper values by about 29.5% and 20.4%, respectively.
+Aspect ratio, volume and rotational transform at :math:`s=0.25,0.5,0.75`
+remain within 0.1% of their seed values; flux and the constant radial
+boundary coefficient are fixed. Refining the equilibrium from 50 radial
+surfaces and ``mpol=8`` to 74 surfaces and ``mpol=10``, with Boozer
+bandwidth increased from 12 to 16, changes these upper values by less
+than 0.01% at :math:`s=0.5`.
+
+Separate continuous-velocity trial calculations on the fitted
+:math:`J(16,20)` fields establish a response decrease of at least 26.2%
+throughout :math:`T=100` eV, :math:`\ln\Lambda=15`,
+:math:`n\in[1.35,1.65]\,10^{20}` m⁻³ and
+:math:`|E_r|\le100` V/m. At the separate point :math:`T=1` keV,
+:math:`n=10^{20}` m⁻³, :math:`\ln\Lambda=17`, :math:`E_r=0`, the seed
+lower value is 0.04582915931 m²/s and the candidate upper value is
+0.04285529594 m²/s, giving at least 6.489% decrease. These tighter
+offline trials are distinct from the compact runtime lower endpoint.
+Angular remainders are included; floating rounding and transfer to the
+untruncated magnetic field remain outside these enclosures.
+
+The first design's compact upper value becomes much larger at a held-out
+10 keV operating point. This shows loss of useful bound control there;
+it does not establish an increase of the kinetic response. Include the
+intended collision and electric-field range in the objective, then check
+both endpoints with refined geometry and an independently resolved
+kinetic calculation before adopting the boundary.
+
 Bootstrap current (Redl)
 ------------------------
 

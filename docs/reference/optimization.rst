@@ -844,11 +844,30 @@ at finite electric field. A reduced upper bound alone does not establish
 that the response decreased; separated endpoint intervals can do so.
 
 Set ``VMEX_HEAT_BOUND_MODEL=coulomb`` when running the same optimization
-example to select this objective. It checks the equilibrium adjoint against
-re-solved finite differences, then refines the equilibrium and finite-J fit
-at both endpoints. No full drift-kinetic matrix solve occurs inside the loss.
+example to select this objective. It starts from the unperturbed reactor-scale
+QA seed, with fixed local deuterium density and temperature. The default
+nine cases combine 100 eV, 1 keV and 10 keV with zero and both signs of the
+specified radial electric field. Set ``VMEX_HEAT_BOUND_INCLUDE_HOT=0`` for
+the six-case 100 eV/1 keV window. ``VMEX_HEAT_BOUND_MAX_MODE`` and
+``VMEX_HEAT_BOUND_MAXITER`` control the boundary space and iteration budget.
+The remaining resolution and physical settings are grouped at the top.
+
+The loss is a smooth maximum of upper values normalized to their seed
+values. A bounded L-BFGS-B solve with augmented Lagrangian constraints
+preserves aspect ratio, volume and transform at three radii. At finite
+equilibrium resolution, the released coordinate family is held fixed in
+both objective values and adjoints. A re-solved directional difference
+checks that same family; failed root refinements reject the trial.
+The final check increases equilibrium and Boozer resolution, evaluates
+the finite-J objective at both endpoints and reports the off-objective
+surfaces separately. The recorded acceptance flag requires all selected
+upper values to decrease and all constraints to meet their tolerances.
+It does not by itself certify a decrease of the kinetic response.
+No full drift-kinetic matrix solve occurs inside the loss.
 Set ``VMEX_HEAT_BOUND_MACRO_ORDER=6`` as well to select the correlated
 refinement in that same example; omitting it retains the scalar objective.
+``VMEX_EXAMPLES_CI=1`` runs a small two-iteration execution check and records
+its acceptance status without treating that short run as a completed design.
 
 Resources and reproducibility
 -----------------------------
