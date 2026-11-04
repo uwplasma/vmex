@@ -1075,6 +1075,120 @@ different models, as discussed by
 caller must establish the exact orbit images, continuous inverse majorant,
 measure and boundary conditions; rounding remains outside the theorem.
 
+.. _full-coulomb-stellarator-proxy:
+
+Full-Coulomb stellarator upper objective
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:class:`vmex.core.neoclassical.ConservingHeatBound` evaluates a continuous
+single-species Landau upper bound directly from the equilibrium's Boozer
+spectrum. It includes the test-particle and field-particle collision terms,
+parallel streaming, mirror trapping and the incompressible DKES electric
+drift. Tangential magnetic drift and interspecies collisions are outside
+this objective. The scalar response is the heat coefficient for the
+temperature force with the other thermodynamic force set to zero.
+
+The underlying :func:`vmex.core.neoclassical.conserving_stellarator_proxy`
+takes a finite Fourier representation of :math:`J=\widehat B^{-2}` in
+:math:`x=\theta-h\zeta`, :math:`y=N_{\rm fp}\zeta`. Its complex coefficients
+define the real part of the Fourier sum; :math:`h` is an integer multiple
+of :math:`N_{\rm fp}`. Define
+
+.. math::
+
+   D=(\iota-h)\partial_x+N_{\rm fp}\partial_y,\qquad
+   D_\perp=\frac{G+hI}{G+\iota I}\partial_x
+                  -\frac{N_{\rm fp}I}{G+\iota I}\partial_y,
+   \qquad P_0=D^{-1}D_\perp J,\quad\langle P_0\rangle=0.
+
+Angle brackets here denote a uniform angular average. Each nonconstant
+Fourier coefficient of :math:`P_0` is obtained by multiplying that of
+:math:`J` by the ratio of the :math:`D_\perp` and :math:`D` wave numbers.
+The implementation rejects a resonant chart; it does not replace the
+denominator by a fitted floor. Set :math:`P=P_0+c` and
+
+.. math::
+
+   F=JD_\perp J-PDJ,\qquad
+   E=JD_\perp P-\tfrac12PD_\perp J.
+
+The odd heat-flow trial :math:`-\widehat B P v_\parallel(v^2-5/2)` satisfies
+the local particle, momentum and energy balances. Its residual contains
+only the heat polynomial :math:`q_1=v_\parallel(v^2-5/2)` and the stress
+polynomial :math:`q_2=(v_\parallel^2-v^2/3)(v^2-5/2)`. Continuous inverse
+norm bounds :math:`\mu_j\ge\langle q_j,A_C^\dagger q_j\rangle` give
+
+.. math::
+
+   U(c)=\frac1{\langle J\rangle}\left[
+      \frac{4\nu}{3}\sqrt{\frac2\pi}\langle P^2\rangle
+      +\frac{9\mu_2}{16\nu}\left\langle\frac{F^2}{J^3}\right\rangle
+      +\frac{(E_*\langle J\rangle)^2\mu_1}{\nu}
+                       \left\langle\frac{E^2}{J^4}\right\rangle\right].
+
+This is a positive scalar quadratic in :math:`c`; its minimum requires
+one division. The defaults are the explicit Maxwell-kernel flux lifts
+
+.. math::
+
+   A_2^{-1}q_1=q_1/8,\quad \mu_1=4\sqrt{2/\pi},\qquad
+   A_2^{-1}q_2=(v_\parallel^2-v^2/3)(v^2/14-1/6),\quad
+   \mu_2=\frac{9368}{2205}\sqrt{2/\pi}.
+
+These auxiliary fluxes bound the inverse of the Coulomb operator; they do
+not replace its collision law by Maxwell-molecule collisions. Sharper
+continuous inverse bounds may be supplied. A finite Coulomb matrix inverse
+alone is insufficient. At :math:`E_*=0`, an isobaric trial also gives
+:math:`L=25\nu\langle P_0^2\rangle/(16\mu_1\langle J\rangle)`.
+At finite electric field this compact objective returns the universal
+lower endpoint zero.
+
+Rational angular weights have an explicit integration correction. Write
+:math:`J=j_0(1-r_J)` and establish
+:math:`\|r_J\|_\infty\le\rho<1` from the Fourier amplitudes. For integer
+:math:`p`, the tail after degree :math:`M` in the binomial expansion is
+
+.. math::
+
+   T_{p,M}(\rho)=\rho^{M+1}\sum_{k=0}^{p-1}
+      {M+p\choose p-1-k}\frac{\rho^k}{(1-\rho)^{k+1}}.
+
+The grid resolves every term through degree :math:`M+4` in the retained
+Fourier band. For the nonnegative numerators :math:`F^2,E^2`, replacing
+the sampled weight :math:`J^{-p}` by
+:math:`J^{-p}+2j_0^{-p}T_{p,M}` bounds the remaining quadrature error.
+The scalar minimization uses these corrected weights. A fixed
+``rho_bound`` above the current relative Fourier amplitude makes this
+tail correction differentiable when a Fourier coefficient crosses zero.
+Floating-point rounding remains separate from the analytic bound.
+
+``ConservingHeatBound`` fits :math:`J` on the chosen grid and reports the
+sampled relative magnetic-field fitting error. The interval applies to
+that finite representation. Refine ``geometry_order``, ``fit_grid`` and
+the Boozer transform independently; the integration correction does not
+bound the change to a different magnetic field.
+
+The state objective returns heat diffusivity in m\ :sup:`2`/s. With
+:math:`v_t=\sqrt{2eT_{\rm eV}/m}` and
+:math:`\tau=|G+\iota I|/(B_{00}v_t)`, its operating inputs become
+
+.. math::
+
+   \nu=\tau\nu_C,\qquad
+   E_*=-\tau E_r\frac{dr}{d\psi},\qquad
+   \chi_r=\left(\frac{2T_{\rm eV}}{Z}\right)^2
+              \tau\left(\frac{dr}{d\psi}\right)^2D.
+
+Here ``collision_strengths`` means
+:math:`\nu_C=n(Ze)^4\ln\Lambda/(8\pi\epsilon_0^2m^2v_t^3)` in
+s\ :sup:`-1`, and ``radial_electric_fields`` means :math:`E_r=-d\Phi/dr`
+in V/m. VMEX supplies the signed toroidal flux :math:`\psi=\Phi_t/(2\pi)`.
+The flux radius :math:`r=a\sqrt{\psi/\psi_{\rm edge}}` fixes its derivative
+even when the computational radial mesh uses a nonlinear flux profile.
+The loss is the smooth upper envelope over the selected surfaces,
+collision strengths and electric fields; ``scale`` is a fixed positive
+diffusivity scale in m\ :sup:`2`/s.
+
 Bootstrap current (Redl)
 ------------------------
 

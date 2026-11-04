@@ -694,6 +694,27 @@ def test_conserving_chart_derivative_includes_moving_constraints():
     assert np.isfinite(values).all()
 
 
+def test_conserving_redundant_residual_generators_preserve_bounds_and_derivatives():
+    # Store only the Gram form of (K trial_1, ..., K trial_n, S), even
+    # when these generators are dependent in the physical residual space.
+    def evaluate(parameter, compressed):
+        args, kwargs, _, _ = _conserving_case(parameter, slack=.1)
+        if compressed:
+            c, b, s, f, g = args
+            image = jnp.column_stack((b, s))
+            args = (c, jnp.eye(6)[:, :5], jnp.eye(6)[:, -1], f, image.T @ g @ image)
+            kwargs['invariants'] = image.T @ kwargs['invariants']
+        out = conserving_transport_bounds(*args, **kwargs)
+        return jnp.array([out['lower'], out['upper']]), out['valid']
+
+    for compressed in (False, True):
+        values, valid = jax.jit(lambda x: evaluate(x, compressed))(.2)
+        assert bool(valid)
+        np.testing.assert_allclose(values, evaluate(.2, False)[0], rtol=2e-12)
+    np.testing.assert_allclose(jax.jacfwd(lambda x: evaluate(x, True)[0])(.2),
+                               jax.jacrev(lambda x: evaluate(x, False)[0])(.2), rtol=2e-11)
+
+
 def test_conserving_complex_fourier_response_and_complete_constraints():
     c = np.diag([0., 1., 2.])
     k = np.array([[.2j, 1., .3j], [-1., .5j, .4], [.3j, -.4, -.7j]])
@@ -785,6 +806,34 @@ def test_signed_goal_interval_encloses_independent_full_matrix_solve_and_differe
         invalid = conserving_goal_interval(args[0], bad_orbit, args[3], args[3], source, source)
         assert not bool(invalid['valid'])
         assert np.isneginf(invalid['lower']) and np.isposinf(invalid['upper'])
+
+
+def test_signed_goal_covers_weak_orbit_integration_error():
+    c, k = np.diag([0., 1.]), np.array([[0., 1.], [-1., 0.]])
+    s, j = np.eye(2)
+    kwargs = dict(invariants=np.eye(2)[:, :1], constraint_rows=(0,), constraint_columns=(1,))
+    source = conserving_transport_bounds(c, k, s, s, c, **kwargs)
+    goal = conserving_transport_bounds(c, k, j, j, c, **kwargs)
+    error = np.array([[.04, .02], [.01, -.03]])
+    bound = np.linalg.norm(error)
+    def evaluate(scale):
+        return conserving_goal_interval(c, k + scale * error, s, j, source, goal,
+                                        orbit_error_bound=scale * bound)
+    out = jax.jit(evaluate)(1.)
+    assert bool(out['valid']) and out['lower'] <= 1. <= out['upper']
+    primal = source['lower_trial'] + source['upper_trial']
+    adjoint = goal['lower_trial'] - goal['upper_trial']
+    assert float(out['orbit_error_radius']) == pytest.approx(bound * np.linalg.norm(primal) * np.linalg.norm(adjoint))
+    assert float(out['radius']) == pytest.approx(float(out['orbit_error_radius']))
+    step = 1e-5
+    np.testing.assert_allclose(jax.grad(lambda x: evaluate(x)['upper'])(1.),
+                               (evaluate(1. + step)['upper'] - evaluate(1. - step)['upper']) / (2 * step), rtol=1e-8)
+    for invalid in (-1., np.nan, np.inf):
+        out = conserving_goal_interval(c, k, s, j, source, goal, orbit_error_bound=invalid)
+        assert not bool(out['valid']) and np.isneginf(out['lower']) and np.isposinf(out['upper'])
+    for malformed in ([.1], .1j):
+        with pytest.raises(ValueError, match='real scalar'):
+            conserving_goal_interval(c, k, s, j, source, goal, orbit_error_bound=malformed)
 
 
 @pytest.mark.parametrize("kind", ['nan', 'negative', 'nonsymmetric', 'gauge', 'pivot', 'omitted', 'inverse',
@@ -1373,10 +1422,121 @@ def test_public_exports_resolve_to_the_traceable_adapter():
     import vmex
     from vmex import optimize
 
-    for name in ("NeoclassicalHeatBound", "neoclassical_heat_bounds_state"):
+    for name in ("NeoclassicalHeatBound", "ConservingHeatBound", "neoclassical_heat_bounds_state"):
         assert getattr(vmex, name) is getattr(neoclassical, name)
         assert getattr(optimize, name) is getattr(neoclassical, name)
     assert vmex.neoclassical_heat_bounds_from_boozer is neoclassical.neoclassical_heat_bounds_from_boozer
+    assert vmex.conserving_stellarator_proxy is neoclassical.conserving_stellarator_proxy
+
+
+def test_full_coulomb_proxy_encloses_independent_angular_quadrature_and_has_gradients():
+    """A dense quadrature and scalar minimizer independently check the feasible flow."""
+    from scipy.optimize import minimize_scalar
+
+    modes = np.array([[0, 0], [1, 0], [0, 1], [1, -1]])
+    coefficients = jnp.asarray([1., .18, .013j, .006])
+    options = dict(iota=.41, G_b=3., I_b=.02, nfp=2, collision_frequency=.3, electric_field=.01)
+    grid = np.arange(257) * (2 * np.pi / 257)
+    x, y = np.meshgrid(grid, grid, indexing="ij")
+    phase = np.exp(1j * (x[..., None] * modes[:, 0] + y[..., None] * modes[:, 1]))
+    kd = modes @ np.array([.41, 2.])
+    ke = modes @ np.array([3., -.04]) / (3. + .41 * .02)
+    primitive = np.divide(ke, kd, out=np.zeros_like(kd), where=kd != 0) * coefficients
+    J = np.real(phase @ coefficients)
+    p, dj, ej, ep = [np.real(phase @ v) for v in
+                     (primitive, 1j * kd * coefficients, 1j * ke * coefficients, 1j * ke * primitive)]
+    s = np.sqrt(2 / np.pi)
+
+    def objective(c):
+        P = p + c
+        return (.3 * 4 * s / 3 * np.mean(P**2)
+                + 9 * (9368 * s / 2205) / (16 * .3) * np.mean((J * ej - P * dj)**2 / J**3)
+                + .01**2 * 4 * s / .3 * np.mean((J * ep - .5 * P * ej)**2 / J**4))
+
+    reference = minimize_scalar(objective, bracket=(-1., 1.), method="brent", options={"xtol": 1.e-12})
+    coarse = neoclassical.conserving_stellarator_proxy(modes, coefficients, integration_order=0, **options)
+    fine = neoclassical.conserving_stellarator_proxy(modes, coefficients, integration_order=24, **options)
+    assert coarse["valid"] and fine["valid"] and coarse["upper"] > reference.fun
+    np.testing.assert_allclose(fine["upper"], reference.fun, rtol=2.e-12)
+    np.testing.assert_allclose(fine["optimal_heat_flow_constant"], reference.x, rtol=1.e-7)
+    assert fine["lower"] == 0
+
+    def response(values):
+        return neoclassical.conserving_stellarator_proxy(
+            modes, coefficients.at[1].set(values[0]), rho_bound=.3,
+            **(options | dict(collision_frequency=values[1], electric_field=values[2])))["upper"]
+
+    parameters, direction, step = jnp.array([.18, .3, .01]), jnp.array([.2, -.3, .04]), 1.e-5
+    gradient = jax.jit(jax.grad(response))(parameters)
+    finite = (response(parameters + step * direction) - response(parameters - step * direction)) / (2 * step)
+    np.testing.assert_allclose(gradient @ direction, finite, rtol=3.e-8)
+
+
+def test_full_coulomb_proxy_zero_source_symmetries_and_chart_rejection():
+    """Zero drive, field reversal, broadcasting and invalid Fourier charts are explicit."""
+    proxy = neoclassical.conserving_stellarator_proxy
+    wave, c = np.array([[0, 0], [1, 0]]), jnp.array([1., .2])
+    args = dict(iota=.4, G_b=1., I_b=0.)
+    out = proxy(wave, c, collision_frequency=jnp.array([.1, 1.])[:, None],
+                electric_field=jnp.array([-.01, 0., .01])[None, :], **args)
+    assert np.all(out["valid"]) and out["upper"].shape == (2, 3)
+    np.testing.assert_allclose(out["upper"][:, 0], out["upper"][:, 2])
+    assert np.all(out["lower"][:, 1] > 0) and np.all(out["lower"][:, (0, 2)] == 0)
+    uniform = proxy([[0, 0]], [1], **args)
+    assert uniform["valid"] and uniform["upper"] == uniform["lower"] == uniform["relative_gap"] == 0
+    overflow = proxy([[0, 0]], [1.], iota=1.e308, G_b=1., I_b=1.e308)
+    assert not overflow["valid"] and jnp.isinf(overflow["upper"])
+    for update in (dict(iota=0.), dict(G_b=0.), dict(collision_frequency=0.), dict(electric_field=np.nan),
+                   dict(heat_inverse_bound=-1.), dict(rho_bound=.1), dict(rho_bound=1.)):
+        invalid = proxy(wave, c, **(args | update))
+        assert not invalid["valid"] and invalid["lower"] == 0 and jnp.isinf(invalid["upper"])
+    for waves, coefficients in (([[1, 0]], [1.]), ([[0, 0], [0, 0]], [1., 1.]),
+                                 ([[0, 0], [.5, 0]], [1., .2]), (wave, [1.])):
+        with pytest.raises(ValueError):
+            proxy(waves, coefficients, **args)
+    for update in (dict(nfp=0), dict(helicity=1, nfp=2), dict(integration_order=-1), dict(iota=[.4]),
+                   dict(collision_frequency=1j), dict(rho_bound=[.3])):
+        with pytest.raises(ValueError):
+            proxy(wave, c, **(args | update))
+
+
+def test_full_coulomb_state_objective_flux_units_and_equilibrium_derivatives(monkeypatch):
+    """Field scaling, nonlinear flux radius and the objective contract survive tracing."""
+    def transform(amplitude, rt, **kwargs):
+        return dict(bmnc_b=jnp.array([[2., amplitude, .001]]), bmns_b=jnp.zeros((1, 3)),
+                    xm_b=np.array([0, 1, 1]), xn_b=np.array([0, 0, 2]),
+                    iota_b=jnp.array([.4]), G_b=jnp.array([5.]), I_b=jnp.array([.02]), nfp=2,
+                    psi_b=jnp.array([-.3]), psi_edge=jnp.array(-2.), s_b=jnp.array([.5]))
+    monkeypatch.setattr(neoclassical.ConservingHeatBound, "_boozer", lambda self, state, rt: transform(state, rt))
+    monkeypatch.setattr(neoclassical, "_aspect_scalars", lambda state, rt: (1., None, None, None))
+    options = dict(temperature_ev=1000., collision_strengths=[100., 1000.], radial_electric_fields=[0., 30.],
+                   geometry_order=(2, 1), fit_grid=32, integration_order=16, rho_bound=.4)
+    term = neoclassical.ConservingHeatBound([.5], **options)
+    out = term.compute_state(.2, None)
+    assert out["upper"].shape == (1, 2, 2) and np.all(out["valid"])
+    assert 0 < out["geometry_fit_error_sampled"][0] < .002
+    np.testing.assert_allclose(term(SimpleNamespace(state=.2, runtime=None))**2, out["total"])
+    value, grad = jax.jit(jax.value_and_grad(lambda a: term.total_state(a, None)))(.2)
+    fd = (term.total_state(.200001, None) - term.total_state(.199999, None)) / .000002
+    np.testing.assert_allclose(grad, fd, rtol=2.e-7)
+    assert value > 0
+
+    def scaled(amplitude, rt, **kwargs):
+        data = transform(amplitude, rt, **kwargs)
+        return data | {k: 2 * data[k] for k in ("bmnc_b", "G_b", "I_b", "psi_b", "psi_edge")}
+
+    monkeypatch.setattr(neoclassical.ConservingHeatBound, "_boozer", lambda self, state, rt: scaled(state, rt))
+    rescaled = term.compute_state(.2, None)
+    np.testing.assert_allclose(rescaled["upper"][..., 0], out["upper"][..., 0] / 4, rtol=2.e-13)
+    np.testing.assert_allclose(rescaled["lower"][..., 0], out["lower"][..., 0] / 4, rtol=2.e-13)
+    undersampled = neoclassical.ConservingHeatBound([.5], **(options | dict(helicity=32)))
+    with pytest.raises(ValueError, match="incoming Boozer"):
+        undersampled.compute_state(.2, None)
+    for update in (dict(surfaces=[]), dict(surfaces=[0.]), dict(temperature_ev=-1.),
+                   dict(collision_strengths=[]), dict(radial_electric_fields=[np.nan]), dict(scale=0.),
+                   dict(geometry_order=(1,)), dict(fit_grid=4), dict(charge_number=0.)):
+        with pytest.raises(ValueError):
+            neoclassical.ConservingHeatBound(**(options | dict(surfaces=[.5]) | update))
 
 
 def test_continuous_energy_route_retains_geometry_gradients_and_its_distinct_schema():

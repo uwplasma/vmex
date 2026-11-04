@@ -97,6 +97,9 @@ links to the module that documents it.
   :func:`~vmex.core.neoclassical.neoclassical_heat_bounds_state` /
   :func:`~vmex.core.neoclassical.neoclassical_heat_bounds_from_boozer` —
   differentiable reference-model heat intervals and an upper-bound objective
+- :class:`~vmex.core.neoclassical.ConservingHeatBound` /
+  :func:`~vmex.core.neoclassical.conserving_stellarator_proxy` —
+  full-Coulomb stellarator upper objective and continuous angular remainder
 
 **Post-processing and plotting**
 
@@ -302,6 +305,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.neoclassical", "epsilon_effective_from_wout"),
     "gamma_c_from_wout": (".core.gammac", "gamma_c_from_wout"),
     "NeoclassicalHeatBound": (".core.neoclassical", "NeoclassicalHeatBound"),
+    "ConservingHeatBound": (".core.neoclassical", "ConservingHeatBound"),
+    "conserving_stellarator_proxy": (".core.neoclassical", "conserving_stellarator_proxy"),
     "neoclassical_heat_bounds_from_boozer": (
         ".core.neoclassical", "neoclassical_heat_bounds_from_boozer"),
     "neoclassical_heat_bounds_state": (

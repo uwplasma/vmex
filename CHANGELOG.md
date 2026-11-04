@@ -4,11 +4,11 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- Add a differentiable Boozer reference-well heat objective with retained pitch diffusion and tangential precession.
-  Continuous-pitch bounds and analytic Maxwell moments enclose the stated Lorentz response; geometry and model errors remain separate.
-  Shared trial assembly preserves the validated values and derivatives.
-- Add conserving collision-form and signed-response bounds with local conserved-moment constraints.
-  Continuous inverse-norm majorants and differentiable fixed-rank charts support full Coulomb collision models.
+- Add a differentiable Boozer reference-well heat objective with pitch diffusion and tangential precession.
+  Continuous-pitch bounds and analytic Maxwell moments enclose the Lorentz response; shared assembly preserves validated values and derivatives, with geometry and model errors separate.
+- Add conserving collision-form and signed-response bounds with local moments, continuous inverse majorants and differentiable constraint charts for full Coulomb collision models.
+- Add a full-Coulomb stellarator heat objective with an analytically minimized feasible flow, bounded angular-integration remainder and SI Boozer adapter.
+  Extend the existing optimization example; the single-species model retains passing/trapped particles and incompressible electric precession.
 
 ## 0.13.0 - 2026-11-03
 

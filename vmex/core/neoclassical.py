@@ -9,11 +9,14 @@ cold-scatterer collision law. Geometry, reference-model and rounding errors
 remain separate. General omnigenity need not be close to this reference.
 The conserving collision-form API accepts continuous inverse-norm majorants
 and retains local invariant constraints for full Coulomb collision models.
+ConservingHeatBound supplies a separate full-Coulomb stellarator proxy with
+passing/trapped dynamics and incompressible electric precession.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
+from math import comb
 from typing import Any, Sequence
 
 import jax
@@ -38,6 +41,7 @@ __all__ = [
     "continuous_lorentz_heat_bounds",
     "conserving_transport_bounds",
     "conserving_goal_interval",
+    "conserving_stellarator_proxy",
     "reference_pitch_grid_from_boozer",
     "bounce_geometry_from_boozer",
     "neoclassical_heat_bounds_from_geometry",
@@ -45,6 +49,7 @@ __all__ = [
     "neoclassical_heat_bounds_state",
     "smooth_worst_case_bound",
     "NeoclassicalHeatBound",
+    "ConservingHeatBound",
 ]
 
 
@@ -387,7 +392,7 @@ def conserving_transport_bounds(
 
     ``collision(n,n)`` is the trial collision Gram matrix. ``drift(r,n)``
     contains the exact images of these trials under the skew orbit operator,
-    in a linearly independent residual basis. ``source(r)`` and ``source_load(n)``
+    in residual generators that may be redundant. ``source(r)`` and ``source_load(n)``
     are its source coefficients and trial inner products. The positive
     semidefinite ``inverse_bound(r,r)`` must majorize the continuous collision
     inverse norm on the residual space. A feasible Coulomb pair-flux lift
@@ -493,7 +498,7 @@ def conserving_transport_bounds(
 
 
 def conserving_goal_interval(collision, orbit_gram, source_load, goal_load,
-                             source_bounds, goal_bounds) -> dict[str, Any]:
+                             source_bounds, goal_bounds, *, orbit_error_bound=0.) -> dict[str, Any]:
     r"""Bound a signed response using primal and adjoint collision-flux errors.
 
     The two results must come from :func:`conserving_transport_bounds` with
@@ -502,7 +507,10 @@ def conserving_goal_interval(collision, orbit_gram, source_load, goal_load,
     Return an interval for ``Re<J,(A+K)^(-1)S>``. This includes the
     antisymmetric response omitted by polarization of dissipative bounds.
     ``orbit_gram`` must describe the same orbit images as the two bound
-    calls. Derivatives are valid on a fixed chart at positive interval radius;
+    calls. A nonnegative ``orbit_error_bound`` may bound its Frobenius-norm
+    integration error; the radius then includes this error times the primal
+    and adjoint coefficient norms. It does not cover errors in other forms.
+    Derivatives are valid on a fixed chart at positive interval radius;
     a collapsed radius can have a norm cusp. The caller defines the physical
     current or other observable J; this
     operation alone does not supply a bootstrap closure.
@@ -510,6 +518,10 @@ def conserving_goal_interval(collision, orbit_gram, source_load, goal_load,
     arrays = tuple(jnp.asarray(x) for x in (collision, orbit_gram, source_load, goal_load))
     dtype = jnp.result_type(*arrays, jnp.float64)
     c, w, f, j = (x.astype(dtype) for x in arrays)
+    error = jnp.asarray(orbit_error_bound)
+    if error.ndim or jnp.iscomplexobj(error):
+        raise ValueError("orbit_error_bound must be a real scalar")
+    error = error.astype(jnp.float64)
     primal = source_bounds['lower_trial'] + source_bounds['upper_trial']
     adjoint = goal_bounds['lower_trial'] - goal_bounds['upper_trial']
     if (f.ndim != 1 or j.shape != f.shape or primal.shape != f.shape or adjoint.shape != f.shape
@@ -518,14 +530,17 @@ def conserving_goal_interval(collision, orbit_gram, source_load, goal_load,
     center = jnp.real(jnp.vdot(j, primal) + jnp.vdot(adjoint, f - (c + w) @ primal))
     product = source_bounds['primal_error_squared'] * goal_bounds['adjoint_error_squared']
     radius = jnp.where(product > 0, jnp.sqrt(jnp.where(product > 0, product, 1.)), 0.)
+    error_radius = jnp.where(error > 0, error * jnp.linalg.norm(primal) * jnp.linalg.norm(adjoint), 0.)
+    radius += error_radius
     skew_error, orbit_norm = jnp.linalg.norm(w + w.conj().T), jnp.linalg.norm(w)
     skew = (jnp.isfinite(skew_error) & jnp.isfinite(orbit_norm)
-            & (skew_error <= 256 * np.finfo(float).eps * f.size * (1 + orbit_norm)))
+            & (skew_error <= 2 * error + 256 * np.finfo(float).eps * f.size * (1 + orbit_norm)))
     valid = (source_bounds['valid'] & goal_bounds['valid'] & skew & jnp.isfinite(center)
+             & jnp.isfinite(error) & (error >= 0)
              & jnp.isfinite(product) & (product >= 0) & jnp.isfinite(radius))
     return {"lower": jnp.where(valid, center - radius, -jnp.inf),
             "upper": jnp.where(valid, center + radius, jnp.inf),
-            "center": center, "radius": radius, "valid": valid}
+            "center": center, "radius": radius, "orbit_error_radius": error_radius, "valid": valid}
 
 
 _DEFAULT_ENERGY_EDGES = (0., .25, .5, 1., 1.5, 2., 2.5, 3., 4., 5., 7., 10., 16., 24., np.inf)
@@ -1177,6 +1192,193 @@ def smooth_worst_case_bound(upper, *, scale=1., smoothing=.05):
     safe_scale, safe_smoothing = jnp.where(valid, scale, 1.), jnp.where(valid, smoothing, 1.)
     total = safe_smoothing * logsumexp(safe_values / (safe_scale * safe_smoothing))
     return jnp.where(valid, total, jnp.inf)
+
+
+def conserving_stellarator_proxy(
+    modes, coefficients, *, iota, G_b, I_b, nfp=1, helicity=0,
+    collision_frequency=1., electric_field=0., integration_order=32,
+    heat_inverse_bound=4 * np.sqrt(2 / np.pi),
+    stress_inverse_bound=9368 * np.sqrt(2 / np.pi) / 2205, rho_bound=None,
+):
+    r"""Cheap continuous full-Coulomb heat bound for a finite Boozer Jacobian.
+
+    Define ``J=Re sum(coefficients*exp(i*(m*x+n*y)))=Bhat**-2``, with
+    ``x=theta-helicity*zeta``, ``y=nfp*zeta`` and integer ``modes`` of shape (N,2).
+    Streaming and mirror forces retain passing and trapped particles; electric
+    precession uses the incompressible DKES model. Tangential magnetic drift is
+    absent. The collision operator is the full single-species linearized Landau
+    operator about ``M=pi**(-3/2)*exp(-v**2)`` with pair coefficient one.
+    Frequencies and fields are dimensionless and broadcast together.
+
+    The feasible flow ``-Bhat*(D^-1 Dperp J+c)*vparallel*(v**2-5/2)`` has one
+    analytically optimized constant. Defaults use explicit Maxwell-kernel flux
+    lifts for its two Coulomb inverse norms. Sharper supplied constants must
+    also bound the *continuous* inverses of the heat and stress polynomials.
+    A nontrivial lower endpoint is available at zero electric field only.
+
+    The periodic grid integrates polynomials through degree
+    ``(integration_order+4)*max(abs(modes))`` exactly; a positive binomial-tail
+    correction bounds the remaining rational-weight quadrature error. Floating
+    point rounding and the error of fitting J to another field remain separate.
+    Gradients are local to a fixed nonresonant Fourier chart. A fixed
+    ``rho_bound`` above the relative Fourier l1 amplitude makes the tail smooth
+    even when a coefficient vanishes. Invalid charts return ``[0, infinity]``.
+    """
+    wave = np.asarray(modes)
+    if (wave.ndim != 2 or wave.shape[1] != 2 or not len(wave)
+            or not np.all(np.isfinite(wave)) or not np.all(wave == wave.astype(int))
+            or len(np.unique(wave, axis=0)) != len(wave)
+            or np.count_nonzero(np.all(wave == 0, axis=1)) != 1):
+        raise ValueError("modes must be distinct integer pairs containing exactly one zero mode")
+    if (int(nfp) != nfp or nfp < 1 or int(helicity) != helicity or helicity % nfp
+            or int(integration_order) != integration_order or integration_order < 0):
+        raise ValueError("require positive integer nfp, helicity a multiple of nfp, and nonnegative integration_order")
+    wave, order = wave.astype(int), int(integration_order)
+    coefficient = jnp.asarray(coefficients) + 0.
+    if coefficient.shape != (len(wave),):
+        raise ValueError("coefficients must have one entry per Fourier mode")
+    scalar = [jnp.asarray(x) for x in (iota, G_b, I_b, heat_inverse_bound, stress_inverse_bound)]
+    nu, field = jnp.broadcast_arrays(jnp.asarray(collision_frequency), jnp.asarray(electric_field))
+    if (any(x.ndim or jnp.iscomplexobj(x) for x in scalar)
+            or jnp.iscomplexobj(nu) or jnp.iscomplexobj(field) or not nu.size):
+        raise ValueError("geometry and inverse bounds must be real scalars; operating points must be real and nonempty")
+    iota, G_b, I_b, mu1, mu2 = scalar
+    zero = np.all(wave == 0, axis=1)
+    center = jnp.real(coefficient[np.flatnonzero(zero)[0]])
+    covariant = G_b + iota * I_b
+    basic = (jnp.all(jnp.isfinite(coefficient)) & jnp.isfinite(center) & (center > 0)
+             & jnp.all(jnp.isfinite(jnp.stack(scalar))) & jnp.isfinite(covariant)
+             & (covariant != 0) & (mu1 > 0) & (mu2 > 0))
+    center, covariant = jnp.where(basic, center, 1.), jnp.where(basic, covariant, 1.)
+    relative_amplitude = jnp.sum(jnp.abs(jnp.where(zero, 0., coefficient))) / center
+    rho = relative_amplitude if rho_bound is None else jnp.asarray(rho_bound)
+    if rho.ndim or jnp.iscomplexobj(rho):
+        raise ValueError("rho_bound must be a real scalar")
+    kd = wave @ jnp.stack((iota - helicity, jnp.asarray(nfp)))
+    ke = wave @ jnp.stack(((G_b + helicity * I_b) / covariant, -nfp * I_b / covariant))
+    nonresonant = jnp.all(zero | (jnp.abs(kd) > 64 * jnp.finfo(center.dtype).eps * (1 + jnp.abs(ke))))
+    chart = basic & nonresonant & jnp.isfinite(rho) & (rho >= relative_amplitude) & (rho < 1)
+    rho, coefficient = jnp.where(chart, rho, 0.), jnp.where(chart, coefficient, zero.astype(float))
+    kd, ke = jnp.where(chart, kd, 0.), jnp.where(chart, ke, 0.)
+    primitive = jnp.where(zero, 0., ke / jnp.where(zero | (kd == 0), 1., kd)) * coefficient
+    shape = tuple((order + 4) * np.max(np.abs(wave), axis=0) + 1)
+    spectra = jnp.stack((coefficient, 1j * kd * coefficient, 1j * ke * coefficient,
+                        primitive, 1j * ke * primitive))
+    grid = jnp.zeros((5, *shape), dtype=jnp.result_type(spectra, 1j))
+    grid = grid.at[:, wave[:, 0] % shape[0], wave[:, 1] % shape[1]].add(spectra)
+    jacobian, dj, ej, p, ep = jnp.fft.ifft2(grid).real * np.prod(shape)
+    weights, tails = [], []
+    for power in (3, 4):
+        tail = rho**(order + 1) * sum(comb(order + power, power - 1 - k)
+            * rho**k / (1 - rho)**(k + 1) for k in range(power)) / center**power
+        tails.append(tail)
+        weights.append(jacobian**(-power) + 2 * tail)
+    w3, w4 = weights
+    even, odd = jacobian * ej - p * dj, jacobian * ep - .5 * p * ej
+    valid = chart & jnp.isfinite(nu) & (nu > 0) & jnp.isfinite(field)
+    nu, field = jnp.where(valid, nu, 1.), jnp.where(valid, field, 0.)
+    a, b, d = nu * (4 * np.sqrt(2 / np.pi) / 3), 9 * mu2 / (16 * nu), (field * center)**2 * mu1 / nu
+    quadratic = a + b * jnp.mean(dj**2 * w3) + .25 * d * jnp.mean(ej**2 * w4)
+    linear = a * jnp.mean(p) - b * jnp.mean(even * dj * w3) - .5 * d * jnp.mean(odd * ej * w4)
+    constant = -linear / quadratic
+    c = constant[..., None, None]
+    upper = (a * jnp.mean((p + c)**2, axis=(-2, -1))
+             + b * jnp.mean((even - c * dj)**2 * w3, axis=(-2, -1))
+             + d * jnp.mean((odd - .5 * c * ej)**2 * w4, axis=(-2, -1))) / center
+    geometric = jnp.mean(p**2) / center
+    lower = jnp.where(field == 0, 25 * nu * geometric / (16 * mu1), 0.)
+    valid &= jnp.isfinite(upper) & (upper >= lower)
+    return dict(lower=jnp.where(valid, lower, 0.), upper=jnp.where(valid, upper, jnp.inf),
+                valid=valid, relative_gap=jnp.where(valid, (upper - lower) / jnp.where(upper > 0, upper, 1.), 1.),
+                geometric_heat_factor=geometric, optimal_heat_flow_constant=constant,
+                integration_remainders=jnp.stack(tails), relative_fourier_amplitude=relative_amplitude)
+
+
+class ConservingHeatBound(_ResidualTerm):
+    """Full-Coulomb stellarator upper diffusivity, in m²/s, as a VMEX loss.
+
+    ``collision_strengths`` are Γ*n/(m²*vth³) in s⁻¹, where
+    Γ=(Z*e)^4*logΛ/(8*pi*epsilon0²); they are not Lorentz deflection rates.
+    ``radial_electric_fields`` are −dΦ/dr in V/m. The flux radius is
+    r=minor_radius*sqrt(psi/psi_edge), with psi the signed toroidal flux/(2π).
+    The source uses the pure-temperature force with zero electrochemical force X1.
+
+    Fits a finite Fourier J=Bhat⁻² on a fixed grid and reports its sampled field
+    error separately. Increase ``geometry_order``, ``fit_grid`` and Boozer
+    resolution independently. ``options`` pass to conserving_stellarator_proxy;
+    its collision, trajectory, resonance and rounding qualifications apply.
+    """
+
+    name = "conserving_heat_upper_bound"
+
+    def __init__(self, surfaces, *, temperature_ev, collision_strengths, radial_electric_fields,
+                 mass_kg=3.3435837724e-27, charge_number=1., geometry_order=(4, 2), fit_grid=128,
+                 helicity=0, mboz=8, nboz=8, oversample=2, scale=1., smoothing=.05, **options):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        self.temperature = np.broadcast_to(np.asarray(temperature_ev, dtype=float), self.surfaces.shape)
+        self.frequencies, self.fields = (np.atleast_1d(np.asarray(x, dtype=float))
+                                        for x in (collision_strengths, radial_electric_fields))
+        if (self.surfaces.ndim != 1 or not self.surfaces.size or not np.all(np.isfinite(self.surfaces))
+                or np.any(self.surfaces <= 0) or np.any(self.surfaces >= 1)
+                or np.any(~np.isfinite(self.temperature)) or np.any(self.temperature <= 0)
+                or any(x.ndim != 1 or not x.size or not np.all(np.isfinite(x)) for x in (self.frequencies, self.fields))
+                or np.any(self.frequencies <= 0) or not np.all(np.isfinite([mass_kg, charge_number, scale, smoothing]))
+                or mass_kg <= 0 or charge_number == 0 or scale <= 0 or smoothing <= 0):
+            raise ValueError("require interior surfaces, positive temperatures, rates, mass and scales, and finite fields/charge")
+        order = np.asarray(geometry_order)
+        if (order.shape != (2,) or np.any(order < 0) or np.any(order != order.astype(int))
+                or int(fit_grid) != fit_grid or fit_grid <= 2 * max(order)):
+            raise ValueError("geometry_order must be two nonnegative integers; fit_grid must resolve both")
+        self.wave = np.stack(np.meshgrid(*(np.arange(-k, k + 1) for k in order.astype(int)), indexing="ij"), -1).reshape(-1, 2)
+        self.mass, self.charge, self.fit_grid, self.helicity = mass_kg, charge_number, int(fit_grid), helicity
+        self.mboz, self.nboz, self.oversample = int(mboz), int(nboz), int(oversample)
+        self.scale, self.smoothing, self.options = float(scale), float(smoothing), options
+
+    def compute_state(self, state, rt):
+        """Return surface × collision × field intervals and a composable loss."""
+        booz, minor = self._boozer(state, rt), _aspect_scalars(state, rt)[0]
+        band = np.array([np.asarray(booz["xm_b"]),
+                         (self.helicity * np.asarray(booz["xm_b"]) - np.asarray(booz["xn_b"])) / booz["nfp"]])
+        if self.fit_grid <= 2 * np.max(np.abs(band)):
+            raise ValueError("fit_grid must resolve the incoming Boozer spectrum in the helical chart")
+        angle = np.arange(self.fit_grid) * (2 * np.pi / self.fit_grid)
+        x, y = np.meshgrid(angle, angle, indexing="ij")
+        phase = (np.asarray(booz["xm_b"])[:, None, None] * (x + self.helicity * y / booz["nfp"])
+                 - np.asarray(booz["xn_b"])[:, None, None] * y / booz["nfp"])
+        constant = np.flatnonzero((np.asarray(booz["xm_b"]) == 0) & (np.asarray(booz["xn_b"]) == 0))[0]
+        records, errors = [], []
+        for k, temperature in enumerate(self.temperature):
+            cosine, sine = booz["bmnc_b"][k], booz["bmns_b"][k]
+            b0 = cosine[constant]
+            field = (jnp.einsum("m,mij->ij", cosine, np.cos(phase))
+                     + jnp.einsum("m,mij->ij", sine, np.sin(phase))) / b0
+            coefficients = jnp.fft.fft2(field**-2)[self.wave[:, 0] % self.fit_grid,
+                                                      self.wave[:, 1] % self.fit_grid] / self.fit_grid**2
+            spectrum = jnp.zeros((self.fit_grid, self.fit_grid), dtype=coefficients.dtype)
+            spectrum = spectrum.at[self.wave[:, 0] % self.fit_grid, self.wave[:, 1] % self.fit_grid].set(coefficients)
+            fitted = jnp.fft.ifft2(spectrum).real * self.fit_grid**2
+            errors.append(jnp.max(jnp.abs(fitted**-.5 / field - 1)))
+            psi, edge = booz["psi_b"][k], booz["psi_edge"]
+            dr_dpsi = minor / (2 * edge * jnp.sqrt(psi / edge))
+            tau = jnp.abs(booz["G_b"][k] + booz["iota_b"][k] * booz["I_b"][k]) / (
+                b0 * jnp.sqrt(2 * 1.602176634e-19 * temperature / self.mass))
+            result = conserving_stellarator_proxy(
+                self.wave, coefficients, iota=booz["iota_b"][k], G_b=booz["G_b"][k], I_b=booz["I_b"][k],
+                nfp=booz["nfp"], helicity=self.helicity, collision_frequency=self.frequencies[:, None] * tau,
+                electric_field=-self.fields[None, :] * dr_dpsi * tau, **self.options)
+            factor = (2 * temperature / self.charge)**2 * tau * dr_dpsi**2
+            usable = (jnp.isfinite(factor) & (factor > 0) & (psi / edge > 0) & (psi / edge < 1)
+                      & (minor > 0) & (b0 > 0) & jnp.all(field > 0))
+            result["valid"] &= usable
+            result["lower"] = jnp.where(result["valid"], factor * result["lower"], 0.)
+            result["upper"] = jnp.where(result["valid"], factor * result["upper"], jnp.inf)
+            result["relative_gap"] = jnp.where(result["valid"], result["relative_gap"], 1.)
+            records.append(result)
+        out = jax.tree.map(lambda *values: jnp.stack(values), *records)
+        total = smooth_worst_case_bound(out["upper"], scale=self.scale, smoothing=self.smoothing)
+        out.update(total=total, residuals1d=jnp.atleast_1d(jnp.sqrt(jnp.where(total > 0, total, 1.)))
+                   * jnp.where(total > 0, 1., 0.), geometry_fit_error_sampled=jnp.stack(errors))
+        return out
 
 
 class NeoclassicalHeatBound(_ResidualTerm):

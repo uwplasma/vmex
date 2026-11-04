@@ -779,8 +779,8 @@ For conserving collision models, the low-level
 collision Gram, exact rectangular orbit images, source coefficients, source
 loads and a continuous collision-inverse majorant. The construction and
 full-Landau assumptions are in :ref:`conserving-collision-bounds`.
-The residual basis can differ from the trial basis; its metric belongs in
-``inverse_bound``. The columns of ``invariants`` encode its local conserved
+The residual generators can differ from the trial basis and can be redundant;
+their metric belongs in ``inverse_bound``. The columns of ``invariants`` encode the local conserved
 moments. For example, the smallest streaming-coupled invariant problem is:
 
 .. code-block:: python
@@ -811,9 +811,36 @@ For a signed observable, evaluate the same forms for its source ``J`` and
 pass both results, their source loads and the weak orbit Gram to
 :func:`vmex.core.neoclassical.conserving_goal_interval`. It returns primal–adjoint
 error bounds on the complete signed response, including its antisymmetric
-part. A collapsed interval radius can be nonsmooth. These kernels accept
-full collision forms; they do not replace the Lorentz geometry adapter with
-an implicit full drift-kinetic solve.
+part. Supply ``orbit_error_bound`` when the weak orbit Gram has a proved
+Frobenius-norm integration-error bound; its contribution to the radius is
+that bound times the primal and adjoint coefficient norms. This correction
+does not cover errors in other forms. A collapsed interval radius can be nonsmooth.
+
+The separate :class:`vmex.core.neoclassical.ConservingHeatBound` constructs
+an inexpensive full-Coulomb upper bound directly from the Boozer spectrum:
+
+.. code-block:: python
+
+   heat = vmex.ConservingHeatBound(
+       [.5], temperature_ev=1000., collision_strengths=[1.e4, 1.e5],
+       radial_electric_fields=[-250., 0., 250.], geometry_order=(4, 2),
+       fit_grid=128, helicity=0, scale=1.)
+   # As with other terms, pass heat.total_state to VmecProblem.from_loss.
+
+The strengths are the Landau prefactor :math:`\Gamma n/(m^2v_t^3)` in s⁻¹,
+not Lorentz deflection rates. The returned intervals have shape
+``(surface, collision_strength, electric_field)`` and units m²/s. It retains
+passing/trapped particles and the full single-species collision operator,
+with incompressible electric precession. Its main theory, unit conversion,
+finite-J geometry scope and integration remainder are given in
+:ref:`full-coulomb-stellarator-proxy`. The compact lower endpoint is zero
+at finite electric field. A reduced upper bound alone does not establish
+that the response decreased; separated endpoint intervals can do so.
+
+Set ``VMEX_HEAT_BOUND_MODEL=coulomb`` when running the same optimization
+example to select this objective. It checks the equilibrium adjoint against
+re-solved finite differences, then refines the equilibrium and finite-J fit
+at both endpoints. No full drift-kinetic matrix solve occurs inside the loss.
 
 Resources and reproducibility
 -----------------------------

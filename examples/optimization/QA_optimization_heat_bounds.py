@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-"""Optimize a QA boundary with a differentiable reference-model heat bound.
+"""Optimize a QA boundary with a differentiable heat bound.
 
 An implicit equilibrium adjoint supplies the gradient. A re-solved finite
 difference checks it, and finer endpoint evaluations test the improvement.
-The bounded Lorentz reference response excludes total neoclassical heat loss;
-see the neoclassical heat-bounds section of docs/explanation/confinement.rst.
+Set VMEX_HEAT_BOUND_MODEL=coulomb for the full-Coulomb stellarator proxy;
+the default is the bounce-averaged Lorentz reference. Each has its stated orbit
+model; see the neoclassical section of docs/explanation/confinement.rst.
 """
 
 import json
@@ -24,7 +25,9 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.LandremanPaul
 OUTPUT = Path(os.environ.get("VMEX_HEAT_BOUNDS_OUTPUT", "."))
 SURFACES = (.5,)
 TEMPERATURE_EV = 1000.
+MODEL = os.environ.get("VMEX_HEAT_BOUND_MODEL", "lorentz")
 COLLISION_FREQUENCIES = (100., 1000.)          # thermal Lorentz rates, s^-1
+COLLISION_STRENGTHS = (1.e4, 1.e5)            # Coulomb Gamma*n/(m²*vth³), s^-1
 RADIAL_ELECTRIC_FIELDS = (-250., 0., 250.)     # Er = -dPhi/dr, V/m
 ACTIVE_MODES = ("RBC(1,0)", "RBC(-1,1)", "ZBS(-1,1)")
 SEED_PERTURBATION = .005                     # metres, RBC(1,0)
@@ -54,17 +57,23 @@ rbc[inp.ntor + 1, 0] += SEED_PERTURBATION
 inp = replace(inp, rbc=rbc, ns_array=np.array([14]),
               ftol_array=np.array([1.e-11]), niter_array=np.array([4000]))
 seed = opt.solve_equilibrium(inp, raise_on_max_iterations=True)
-booz, _ = _state_stencils(seed.state, seed.runtime, SURFACES, 6, 6, 2)
-grid = reference_pitch_grid_from_boozer(**booz, ncells=PITCH_CELLS,
-                                       helicity_m=1, helicity_n=0)
 shared = dict(temperature_ev=TEMPERATURE_EV,
-              collision_frequencies=COLLISION_FREQUENCIES,
-              radial_electric_fields=RADIAL_ELECTRIC_FIELDS,
-              helicity_m=1, helicity_n=0, well_center=grid["well_center"])
-term = vj.NeoclassicalHeatBound(
-    SURFACES, pitch_fractions=np.linspace(0., 1., PITCH_CELLS + 1),
-    points_per_period=128, quadrature_order=32, nenergy=ENERGY_POINTS,
-    mboz=6, nboz=6, nalpha=13, **shared)
+              radial_electric_fields=RADIAL_ELECTRIC_FIELDS)
+if MODEL == "coulomb":
+    shared.update(collision_strengths=COLLISION_STRENGTHS)
+    term = vj.ConservingHeatBound(SURFACES, geometry_order=(3, 1), fit_grid=64,
+                                 mboz=6, nboz=6, **shared)
+elif MODEL == "lorentz":
+    booz, _ = _state_stencils(seed.state, seed.runtime, SURFACES, 6, 6, 2)
+    grid = reference_pitch_grid_from_boozer(**booz, ncells=PITCH_CELLS, helicity_m=1, helicity_n=0)
+    shared.update(collision_frequencies=COLLISION_FREQUENCIES,
+                  helicity_m=1, helicity_n=0, well_center=grid["well_center"])
+    term = vj.NeoclassicalHeatBound(
+        SURFACES, pitch_fractions=np.linspace(0., 1., PITCH_CELLS + 1),
+        points_per_period=128, quadrature_order=32, nenergy=ENERGY_POINTS,
+        mboz=6, nboz=6, nalpha=13, **shared)
+else:
+    raise ValueError("VMEX_HEAT_BOUND_MODEL must be lorentz or coulomb")
 initial = term.compute_state(seed.state, seed.runtime)
 if not np.all(initial["valid"]):
     raise RuntimeError("invalid seed reference geometry")
@@ -115,11 +124,16 @@ if not np.isfinite(result.fun) or float(result.fun) > seed_value:
     raise RuntimeError("the reference objective did not improve")
 
 ### Verify matched endpoints and save #########################################
-verify = vj.NeoclassicalHeatBound(
-    SURFACES, pitch_fractions=np.linspace(0., 1., VERIFY_PITCH_CELLS + 1),
-    points_per_period=1024, quadrature_order=256, nenergy=VERIFY_ENERGY_POINTS,
-    mboz=6 if ci_smoke else 10, nboz=6 if ci_smoke else 10,
-    nalpha=13 if ci_smoke else 21, scale=term.scale, **shared)
+if MODEL == "coulomb":
+    verify = vj.ConservingHeatBound(SURFACES, geometry_order=(6, 4), fit_grid=128,
+        integration_order=40, mboz=6 if ci_smoke else 10, nboz=6 if ci_smoke else 10,
+        scale=term.scale, **shared)
+else:
+    verify = vj.NeoclassicalHeatBound(
+        SURFACES, pitch_fractions=np.linspace(0., 1., VERIFY_PITCH_CELLS + 1),
+        points_per_period=1024, quadrature_order=256, nenergy=VERIFY_ENERGY_POINTS,
+        mboz=6 if ci_smoke else 10, nboz=6 if ci_smoke else 10,
+        nalpha=13 if ci_smoke else 21, scale=term.scale, **shared)
 records = {}
 for label, equilibrium in (("seed", seed), ("candidate", candidate)):
     refined_input = replace(equilibrium.inp, ns_array=np.array([FINAL_NS]),
@@ -131,24 +145,30 @@ for label, equilibrium in (("seed", seed), ("candidate", candidate)):
         raise RuntimeError(f"{label}: invalid refined reference geometry")
     records[label] = {key: np.asarray(response[key]).tolist()
                       for key in ("lower", "upper", "relative_gap")}
-    records[label]["well_relative_perturbation"] = np.asarray(
-        response["geometry"]["reference_perturbation_well_max"]).tolist()
+    diagnostic = (response["geometry_fit_error_sampled"] if MODEL == "coulomb" else
+                  response["geometry"]["reference_perturbation_well_max"])
+    records[label]["geometry_diagnostic"] = np.asarray(diagnostic).tolist()
     vj.write_wout(OUTPUT / f"wout_optimization_{label}.nc", refined.wout)
     if label == "candidate":
         refined.inp.to_indata(OUTPUT / "input.QA_heat_bound_optimized")
 
 seed_lower = float(np.max(records["seed"]["lower"]))
+seed_upper = float(np.max(records["seed"]["upper"]))
 candidate_upper = float(np.max(records["candidate"]["upper"]))
-if candidate_upper >= seed_lower:
-    raise RuntimeError("refined intervals do not establish an improved worst response")
+if candidate_upper >= (seed_upper if MODEL == "coulomb" else seed_lower):
+    raise RuntimeError("refined upper objective did not decrease" if MODEL == "coulomb" else
+                       "refined intervals do not establish an improved worst response")
 records.update(
-    model="single-reference-well Lorentz; positive discrete speed rule",
+    model=("single-species full Coulomb; incompressible ExB; no tangential magnetic drift" if MODEL == "coulomb"
+           else "single-reference-well Lorentz; positive discrete speed rule"),
     gradient_check={"ad": ad, "fd": fd, "relative_error": gradient_error},
     optimizer={"iterations": int(result.nit), "converged": bool(result.success),
                "message": str(result.message), "initial_loss": float(seed_value),
                "final_loss": float(result.fun)},
-    guaranteed_worst_response_decrease=1 - candidate_upper / seed_lower)
+    upper_bound_decrease=1 - candidate_upper / seed_upper,
+    guaranteed_worst_response_decrease=(1 - candidate_upper / seed_lower if candidate_upper < seed_lower else None))
 (OUTPUT / "neoclassical_heat_bound_optimization.json").write_text(
     json.dumps(records, indent=2, allow_nan=False) + "\n")
-print(f"Guaranteed reference-response decrease: {1 - candidate_upper / seed_lower:.2%}")
+print(f"Upper-bound decrease: {1 - candidate_upper / seed_upper:.2%}")
+print(f"Separated-interval response decrease: {records['guaranteed_worst_response_decrease']}")
 print(f"Optimizer: {result.message}; fuller kinetic acceptance remains separate.")

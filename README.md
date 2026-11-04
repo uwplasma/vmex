@@ -460,6 +460,12 @@ The [conserving collision-form API](docs/explanation/confinement.rst#conserving-
 retains local density, momentum and energy constraints and supplies signed
 adjoint-response intervals. Continuous Coulomb bounds require the supplied
 orbit forms and a feasible collision-flux majorant.
+`vmex.ConservingHeatBound` also supplies a direct full-Coulomb stellarator
+upper objective with passing/trapped dynamics and incompressible electric
+precession. It analytically optimizes a feasible heat-flow trial and bounds
+the angular integration remainder. The [model and SI units](docs/explanation/confinement.rst#full-coulomb-stellarator-proxy)
+specify its collision normalization and orbit assumptions. Select it in the
+same example with `VMEX_HEAT_BOUND_MODEL=coulomb`.
 
 A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
 field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
