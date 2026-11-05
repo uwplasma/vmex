@@ -334,6 +334,12 @@ class FreeMapProblem:
         clipped = np.clip(fixed[index], low[index]+1e-3*(high[index]-low[index]), high[index]-1e-3*(high[index]-low[index]))
         fraction = (clipped-low[index])/(high[index]-low[index])
         self.x0 = np.concatenate((np.asarray(stage.x0), np.log(fraction/(1-fraction))))
+        self.metadata = dict(getattr(stage, "metadata", {}))
+        if slices := self.metadata.get("term_slices"):
+            count = jax.eval_shape(rows, jnp.zeros(self.nspec), jnp.zeros(index.size)).size
+            shift = count - self.nspec
+            self.metadata["term_slices"] = (("pwO and map area", 0, count), *(
+                (name, start + shift, stop + shift) for name, start, stop in slices[1:]))
 
     def residual(self, z):
         """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""

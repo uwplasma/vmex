@@ -177,6 +177,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
     joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    monitor.problem = joint
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
