@@ -204,8 +204,9 @@ def compute_currents(*, bsubsmns, bsubumnc, bsubvmnc, xm_nyq, xn_nyq,
     """Current-density harmonics ``currXmn = sqrt(g)*J^X`` (X = u, v) [A].
 
     Port of ``read_wout_mod.f90::Compute_Currents`` (called by ``wrout.f``).
-    Inputs are the file-convention half-mesh ``bsub*`` tables shaped
-    ``(ns, mnmax_nyq)``; outputs are full-mesh, already divided by ``mu0``.
+    Inputs have shape ``(ns, mnmax_nyq)``: ``bsubs`` is on the full mesh,
+    while ``bsubu`` and ``bsubv`` are on the half mesh. Outputs are full-mesh,
+    already divided by ``mu0``.
     Returns ``(currumnc, currvmnc, currumns, currvmns)`` with the sine
     partners ``None`` unless ``lasym``.
     """
