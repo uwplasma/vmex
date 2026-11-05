@@ -410,20 +410,28 @@ def test_drift_orbits_alpha_independent_action_is_a_flux_surface():
     assert float(jnp.max(jnp.abs(orb["s"] - 0.5))) < 1.0e-10
     assert float(orb["s_max"][0]) == pytest.approx(0.5, abs=1.0e-10)
     assert float(orb["alpha"][0, -1]) == pytest.approx(0.3 - 2.0 * 1.5, abs=1.0e-8)
+    stationary = maxj.drift_orbits(jnp.zeros_like(action), tau, s, alpha, 0.5, 0.3, length=2.0)
+    np.testing.assert_array_equal(stationary["s"], 0.5)
+    np.testing.assert_array_equal(stationary["alpha"], 0.3)
+    arc = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.3, length=2.0)
+    varied = maxj.drift_orbits(action, tau * (1 + .5 * jnp.cos(alpha)), s, alpha, 0.5, 0.3, length=2.0)
+    np.testing.assert_allclose(arc["alpha"], varied["alpha"], atol=1e-12)
 
 
-def test_drift_orbits_gradient_and_nan_rows():
+@pytest.mark.parametrize("length", [None, 2.0])
+def test_drift_orbits_gradient_and_nan_rows(length):
     s, alpha, action, tau = _synthetic_drift()
 
     def s_max(a):
-        return maxj.drift_orbits(a, tau, s, alpha, 0.5, 0.0, nsteps=64)["s_max"][0]
+        return maxj.drift_orbits(a, tau, s, alpha, 0.5, 0.0, nsteps=64, length=length)["s_max"][0]
 
     grad = jax.grad(s_max)(action)
     assert bool(jnp.all(jnp.isfinite(grad)))
     h = 1.0e-6
-    bump = jnp.zeros_like(action).at[3, 5].set(h)
-    fd = (s_max(action + bump) - s_max(action - bump)) / (2.0 * h)
-    assert float(grad[3, 5]) == pytest.approx(float(fd), rel=1.0e-4, abs=1.0e-8)
+    direction = (jnp.zeros_like(action).at[3, 5].set(1.) if length is None
+                 else s[:, None] * jnp.cos(alpha))
+    fd = (s_max(action + h * direction) - s_max(action - h * direction)) / (2.0 * h)
+    assert float(jnp.sum(grad * direction)) == pytest.approx(float(fd), rel=1.0e-4, abs=1.0e-8)
     clean = s_max(action)
     dirty = s_max(action.at[4].set(jnp.nan))
     assert bool(jnp.isfinite(dirty)) and float(dirty) == pytest.approx(float(clean), rel=1.0e-4)
