@@ -532,13 +532,14 @@ def test_limited_map_turns_any_parameters_into_a_valid_map():
 
 def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch):
     spec = _spectrum(2)
-    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
     monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
-    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
     shift = np.linspace(.01, .03, flat.size)
 
     class Stage:
         x0 = np.zeros(2)
+        metadata = {"term_slices": (("spectrum", 0, flat.size), ("shape", flat.size, flat.size + 1))}
 
         def residual(self, x):
             return np.concatenate((flat + shift*x[0], [x[1] - 1.]))
@@ -549,9 +550,9 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     class Equilibrium:
         state = runtime = None
 
-    mapped = MappedPwOResidual((.3, .6))
+    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
     np.testing.assert_allclose(mapped.spectrum_state(None, None), flat)
-    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(a=.3, b=.1, c=-2., eta_min=2.8),
+    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(eta_min=2.8, c=-2., b=.1, a=.3),
                              ("a", "b", "c", "eta_min"), weight=10.)
     z = problem.x0 + .05
     jac = problem.residual_jac(z)
@@ -561,3 +562,13 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     values = problem.values(z)
     for name, (low, high) in FreeMapProblem.MAP_BOUNDS.items():
         assert low < values[name] < high
+    rows = problem.residual(z)
+    assert rows.shape == (2 * 12 * 10 + 2 + 1,)
+    from vmex.core.monitoring import OptimizationMonitor
+    from types import SimpleNamespace
+    monitor = OptimizationMonitor(problem, stream=None)
+    monitor(SimpleNamespace(x=z, fun=rows))
+    terms = monitor.records[-1].terms
+    assert terms["shape"] == pytest.approx(.5 * (z[1] - 1.) ** 2)
+    assert sum(terms.values()) == pytest.approx(.5 * rows @ rows)
+    assert Stage.metadata["term_slices"][0][2] == flat.size
