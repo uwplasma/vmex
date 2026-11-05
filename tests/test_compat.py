@@ -788,6 +788,7 @@ def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
     different subdirectories of the same user path.
     """
     mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)  # jaxlib < 0.10 keeps the cache off
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
     mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
     first = _compat._default_compilation_cache_dir()
@@ -824,6 +825,7 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
         if "COMPILATION_CACHE" not in key and not key.startswith("VMEX_")
     }
     env["HOME"] = str(tmp_path)
+    env["VMEX_COMPILATION_CACHE"] = "1"  # jaxlib < 0.10 keeps the cache off unless asked
     fingerprint = _compat._cache_machine_fingerprint()
     expected = tmp_path / ".cache" / "vmex" / "jax_cache" / fingerprint
     assert pathlib.Path(_import_cache_dir(env)) == expected
@@ -914,3 +916,17 @@ def test_explicit_float32_choice_is_respected_and_refused_by_the_solver():
     assert _fresh(probe).splitlines() == ["False", "True"]
     assert _fresh("import jax, vmex.core.solver; print(jax.config.jax_enable_x64)",
                   JAX_ENABLE_X64="0") == "False"
+
+
+@pytest.mark.parametrize("cpus, pool", [(3, "3"), (500, str(_compat._MAX_THREADS))])
+def test_configure_sizes_thread_pools_and_keeps_user_values(monkeypatch, cpus, pool):
+    monkeypatch.setattr("solvax.available_cpus", lambda: cpus)
+    monkeypatch.setitem(_compat._CONFIGURED, "x64", True)
+    for name in ("NPROC", "ESSOS_CPU_DEVICES"):
+        monkeypatch.setenv(name, "1")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "7")
+    _compat.configure()
+    assert os.environ["NPROC"] == pool
+    assert os.environ["ESSOS_CPU_DEVICES"] == str(cpus)
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "7"

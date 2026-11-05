@@ -1,7 +1,7 @@
 # VMEX
 
 [![PyPI version](https://img.shields.io/pypi/v/vmex.svg)](https://pypi.org/project/vmex/)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmex)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmex/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmex/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
@@ -22,7 +22,7 @@ boundary and the coils are optimized together. VMEX also computes Boozer
 transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
 and stability diagnostics, and has a separate lane for open mirrors.
 
-- **Use existing workflows:** VMEC input decks and `wout_*.nc` output, `NS_ARRAY` multigrid
+- **Use existing workflows:** VMEC2000 `&INDATA` decks, VMEC++-style JSON inputs and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
 - **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
   Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
@@ -56,8 +56,9 @@ radial preconditioner, polishing least squares, GMRES) and
 prints the interpreter, package versions and JAX devices; `vmex --test` solves a bundled QH deck
 end to end and writes its figures to `./vmex_test/`.
 
-Python 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, so a 3.11 environment
-resolves an older JAX; 3.12 or newer is recommended.
+Python 3.10, 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, JAX 0.7 and
+later need 3.11, and SciPy 1.16 needs 3.11, so an older interpreter resolves an older JAX and
+SciPy; 3.12 or newer is recommended. The `coils`, `neoclassical`, `turbulence` and `all` extras need Python 3.11 or newer.
 
 ### Optional packages for the full capabilities
 
@@ -73,8 +74,8 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.9` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.0.6`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.11` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -83,11 +84,11 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
+| `solvax` | 0.35.0 | `pip install vmex` | `pip install "solvax>=0.35.0"` |
 | `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.9 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.9"` |
-| `neo-jax` | 1.0.6 | `vmex[neoclassical]` | `pip install "neo-jax>=1.0.6"` |
+| `virtual-casing-jax` | 0.0.11 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.11"` |
+| `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
 | `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
@@ -230,7 +231,9 @@ convergence checks, constraints, scaling and finite-difference verification.
 The infinite-n ideal ballooning mode ([Dewar and Glasser 1983](https://doi.org/10.1063/1.864113),
 [Gaur et al. 2023](https://arxiv.org/abs/2302.07673)) is the eigenproblem along a field line,
 
-$$\frac{d}{d\eta}\Big(g\,\frac{dX}{d\eta}\Big) + c\,X = \lambda\,f\,X,\qquad X(\pm\eta_b)=0,$$
+$$
+\frac{d}{d\eta}\Big(g\,\frac{dX}{d\eta}\Big) + c\,X = \lambda\,f\,X,\qquad X(\pm\eta_b)=0,
+$$
 
 with line bending `g`, pressure and curvature drive `c` and inertia `f > 0`. A line is unstable
 when its largest eigenvalue `λ = (γ a_N/v_A)²` is positive. VMEX discretizes it with finite
@@ -257,7 +260,7 @@ Details and the optimization recipe: [stability theory](docs/explanation/confine
 
 ## What you can build
 
-Every figure below is regenerated by the script named beside it, from decks in this repository.
+Every figure below has a generator beside it, using repository decks or retained result data.
 
 ### Quasisymmetric and quasi-isodynamic boundaries
 
@@ -272,6 +275,14 @@ field-period count, from `examples/optimization/QA_optimization.py` and its QH a
 Quasi-isodynamic designs at four field-period counts: the `|B|` contours close poloidally as `nfp`
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
+
+### Piecewise omnigenity
+
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
+
+![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
+
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
 ### Free boundary with coils
 
@@ -592,11 +603,17 @@ optimization. CPU and GPU performance depend on resolution and workload; the dat
 in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
 and the [benchmark records](benchmarks/).
 
+Optimizations need no worker settings. Finite-difference probes already use every
+available CPU, and an exact-Jacobian run measures no faster on 36 cores than on 1, so
+it stays one process. Independent starts on every core are an
+[advanced option](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html#optimizations-on-a-full-node).
+
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
 baseline. Set worker and device budgets with the
-[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
-kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html).
+
+Defaults for CPU, GPU and whole nodes, and when to change them: [running on CPU, GPU and whole nodes](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html#running-on-cpu-gpu-and-whole-nodes).
 
 ## Running the examples
 

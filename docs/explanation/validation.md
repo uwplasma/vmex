@@ -242,6 +242,18 @@ tokamaks, and the non-stellarator-symmetric extensions of Issan et al. (arXiv:26
 exact case passes force balance and divergence to round-off; the Issan closed forms reproduce the
 paper's volume, beta and transform. Each WOUT is scored by one script for every producer.
 
+The exact nonsymmetric vacuum fields of Sengupta et al. (arXiv:2610.28466) are tested in
+`tests/test_exact_vacuum.py`. Given only the exact boundary and flux at aspect ratio 5.7 (paraboloidal) and 9.5 (ellipsoidal), with
+`ns = 65`, `mpol = 7`, the transform error for `0.2 < s < 0.9` is:
+
+| Member | `ntor = 7` | `ntor = 14` | `ntor = 20` |
+|---|---|---|---|
+| Paraboloidal, `iota = 1/sqrt(5)` | 2.9e-3 | 5.8e-5 | 4.1e-5 |
+| Ellipsoidal, no stellarator symmetry, `iota0 = sqrt(2)/7` | 2.3e-4 | 5.4e-05 | 5.4e-5 |
+
+Next to the axis the error is 3e-4 to 1e-3 and does not fall with `ns`, the usual near-axis limit of
+this discretization.
+
 | Family A (`iota = 2`), VMEX from the exact geometry | ns 65 | ns 129 |
 |---|---|---|
 | flux-label error, `tau0 = 0` | 2.8e-5 | 5.5e-6 |

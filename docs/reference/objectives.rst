@@ -124,6 +124,9 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.max_elongation` — equivalent-ellipse boundary
   elongation from Fourier-exact area and perimeter line integrals over one
   field period;
+- :func:`~vmex.core.optimize.min_boundary_curvature_radius` — the smallest
+  poloidal radius of curvature of the boundary cross-sections, in metres; a
+  floor keeps out tips sharper than coils can hold;
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
   measure (positive = well, stabilizing).
 
@@ -348,6 +351,73 @@ the reported certificate.
 When both terms use the same surfaces and pitch,
 :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual` concatenates their
 cost-weighted rows after one shared Boozer transform.
+
+The constructed-QI interpolation fixes the first well wall at its prescribed
+maximum field. This removes roundoff amplification at nearly coincident nodes
+and preserves its derivative. Existing ``ConstructedQIResidual`` optimizers
+use the correction without script changes; it does not change the QI target.
+
+.. _objectives-mapped-pwo:
+
+Mapped-field contour variance
+-----------------------------
+
+:class:`~vmex.core.pwo.MappedPwOResidual` evaluates a live Boozer spectrum on
+fixed mapped coordinates and returns flattened least-squares rows. Its default
+normalization uses the live Boozer mean field on each surface::
+
+   from vmex.core.pwo import MappedPwOResidual
+
+   mapped = MappedPwOResidual(
+       [0.25, 0.5, 0.75],
+       a=0.3, b=0.0, c=-2.0, eta_min=2.8, ngamma=32, neta=32)
+
+``total`` is the sum of squared rows: the surface-weighted gamma variance
+divided by live ``B00**2``, averaged over eta. This is invariant under field
+rescaling and includes derivatives of the normalization. Supplying ``b_ref``
+selects an explicit fixed positive field reference in tesla instead. Surface weights are normalized to sum to one; this is a coordinate
+average, without a physical-area Jacobian factor.
+
+``compute_state`` also returns the mapped field, branch means, Jacobian,
+conservative Jacobian lower bound, toroidal-span upper bound and sampled
+area fraction. The map rejects uncertified nonfolding domains, nonpositive
+reference fields and nonpositive mapped fields. Full-surface field bounds,
+geometry and transport remain separate checks. ``diagnostics_state`` reuses
+the transform for sampled full-surface extrema; ``physical_metrics`` checks
+these limits, signed iota, aspect ratio, oriented Jacobian and solver residuals.
+The signed transform is live;
+freeze the map parameters, cut and quadrature, not iota or the default field scale.
+See :ref:`confinement-mapped-pwo` for the formula and its relation to bounce
+action.
+
+**Map validity.** ``limit_map=True`` clips ``(a, b, c, eta_min)`` on each surface
+to the closest one-to-one map for the live ``iota``, so every parameter value
+gives a valid residual. Without it, an invalid map makes the rows non-finite.
+
+**Free map.** :class:`~vmex.core.pwo.FreeMapProblem` wraps a boundary stage whose
+first residual rows are ``mapped.spectrum_state`` and adds the map parameters
+to the least-squares variables. The map does not change the equilibrium, so its
+Jacobian columns come from the kernel alone. Parameters move through a sigmoid
+inside ``FreeMapProblem.MAP_BOUNDS``, and a penalty keeps the mapped area
+fraction above ``area_floor``, so the fit cannot shrink the map to nothing.
+``values(x)`` returns the optimized parameters.
+
+**Constraints that the variance does not see.** Each is a function of the state used
+with :class:`~vmex.core.optimize.Hinge`, which turns a metric into a residual that is
+zero inside ``[floor, ceiling]`` and the distance outside, as in
+``(opt.Hinge(opt.min_abs_iota, floor=0.42), 0.0, 100.0)``.
+
+- ``opt.edge_jacobian_ratio`` returns the min/max Jacobian ratio in each of
+  the outermost three radial cells. A pinched outer cell passes on the
+  optimizer's grid but flips the Jacobian sign when the boundary is re-solved on
+  a finer ``ns``, so the final solve fails. A floor of 0.25 prevents this.
+- ``opt.axis_excursion`` returns the RMS size of the magnetic axis' helical
+  harmonics in metres. A ceiling keeps the axis from winding away from a circle
+  as the boundary gains helicity.
+
+``examples/optimization/pwO_optimization.py`` combines these with the aspect
+ratio, an ``|iota|`` floor, a mirror-ratio ceiling and an optional magnetic well; see
+:ref:`optimization-low-transport`.
 
 Fast-ion confinement (Gamma_c)
 ------------------------------
@@ -681,6 +751,14 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable ``L_grad_B`` lane (soft-min via ``softmin_k``)
+   * - :func:`~vmex.core.optimize.l_grad_b_excess_state`
+     - yes
+     - yes
+     - one-sided pointwise rows for a minimum gradient scale length
+   * - :func:`~vmex.core.optimize.weighted_magnetic_well`
+     - yes
+     - yes
+     - volume-derivative well between two user-chosen radial regions
    * - :func:`~vmex.core.optimize.d_merc_state`,
        :func:`~vmex.core.optimize.mercier_stability_residual`
      - yes

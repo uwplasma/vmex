@@ -139,6 +139,9 @@ Free boundary
 .. automodule:: vmex.core.virtual_casing
    :members:
 
+.. automodule:: vmex.core.single_stage
+   :members:
+
 .. automodule:: vmex.core.mgrid
    :members:
 
@@ -169,6 +172,9 @@ that the objective modules share live in one place and are re-exported by
    :members:
 
 .. automodule:: vmex.core.qi
+   :members:
+
+.. automodule:: vmex.core.pwo
    :members:
 
 .. automodule:: vmex.core.maxj

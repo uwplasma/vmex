@@ -184,7 +184,8 @@ from .residuals import (
     zero_m1_z_force,
 )
 from .setup import (
-    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess)
+    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess,
+    rescale_boundary_volume)
 from .solver import (
     STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
@@ -787,11 +788,10 @@ def _boundary_from_params(params: ImplicitParams, cfg: ImplicitConfig):
     lthreed = ntor > 0
     lasym = bool(res.lasym)
 
-    rbc = jnp.asarray(params.rbc)
-    zbs = jnp.asarray(params.zbs)
+    rbc, rbs, zbc, zbs = (jnp.asarray(a) for a in
+                          (params.rbc, params.rbs, params.zbc, params.zbs))
+    rbc, rbs, zbc, zbs = rescale_boundary_volume(rbc, rbs, zbc, zbs, cfg.inp)
     if lasym:
-        rbs = jnp.asarray(params.rbs)
-        zbc = jnp.asarray(params.zbc)
         rbc, rbs, zbc, zbs = _lasym_delta_rotation_traceable(
             rbc, rbs, zbc, zbs, cfg, mpol=mpol, ntor=ntor)
 
@@ -2285,10 +2285,12 @@ def _forward_trace_context():
     """
     from jax._src import config as jax_config, mesh as jax_mesh
 
-    # jax >= 0.10 moved the state from ``config`` to ``mesh``.
+    # jax >= 0.10 moved the state from ``config`` to ``mesh`` (and with it
+    # ``config_ext``, still in ``config`` on the jax 0.6 that Python 3.10 gets).
     state = getattr(jax_mesh, "abstract_mesh_context_manager", None) or \
         jax_config.abstract_mesh_context_manager
-    previous = state.swap_local(jax_mesh.config_ext.unset)
+    config_ext = getattr(jax_mesh, "config_ext", None) or jax_config.config_ext
+    previous = state.swap_local(config_ext.unset)
     try:
         yield
     finally:
