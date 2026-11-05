@@ -124,10 +124,9 @@ coils = [
 ]
 # Finite-n ideal-MHD stability through AGNI: ``vmex.core.agni`` maps a converged
 # state to an ``agnimhd.EquilibriumData``. It needs ``Basis(restrict=True)``,
-# which is newer than agnimhd's latest tag (v0.2.0), so no floor is declared
-# until a release carries it.
+# available in 0.3.0. This optional extra requires Python 3.12 or newer.
 agni = [
-  "agnimhd",
+  "agnimhd>=0.3.0",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

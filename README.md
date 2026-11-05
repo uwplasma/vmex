@@ -287,7 +287,8 @@ constructed-QI residual near the seed and lowers `gamma2` to 0.17 and 0.14 of th
 ns 91). It does not stabilize: both families stay unstable, and at `(10, 9)` the final values are 0.33
 and 0.60 of the seed because the optimizer only sees `(6, 5)`.
 
-These are lower bounds that rise with the bandwidth. The collocation nodes must satisfy
+These represented-space growth rates rise with bandwidth; they do not certify continuum stability.
+The collocation nodes must satisfy
 `n_theta >= 2M + 16` and `n_zeta >= 2N + 14`; on the QA deck, coarser grids gave 6.9e-3 against about
 1e-6 at adequate nodes. Conventions, normalization, validation numbers and limitations:
 [finite-n stability with AGNI](docs/explanation/finite-n-stability.md).

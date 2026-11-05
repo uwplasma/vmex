@@ -8,9 +8,9 @@ differentiated through the equilibrium, and what has been measured. The adapter 
 {func}`vmex.core.agni.make_agni_map`; the examples are `examples/finite_n_stability.py` and
 `examples/optimization/QI_optimization_finite_n.py`.
 
-Install with `pip install "vmex[agni]"`. The extra currently needs an AGNI that has
-`Basis(restrict=True)`, from [AGNI#117](https://github.com/rahulgaur104/AGNI/pull/117); the
-latest tag, v0.2.0, does not have it, so `pyproject.toml` declares no floor.
+Use Python 3.12 or newer and install with `pip install "vmex[agni]"`.
+[AGNI v0.3.0](https://github.com/rahulgaur104/AGNI/tree/v0.3.0) includes the required
+`Basis(restrict=True)` API. Earlier versions are not supported by these examples.
 
 ## What AGNI adds
 
@@ -116,8 +116,8 @@ $m\iota+n=0$. Wout and VMEC labels usually use $\exp[i(m\theta-n\zeta)]$, which 
 Families $q$ and $N_{\rm fp}-q$ have equal eigenvalues, so `basis.families(NFP)` lists
 $q=0,\dots,\lfloor N_{\rm fp}/2\rfloor$ (0, 1, 2 for $N_{\rm fp}=4$). Family 0 and, for even
 $N_{\rm fp}$, $q=N_{\rm fp}/2$ are real; the others are complex. One AGNI call evaluates one
-family, so every objective must loop over all of them. A family is reported stable only when its
-eigensolve converged and its eigenvalue is above the numerical floor.
+family, so every objective must loop over all of them. A converged eigensolve without a positive
+growth rate above the numerical floor means no resolved instability in the checked space.
 
 ## Why `Basis(restrict=True)` is required
 
@@ -249,7 +249,7 @@ ns 91 with dense eigensolves of the restricted block, residuals $\le10^{-10}$:
 | bandwidth, nodes | family 0 seed $\to$ final | family 1 seed $\to$ final | family 2 seed $\to$ final |
 |---|---|---|---|
 | $(6,5)$, $32\times28$ | $4.91\to0.82\times10^{-4}$ | $5.11\to0.73\times10^{-4}$ | $-5.9\to-6.3\times10^{-8}$ |
-| $(8,7)$, $36\times32$ | $6.32\to1.86\times10^{-4}$ | $14.2\to7.14\times10^{-4}$ | stable |
+| $(8,7)$, $36\times32$ | $6.32\to1.86\times10^{-4}$ | $14.2\to7.14\times10^{-4}$ | no resolved instability |
 | $(10,9)$, $40\times36$ | $7.25\to2.36\times10^{-4}$ | $15.9\to9.53\times10^{-4}$ | $3.5\times10^{-4}\to-1.6\times10^{-8}$ |
 
 At $(6,5)$ the final values are 0.167 (family 0) and 0.144 (family 1) of the seed. The
@@ -257,8 +257,8 @@ uncertainty from $\varepsilon=0.01$ and $38\times34$ nodes is $3.1\times10^{-6}$
 $6.7\times10^{-6}$, so the reduction is 130 and 65 times larger. The optimizer sees only
 $(6,5)$, so the gain shrinks with bandwidth. **No stability crossing was achieved**: families 0
 and 1 stay unstable at every bandwidth. The seed's family 2 is unstable at $(10,9)$; the
-optimized boundary is stable there although family 2 is not in the objective. All targets
-(beta, aspect ratio, volume, mean and edge $\iota$, constructed QI) stay within their
+optimized boundary has no resolved instability there although family 2 is not in the objective.
+All targets (beta, aspect ratio, volume, mean and edge $\iota$, constructed QI) stay within their
 tolerances; the largest deviation is 0.28 of a tolerance (aspect ratio). The run took 73 evaluations,
 about 2.6 h, with a median of 126 s per value and gradient on 16 cores.
 
@@ -273,8 +273,8 @@ about 2.6 h, with a median of 126 s per value and gradient on 16 cores.
 | restricted Hellmann-Feynman gradient against finite differences | $10^{-9}$ to $2\times10^{-6}$ |
 | `eigenpair` (`eigsh`) against dense `eigh`, seed | $2.3\times10^{-11}$ (family 0), $1.3\times10^{-11}$ (family 1) |
 | value of `problem.value_and_grad` against a direct solve and `growth_rate` | relative $4\times10^{-13}$ |
-| total gradient against frozen-gauge finite differences ($h=10^{-4}$, three directions) | $9\times10^{-8}$ to $3\times10^{-7}$, window $h\in[10^{-4},10^{-3}]$ |
-| total gradient against cold re-solved differences | 0.5 %, 5 % and 23 % apart (not an error, see below) |
+| total gradient against fixed-family finite differences ($h=10^{-4}$, three directions) | $9\times10^{-8}$ to $3\times10^{-7}$, window $h\in[10^{-4},10^{-3}]$ |
+| total gradient against cold re-solved differences | 0.5 %, 5 % and 23 % apart (unresolved derivative-map mismatch) |
 | top-two sum gradient against central differences, $h=10^{-6}$ (small instance) | $1.0\times10^{-7}$ |
 | seed $\gamma^2$ over three node levels, $(6,5)$ | 0.2 % (family 0), 0.9 % (family 1) |
 | seed $\gamma^2$, $\varepsilon=0.01$ against 0.02 | +0.4 %, +0.1 % |
@@ -294,8 +294,10 @@ difference (measured 5 %) on a small case. It is skipped when `agnimhd` is missi
   uniform density were the only settings run.
 - **Bandwidth.** Growth rates rise with the bandwidth and have not plateaued. On the seed,
   family 0 is $4.5$, $6.8$, $7.7$, $8.8\times10^{-4}$ for $M=6,8,10,12$ and family 1 is $4.9$,
-  $14.5$, $16.5\times10^{-4}$ for $M=6,8,10$. Every value is a lower bound of the growth
-  rate in the full space. Dewar et al. discuss why the ideal stellarator spectrum has no
+  $14.5$, $16.5\times10^{-4}$ for $M=6,8,10$. With conforming trial spaces and exact energy
+  and mass forms, the represented growth rate is a lower bound for the full-space value.
+  Collocation aliasing and equilibrium-force error prevent treating these computed values
+  as certified bounds. Dewar et al. discuss why the ideal stellarator spectrum has no
   intrinsic short-wavelength scale, so the cutoff matters. A design that is stable at
   $(6,5)$ may be unstable at higher bandwidth, so validate at $(8,7)$ and $(10,9)$.
 - **Stable means checked space.** "No resolved instability" refers to the bandwidth, nodes and
@@ -306,14 +308,16 @@ difference (measured 5 %) on a small case. It is skipped when `agnimhd` is missi
   matters. Changing mpol from 5 to 7 moves the seed by $-24$ % and VMEC `delt` from 0.9 to 0.5
   moves it by 20 %. Radial resolution and the cutoff were scanned only on the QA deck, on
   values that were still aliased: they changed by 1-2 % above $n_\rho=10$.
-- **The $m=1$ gauge.** The implicit gradient is the exact derivative on the branch with the
-  antisymmetric $(+n,-n)$ $m=1$ `Z_sin` combination held fixed. A cold re-solve moves it, so
-  the re-solved objective is a different function whose slope differs by 0.5-23 % in the
-  measured directions. Warm-started re-solves are path dependent through the same gauge: the
-  same boundary re-evaluated between other solves gave a top-two sum of $7.2$, $7.7$ and
-  $8.1\times10^{-4}$ on the small instance, while cold solves repeat bit for bit. The optimization example therefore uses
-  `warm_start=None`, at a cost of 3-10 s per cold ns 45 solve against a 60-130 s evaluation.
-  The objective still has a noise floor near $10^{-3}$ relative, which ends line searches.
+- **The constrained $m=1$ family.** The reported implicit gradient holds the
+  antisymmetric $(+n,-n)$ $m=1$ `Z_sin` combination fixed, while independent
+  re-solves can move it. This family changes the discrete physical surfaces;
+  it is not generally a pure angle gauge. The measured 0.5-23 % derivative gap
+  therefore remains a validation failure for the re-solved objective. Warm-started
+  solves also gave different values at the same boundary. Cold starts repeat
+  deterministically but do not resolve the derivative mismatch. The example's
+  `warm_start=None` and its fixed-family checks do not qualify total-gradient
+  optimization; repeat the independent re-solve checks after consistent family
+  selection is integrated.
 - **Near-degenerate modes.** The seed's top two family-0 modes are $4.5521\times10^{-4}$ and
   $4.4132\times10^{-4}$, a 3 % gap, and exchange under a step of $10^{-2}$ in some boundary
   coefficients, where the single-eigenvalue gradient jumps. Use a sum over the active cluster, as
