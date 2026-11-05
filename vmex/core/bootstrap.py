@@ -876,8 +876,9 @@ class RedlBootstrapMismatch:
 class BootstrapPicardResult:
     """Outcome of :func:`self_consistent_bootstrap`.
 
-    ``input`` carries the final ``AC``/``CURTOR`` (``ncurr=1``,
-    ``pcurr_type="power_series"``); ``equilibrium`` is the last solved
+    ``input`` is the deck used for ``equilibrium``, with its final
+    ``AC``/``CURTOR``; refits use ``ncurr=1``, ``pcurr_type="power_series"``.
+    ``equilibrium`` is the last solved
     :class:`~vmex.core.optimize.Equilibrium`; ``history`` is one dict per
     iteration (``curtor``, ``delta``, ``f_boot``).  ``delta`` is the
     self-consistency error ``max|I'_Redl - I'_applied| / max|I'_Redl|``
@@ -955,6 +956,8 @@ def self_consistent_bootstrap(
     from . import optimize as opt
 
     solve_kwargs = dict(solve_kwargs or {})
+    if n_iter < 1:
+        raise ValueError("n_iter must be positive")
     if s_eval is None:
         s_eval = np.linspace(0.02, 0.98, 49)
     s_eval = np.atleast_1d(np.asarray(s_eval, dtype=float))
@@ -1020,6 +1023,8 @@ def self_consistent_bootstrap(
         if delta <= float(tol):
             converged = True
             break
+        if it + 1 == int(n_iter):
+            break  # Return the solved deck, not an unevaluated next iterate.
 
         dIds_use = (dIds_new if dIds_applied is None
                     else (1.0 - relax) * dIds_applied + relax * dIds_new)

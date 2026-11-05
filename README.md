@@ -538,15 +538,25 @@ and the [validation record](docs/explanation/validation.md).
 
 ## Comparison with MRX
 
-`python examples/vmex_mrx_comparison.py` (about 4 minutes, `pip install mrx`) relaxes the 2.5 %
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 %
 beta QA deck with [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces,
 starting from the VMEX ns = 65 field.
+
+Install the MRX equilibrium solver from its source repository; the PyPI package with that name
+is a different project. The example uses this revision:
+
+```console
+pip install "git+https://github.com/ToBlick/mrx@dd1942e9efae05c57d62c02dc3207f87f0704f18"
+```
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 
 - Traced iota, enclosed current and pressure agree with VMEX.
 - Near the axis VMEX iota still moves with ns: 0.188, 0.176, 0.166 at ρ = 0.1 for ns = 65, 129,
-  257, against 0.166 from DESC.
+  257. These three values do not establish its continuum limit. A matched, independently
+  converged DESC reference has not been established for this deck.
+- MRX reconstructs pressure from its relaxed field rather than imposing VMEX's pressure profile.
+  This is a consistency comparison from a shared initial field, not a matched-profile validation.
 
 ## Validation and speed
 
@@ -594,6 +604,13 @@ scores VMEX, VMEC2000 and DESC against them.
 - With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring
   equilibrium that differs by 8e-4 at every resolution. See the
   [validation record](docs/explanation/validation.md#exact-equilibria).
+- [Sengupta et al. (2026)](https://arxiv.org/abs/2610.28466) provide exact nonsymmetric vacuum
+  fields with nested surfaces. From their boundary and flux alone, the bundled
+  [checks](tests/test_exact_vacuum.py) recover the transform to 5.8e-5 (paraboloidal) and
+  5.4e-5 (ellipsoidal, without stellarator symmetry) for `ns = 65`, `mpol = 7`, `ntor = 14`
+  over `0.2 < s < 0.9`. The near-axis error remains 3e-4–1e-3.
+- The sheared finite-pressure families remain a failed recovery benchmark for VMEX and VMEC2000;
+  the exact-reference identities and the successful integer-family solves do not validate them.
 
 ## Performance and parallel execution
 
