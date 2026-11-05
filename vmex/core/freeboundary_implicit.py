@@ -845,6 +845,10 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     params_bar, field_bar = parameter_pullback(
         jax.tree.map(jnp.negative, lam)
     )
+    # The returned held family depends on p as well as entering the residual.
+    _, held_pullback = jax.vjp(
+        lambda p: im._held(frozen, im.runtime_from_params(p, cfg.implicit)), params)
+    params_bar = jax.tree.map(jnp.add, params_bar, held_pullback(state_bar)[0])
     return params_bar, field_bar
 
 
