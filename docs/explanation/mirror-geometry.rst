@@ -536,11 +536,15 @@ whose transform comes from a weak axial current: it demonstrates the geometry
 and the exactly-straight mirror cell, **not** a reproduction of the QI
 rotational transform.
 
-*Fourier-lane limitation.* A literal VMEC re-solve of a straight-axis QI-mirror
-device is out of scope by construction: VMEC's toroidal coordinate is the
-cylindrical angle :math:`\phi`, and a straight axis segment cannot be
-parameterised by :math:`\phi` (its :math:`R(\phi), Z(\phi)` are degenerate).
-This is why the closed-axis, arc-length-parameterised B-spline lane exists.
+*Fourier-lane limitation.* This example does not re-solve the spliced device
+with VMEC. A straight segment can use cylindrical angle :math:`\phi` wherever
+:math:`d\phi/du=(x y'-y x')/R^2` is nonzero. For example,
+:math:`(x,y,z)=(R_0,u,0)` gives :math:`\phi=\arctan(u/R_0)` and
+:math:`R=R_0/\cos\phi`; straightness alone does not make the coordinate
+degenerate. A global VMEC representation additionally needs a single-valued
+:math:`R(\phi),Z(\phi)` around the circuit. Even when that condition holds,
+a finite Fourier basis approximates the leg/return junction, whereas the
+arc-length B-spline basis can preserve exactly collinear interior spans.
 The VMEC solve serves as the QI *reference* (axis, ``iota``, ``|B|``), and the
 Fourier side of the comparison is the axis-representation accuracy above.
 
