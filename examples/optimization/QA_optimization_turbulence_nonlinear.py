@@ -26,20 +26,10 @@ receives a value and a gradient from one reverse sweep through the
 checkpointed window and one reverse equilibrium adjoint. Needs
 ``pip install 'vmex[turbulence]'``.
 
-The default saturates the seed and takes one short L-BFGS-B step;
-it shows the pipeline, not a transport reduction. The timings and fluxes below
-predate the energy guards and need remeasurement under the current policy.
-Measured with the research
-settings on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
-other jobs, JAX 0.10.2, GKX 2.4.0): 70 min end to end,
-5.5 GB peak memory. The cold saturation of the seed took 35,696 steps
-(1,083 s); the warm restarts after each stage 2,480 and 6,296 steps (99 s,
-136 s). One value and gradient took 69 s in stage 1 (22 evaluations, 1,527 s)
-and 60 s in stage 2 (19, 1,139 s). The gated saturated heat flux at s = 0.5
-went 53.0 +- 2.6 (seed) -> 36.3 +- 1.8 (stage 1) -> 42.6 +- 2.1 (stage 2,
-which traded flux for quasisymmetry: QS error 2.29 -> 0.75), with the aspect
-ratio 11.5 -> 6.0. That is one tube, one seed and no held-out check: it shows
-the pipeline works, not a certified transport reduction.
+The default saturates the seed and takes one short L-BFGS-B step. The saved
+endpoint diagnostics and energy-guarded saturation histories support review
+of that finite-window step. Independent cold-start ensembles and resolution
+checks are required to establish a transport reduction.
 """
 
 import os
@@ -106,12 +96,6 @@ SATURATION_REL_SEM = 0.1
 
 # Differentiated post-saturation window (below GKX's 1024-step divergence knee):
 WINDOW_STEPS = 256
-
-# The earlier flux-only policy fit a 5-minute laptop run; the energy-guarded
-# policy may need longer. The research settings measured below were:
-#   MAX_MODES, MAXITER = [1, 2], [8, 8]
-#   SATURATION_REL_SEM, WINDOW_STEPS = 0.05, 512
-#   MAX_PARAMETER_CHANGE = 5.0
 
 # Weight of the heat-flux term, relative to its seed value (1 makes the
 # seed's term cost 0.5, against 15 for the seed's aspect-ratio error):
