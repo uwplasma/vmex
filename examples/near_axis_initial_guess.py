@@ -29,7 +29,7 @@ NPHI = 61
 NS, MPOL, NTOR = 17, 5, 6
 NTHETA, NZETA = 24, 16
 FTOL, MAX_ITERATIONS = 1e-12, 4000
-USE_LAMBDA_SEED = True
+USE_LAMBDA_SEED = True         # True seeds the angle; False keeps the default zero-lambda guess.
 OUTPUT_DIR = Path("output_near_axis_initial_guess")
 
 ###############################################################################
