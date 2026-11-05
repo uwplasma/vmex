@@ -1127,6 +1127,27 @@ to zero would require a different combination of transport coefficients.
 These conventions and the incompressible trajectory choice follow
 `Landreman et al. (2014) <https://doi.org/10.1063/1.4870077>`_.
 
+The trajectory restriction is also an entropy requirement. For motion that
+preserves :math:`F_M`, let :math:`\mathcal V=\dot z^a\partial_a` act on
+:math:`g=f_1/F_M`, with entropy measure :math:`w\,dz=\mathcal J F_M\,dz`.
+With periodic or matching zero-flux boundary conditions, integration by
+parts gives
+
+.. math::
+
+   \operatorname{Re}(g,\mathcal Vg)_w
+      =-\frac12\int w\,\sigma\,|g|^2\,dz,
+   \qquad \sigma=\frac{1}{w}\partial_a(w\dot z^a).
+
+A nonzero :math:`\sigma` therefore prevents treating this advection as the
+skew operator in the complementary bound. Changing only the entropy weight
+can also change the Landau collision adjoint. A magnetic-drift extension
+must establish the orbit measure, collision form and local moment balances
+together. The distinct local equations discussed by
+`Sugama et al. (2016) <https://doi.org/10.1063/1.4945618>`_ illustrate why
+conservation, entropy production and intrinsic ambipolarity need separate
+checks. The current objective does not implement that extension.
+
 The underlying :func:`vmex.core.neoclassical.conserving_stellarator_proxy`
 takes a finite Fourier representation of :math:`J=\widehat B^{-2}` in
 :math:`x=\theta-h\zeta`, :math:`y=N_{\rm fp}\zeta`. Its complex coefficients
