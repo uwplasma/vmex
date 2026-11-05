@@ -54,6 +54,8 @@ def _allclose(new, old, name, rtol=RTOL, atol=ATOL):
 def case(request):
     name = request.param
     inp = VmecInput.from_file(DATA_DIR / f"input.{name}")
+    if inp.lasym:  # Exercise both LASYM m=1 pairs and the released n=0 gauge.
+        inp = inp.change_resolution(mpol=inp.mpol, ntor=1, nzeta=4)
     resolution = resolution_from_input(inp)
     # These are pure force-kernel tests, so request a regular inferred axis
     # for all-zero-axis decks.  Production keeps the supplied zero axis and
@@ -212,6 +214,15 @@ def test_full_chain_residuals_finite(case):
         assert np.isfinite(value) and value > 0.0, name
     for leaf in jax.tree.leaves(gc):
         assert bool(jnp.all(jnp.isfinite(leaf)))
+    if case.rt.resolution.lasym:
+        from dataclasses import replace
+
+        free = evaluate_forces(case.state, case.rt, iteration=3)[0]
+        held = evaluate_forces(case.state, replace(case.rt, hold_m1=True), iteration=3)[0]
+        m, n = np.asarray(case.rt.modes.m), np.asarray(case.rt.modes.n)
+        gauge = (m == 1) & (n == 0)
+        assert np.any(np.asarray(free.Z_cos)[:, gauge] != 0.0)
+        _allclose(held.Z_cos[:, gauge], free.Z_cos[:, gauge], "released LASYM gauge")
 
 
 def test_full_chain_is_jittable(case):
