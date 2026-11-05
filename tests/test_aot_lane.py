@@ -1,8 +1,10 @@
 """AotLane: serialized executables reload bit-identically and never block a call."""
 
+import os
 import subprocess
 import sys
 import textwrap
+from importlib.util import spec_from_file_location
 
 import jax
 import jax.numpy as jnp
@@ -15,6 +17,7 @@ _SCRIPT = textwrap.dedent("""
     import sys, jax, jax.numpy as jnp, numpy as np
     from pathlib import Path
     from vmex.core import aot
+    from essos import shift
     jax.config.update("jax_num_cpu_devices", int(sys.argv[3]))
     aot._directory = lambda: Path(sys.argv[1]) / "aot"
     jax.config.update("jax_compilation_cache_dir", sys.argv[1] + "/xla")
@@ -31,7 +34,7 @@ _SCRIPT = textwrap.dedent("""
             return cls(*leaves)
     def fn(x, f, *, k=2):
         # The solve is a LAPACK call, which a loaded executable must find bound.
-        return jax.lax.fori_loop(0, 5, lambda i, c: jnp.linalg.solve(2 * jnp.eye(4), c) * k + f.y, x)
+        return jax.lax.fori_loop(0, 5, lambda i, c: jnp.linalg.solve(2 * jnp.eye(4), c) * k + shift(f.y), x)
     lane = aot.AotLane(fn, static_argnames=("k",))
     if sys.argv[2] == "build":   # the persistent cache already holds this program
         jax.jit(fn, static_argnames=("k",))(jnp.arange(4.0), Field(jnp.ones(4)), k=3)
@@ -41,20 +44,37 @@ _SCRIPT = textwrap.dedent("""
     x, y = jnp.arange(4.0), Field(jnp.ones(4))
     got = lane(x, y, k=3)
     np.testing.assert_array_equal(got, jax.jit(fn, static_argnames=("k",))(x, y, k=3)
-                                  if sys.argv[2] == "build" else np.load(sys.argv[1] + "/want.npy"))
+                                  if sys.argv[2] != "load" else np.load(sys.argv[1] + "/want.npy"))
     np.save(sys.argv[1] + "/want.npy", got)
 """)
 
 
 @pytest.mark.parametrize("devices", [1, 4])
-def test_executable_reloads_in_a_fresh_process(tmp_path, devices):
+def test_executable_reloads_in_a_fresh_process(tmp_path, devices, monkeypatch):
     """Also when the build was served by the persistent cache (its blobs fail to run),
     on a backend with several devices, for a pytree that computes in its unflatten,
     and for a program whose first call in the process is a LAPACK kernel."""
-    for mode in ("build", "load"):
-        subprocess.run([sys.executable, "-c", _SCRIPT, str(tmp_path), mode, str(devices)],
+    dependency = tmp_path / "dependency" / "essos"
+    dependency.mkdir(parents=True)
+    source = dependency / "__init__.py"
+    source.write_text('__version__ = "1.0"\ndef shift(value): return value\n')
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        (str(dependency.parent), os.environ.get("PYTHONPATH", ""))))
+    for mode in ("build", "load", "edit", "load"):
+        if mode == "edit":  # editable dependency changes without a version bump
+            source.write_text('__version__ = "1.0"\ndef shift(value): return value + 1\n')
+        subprocess.run([sys.executable, "-B", "-c", _SCRIPT, str(tmp_path), mode, str(devices)],
                        check=True, capture_output=True)
-    assert len(list((tmp_path / "aot").glob("*.aot"))) == 1
+    assert len(list((tmp_path / "aot").glob("*.aot"))) == 2
+    original_spec = aot.find_spec
+    hashes = []
+    for present in (False, True):
+        monkeypatch.setattr(aot, "_SOURCE_HASH", None)
+        monkeypatch.setattr(aot, "find_spec", lambda name: (
+            spec_from_file_location(name, source) if present else None
+        ) if name == "essos" else original_spec(name))
+        hashes.append(aot._source_hash())
+    assert hashes[0] != hashes[1]  # optional dependency absent/present
 
 
 def test_fallbacks_never_block_a_call(tmp_path, monkeypatch):
@@ -72,6 +92,21 @@ def test_fallbacks_never_block_a_call(tmp_path, monkeypatch):
     for f in (tmp_path / "aot").glob("*.aot"):
         f.write_bytes(b"corrupt")
     np.testing.assert_array_equal(aot.AotLane(fn)(x, y), want)              # corrupt entry
+    entries = len(list((tmp_path / "aot").glob("*.aot")))
+    with monkeypatch.context() as changed:
+        changed.setattr(aot.jaxlib, "__version__", aot.jaxlib.__version__ + "-changed")
+        np.testing.assert_array_equal(aot.AotLane(fn)(x, y), want)
+    assert len(list((tmp_path / "aot").glob("*.aot"))) == entries + 1
+    with monkeypatch.context() as unknown:
+        unknown.setattr(aot, "_SOURCE_HASH", None)
+
+        def no_spec(_name):
+            raise ValueError("dependency has no import spec")
+
+        unknown.setattr(aot, "find_spec", no_spec)
+        uncacheable = aot.AotLane(fn)
+        assert uncacheable.executable(x, y) is None
+        np.testing.assert_array_equal(uncacheable(x, y), want)
     monkeypatch.setattr(aot, "_directory", lambda: None)                    # cache off
     np.testing.assert_array_equal(aot.AotLane(fn)(x, y), want)
 

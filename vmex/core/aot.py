@@ -7,8 +7,8 @@ first call compiles through the ordinary jitted lane, serializes the
 executable next to the persistent cache (``<cache>/aot``), and later
 processes deserialize it directly, with no trace, lower or key hash.
 
-Entries are keyed on the lane name, a hash of the vmex sources, the JAX
-version, the backend and the call structure (pytree definition, leaf shapes,
+Entries are keyed on the lane name, VMEX and solver dependency source hashes,
+JAX/JAXlib and target compiler versions, the backend and call structure (pytree definition, leaf shapes,
 dtypes, weak types, commitment, static arguments).  The lowering is the one
 the jitted lane would build, so results are bit-identical.  Any miss, load
 error or argument mismatch falls back to the jitted lane; tracers (calls
@@ -23,10 +23,12 @@ import os
 import pickle
 import tempfile
 import threading
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
 import jax
+import jaxlib
 import numpy as np
 from jax.experimental import serialize_executable as _se
 
@@ -55,15 +57,26 @@ def _compile(lower: Callable[[], Any]) -> Any:
             cc.reset_cache()
 
 
-def _source_hash() -> str:
-    """Digest of the vmex sources (any edit invalidates every entry)."""
+def _source_hash() -> str | None:
+    """Per-process source digest; restart after installed or editable dependency changes."""
     global _SOURCE_HASH
     if _SOURCE_HASH is None:
         h = hashlib.sha256()
-        root = Path(__file__).resolve().parents[1]
-        for path in sorted(root.rglob("*.py")):
-            h.update(path.relative_to(root).as_posix().encode())
-            h.update(path.read_bytes())
+        roots = [("vmex", Path(__file__).resolve().parents[1])]
+        # SOLVAX runs in force/preconditioner lanes; optional ESSOS fields run
+        # inside the free-boundary vacuum lane. Do not import optional packages.
+        for package in ("solvax", "essos"):
+            try:
+                spec = find_spec(package)
+            except (ImportError, ValueError):
+                return None  # an unidentifiable dependency cannot safely reload
+            if spec is not None:
+                roots.extend((package, Path(root)) for root in spec.submodule_search_locations or ())
+        for package, root in roots:
+            h.update(package.encode())
+            for path in sorted(root.rglob("*.py")):
+                h.update(path.relative_to(root).as_posix().encode())
+                h.update(path.read_bytes())
         _SOURCE_HASH = h.hexdigest()[:16]
     return _SOURCE_HASH
 
@@ -181,8 +194,12 @@ class AotLane:
         hit = self._memory.get(text)
         if hit is not None:
             return hit
+        source_hash = _source_hash()
+        if source_hash is None:
+            return None
         digest = hashlib.sha256("\n".join(
-            (self.name, self.identity, _source_hash(), jax.__version__,
+            (self.name, self.identity, source_hash, jax.__version__, jaxlib.__version__,
+             str(getattr(device.client, "platform_version", "")),
              jax.default_backend(), os.environ.get("XLA_FLAGS", ""),
              text)).encode()).hexdigest()[:32]
         path = directory / f"{self.name}-{digest}.aot"
