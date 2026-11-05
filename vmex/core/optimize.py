@@ -123,8 +123,11 @@ from .statephysics import (
     elongation_profile,
     iota_edge,
     max_elongation,
+    min_boundary_curvature_radius,
     mean_iota,
     min_abs_iota,
+    edge_jacobian_ratio,
+    axis_excursion,
     soft_min_abs_iota,
     volume,
     volume_average_beta,
@@ -148,6 +151,9 @@ __all__ = [
     "aspect_ratio",
     "mean_iota",
     "min_abs_iota",
+    "edge_jacobian_ratio",
+    "axis_excursion",
+    "Hinge",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
@@ -155,8 +161,10 @@ __all__ = [
     "volume",
     "volume_average_beta",
     "magnetic_well",
+    "weighted_magnetic_well",
     "elongation_profile",
     "max_elongation",
+    "min_boundary_curvature_radius",
     "d_merc",
     "d_merc_state",
     "mercier_stability_residual",
@@ -171,6 +179,7 @@ __all__ = [
     "trial_pressure_glasser_stability_residual",
     "l_grad_b",
     "l_grad_b_state",
+    "l_grad_b_excess_state",
     "quasi_isodynamic_residual",
     "boozer_modes_from_wout",
     "quasi_isodynamic_residual_from_wout",
@@ -783,6 +792,25 @@ class QuasisymmetryRatioResidual:
 # ``edge_iota`` (implicit.py exposes the mirror alias).
 
 
+class Hinge:
+    """An inequality as a residual: zero inside ``[floor, ceiling]``, the distance outside.
+
+    ``fun`` is any ``(state, runtime)`` metric, scalar or per surface, so
+    ``(Hinge(min_abs_iota, floor=0.42), 0.0, 100.0)`` is an objective tuple.
+    """
+
+    def __init__(self, fun: Callable, *, floor: Any = None, ceiling: Any = None):
+        self.fun, self.floor, self.ceiling = fun, floor, ceiling
+        self.name = getattr(fun, "__name__", type(fun).__name__)
+
+    def __call__(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Return the distance of ``fun`` outside the band, zero inside."""
+        value = self.fun(state, rt)
+        below = 0.0 if self.floor is None else jnp.maximum(self.floor - value, 0.0)
+        above = 0.0 if self.ceiling is None else jnp.maximum(value - self.ceiling, 0.0)
+        return below + above
+
+
 def report_targets(
     eq: Equilibrium,
     *,
@@ -862,6 +890,19 @@ def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
     v1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
     v0_safe = jnp.where(v0 != 0.0, v0, jnp.ones_like(v0))
     return jnp.where(v0 != 0.0, (v0 - v1) / v0_safe, 0.0)
+
+
+def weighted_magnetic_well(state: SpectralState, rt: SolverRuntime, *, inner, outer) -> Array:
+    """``sum((w1 - w2) V') / sum((w1 + w2) V')`` on the half mesh, with ``w1 = inner(s)``.
+
+    Positive means a favorable well between the regions the weights select,
+    without the endpoint extrapolation of :func:`magnetic_well`.
+    """
+    _, _, _, _, energies = _field_chain(state, rt)
+    vp = jnp.abs(jnp.asarray(energies.vp))[1:]
+    s = (jnp.arange(vp.size) + 0.5) / vp.size
+    w1, w2 = inner(s), outer(s)
+    return jnp.sum((w1 - w2) * vp) / jnp.sum((w1 + w2) * vp)
 
 
 def d_merc(eq) -> jnp.ndarray:
@@ -956,6 +997,19 @@ def l_grad_b_state(
         return jnp.min(grid)
     k = jnp.asarray(float(softmin_k), dtype=grid.dtype)
     return -jax.scipy.special.logsumexp(-k * grid) / k
+
+
+def l_grad_b_excess_state(
+    state: SpectralState, rt: SolverRuntime, *, target: float,
+    s_index: int = -1, ntheta: int = 24, nphi: int = 24,
+) -> Array:
+    """Pointwise rows ``max(target / L_grad_B - 1, 0)``: one per grid point.
+
+    Unlike the scalar minimum, every point below ``target`` drives its own
+    Gauss-Newton row, and the rows are zero once the target is met.
+    """
+    grid = _lgradb_grid(s_index=s_index, ntheta=ntheta, nphi=nphi, **_lgradb_state_tables(state, rt))
+    return jnp.ravel(jnp.maximum(target / grid - 1.0, 0.0))
 
 
 # ===========================================================================
@@ -1225,6 +1279,9 @@ def quasi_isodynamic_residual(
 
         shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
             x_target, signed_phi)
+        # The first coordinate is exactly -lend (the wall); roundoff in phi - phimin
+        # must not slide it into the artificial node ramp.
+        shuffled = shuffled.at[..., 0].set(1.0)
         constructed_bnorm = shuffled
         shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
         if float(argmin_softness) > 0.0:
@@ -1923,7 +1980,6 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
-    block_factor: str = AUTO,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2010,11 +2066,6 @@ def make_problem(
     ``refine_tol`` is the frozen fixed-point residual required before
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
-
-    ``block_factor`` selects the backend factoring the ``"block"`` Jacobian
-    lane's block tridiagonal: ``"auto"`` (default) uses cyclic reduction when
-    the implicit work runs on a GPU and Thomas otherwise, ``"thomas"`` and
-    ``"cyclic_reduction"`` force one.  The solves agree to round-off.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -2103,7 +2154,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
-            refine_tol=refine_tol, block_factor=block_factor,
+            refine_tol=refine_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -2156,7 +2207,6 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
-    block_factor: str = AUTO,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2249,9 +2299,6 @@ def least_squares(
     is recomputed by reverse adjoint.  Forced host methods raise
     :class:`AdjointSolveError`; transformable JAX methods fall back to reverse
     so no compiled public path returns an uncertified matrix.
-    ``block_factor`` picks that factorization's backend: ``"auto"`` (default,
-    cyclic reduction on a GPU and Thomas otherwise), ``"thomas"`` or
-    ``"cyclic_reduction"``; the Jacobians agree to round-off.
 
     ``adjoint_tol`` and ``adjoint_maxiter`` control the certified linear
     response solves.  All public optimization paths allow 300 restarts by
@@ -2302,7 +2349,7 @@ def least_squares(
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
                 max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
-                block_factor=block_factor, hot_restart=hot_restart,
+                hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
                 verbose=verbose, **scipy_kwargs)
@@ -2331,7 +2378,6 @@ def least_squares(
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
-            block_factor=block_factor,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2643,7 +2689,6 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
-    block_factor: str = AUTO,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2760,7 +2805,6 @@ def _least_squares_implicit(
         adjoint_maxiter=adjoint_maxiter,
         max_fsq_ratio=max_fsq_ratio,
         refine_tol=refine_tol,
-        block_factor=block_factor,
     )
     # Pin the residual/Jacobian graphs to the fastest device for this
     # launch-bound path (CPU by default; explicit device= honored; None

@@ -133,11 +133,10 @@ inventory, with the call site each class serves:
    `v -> jvp(g, state, v)`; the `precon2d.f` analogue).
 5. `solvax.chunk_map` / `auto_chunk_size` bound memory for Jacobian columns
    and multi-RHS batches (`vmex/core/optimize.py`).
-6. `solvax.SpluFactorization` owns the pivoted sparse factorization used to
-   eliminate the radial bulk in the experimental free-boundary Schur
-   transpose (`vmex/core/freeboundary_implicit.py`). VMEX supplies the
-   physics-specific radial blocks and NESTOR edge response; SOLVAX owns the
-   reusable factorization and transposed solves.
+6. The free-boundary Schur transpose (`vmex/core/freeboundary_implicit.py`)
+   eliminates the radial bulk with LAPACK's banded LU (`gbtrf`, row partial
+   pivoting) in O(ns b^2) memory for blocks of size b. VMEX supplies the
+   physics-specific radial blocks and NESTOR edge response.
 
 The mirror lane keeps its own adjoint solver (`vmex/mirror/implicit.py`).
 
@@ -173,19 +172,16 @@ Use two complementary checks:
   Also check repeated parameters after unrelated trials and in a new problem
   instance. This tests the parameter dependence used by an optimizer.
 
-The two checks do not coincide exactly, and the difference is measured. VMEC
-releases the m=1 constrained `Z_sin` pair combination once `fsqz < 1e-6`.
-The linearization holds it at its converged value, while each cold re-solve
-freezes it wherever its own path left it. On `li383_low_res` at `ftol = 1e-13`
-the implicit mean-iota derivative differs from cold re-solve differences by
-1.0 % along RBC(1,1) and 2.8 % along ZBS(-1,1). The frozen-path check agrees
-to 7e-7. Adding the iota response to the family's drift alone closes the gap
-to 2.3e-6 and 1.6e-5. Across `mpol` 4–8 and `ns` 16–64 the gap spans
-0.06–2.8 % and does not fall monotonically. In the continuum this coordinate is
-an angle gauge, so neither number is wrong; the implicit value is the
-derivative with that gauge held fixed.
-`tests/test_implicit_grad_fd.py::test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family`
-checks the closure.
+VMEC releases the m=1 constrained `Z_sin` pair combination (`Z_cos` on lasym)
+while `fsqz >= 1e-6`, so the root has no equation for it and a solve lands
+where its own path did, yet it moves the surfaces. Implicit solves never
+release it: it stays on the input's `profil3d.f` guess, which the derivative
+follows, so a cold re-solve is the differentiated map. On `li383_low_res`,
+1 % from the first solve, they agree to 3e-6 on mean iota and 1e-4 on an
+interior `Z_sin` objective, where the released family left 1-3 % and 140x
+(`tests/test_implicit_grad_fd.py::test_li383_resolve_fd_matches_the_implicit_derivative`).
+A plain `vmex` run still releases it, as VMEC2000 does.
+Axisymmetric (`ntor = 0`) decks and the lasym `n = 0` entry are exact theta-origin gauges and stay released.
 
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at
@@ -242,8 +238,7 @@ plug into an optimization campaign is {doc}`/howto/optimize-a-boundary`.
 
 The free-boundary path differentiates the converged coupled VMEX--NESTOR root,
 including direct coil-shape/current parameters, while keeping host iterations
-off the AD tape. The default whole-state transpose is exact but cold-compile
-and memory limited. An advanced boundary-Schur transpose, its full-residual
+off the AD tape. The default boundary-Schur transpose, its full-residual
 certificate, and its current performance limits are documented in
 {doc}`nestor-vacuum`. The supported scope of every AD path is one row of
 {doc}`/reference/capabilities`.

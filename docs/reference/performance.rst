@@ -218,44 +218,6 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
-Block-factor backend (2026-10-23)
----------------------------------
-
-The block-tridiagonal factorization behind the implicit Jacobian and adjoint
-lanes (``block_factor``) has two backends: ``"thomas"``, the sequential Schur
-sweep, and ``"cyclic_reduction"``, which eliminates every odd block row at
-once down to 8 rows and finishes with Thomas
-(:func:`solvax.block_cyclic_reduction_factor`).  Both retain partial pivoting
-inside the blocks and give the same certified solves to round-off.  The
-default ``"auto"`` picks cyclic reduction when the implicit work runs on a
-GPU and Thomas otherwise.  The platform is that of ``ImplicitConfig.device``
-(the resolved placement the implicit lanes commit to), else of an active
-``jax.default_device``, else ``jax.default_backend()``; because high-level
-optimization pins implicit work to the CPU, ``"auto"`` reaches cyclic
-reduction there only with an explicit ``device="gpu"`` (or JAX placement).
-Pass ``block_factor="thomas"`` or ``"cyclic_reduction"`` to
-:func:`vmex.core.optimize.make_problem`,
-:func:`~vmex.core.optimize.least_squares`,
-:func:`vmex.core.implicit.make_config` or
-:func:`vmex.core.freeboundary_implicit.make_free_boundary_config`
-to override it.
-
-Measured by SOLVAX's paired kernel benchmark (cyclic reduction divided by
-normalized Thomas, 150-row blocks of the QA ``max_mode=2`` system):
-
-===============  ==============  ===========  ==============
-Device           Factor          Apply        Transpose apply
-===============  ==============  ===========  ==============
-RTX A4000        0.4-0.6x        0.2-0.6x     0.1-0.4x
-CPU              1.3-1.6x        --           --
-===============  ==============  ===========  ==============
-
-At 384-row blocks the A4000 factor ratio is about 1.0x, so the GPU gain
-shrinks as the dense block work dominates.  The cutoff (2 to 8) changes
-little and is fixed at 8. These kernel measurements do not establish a
-complete gradient or Jacobian speedup. Compare both backends on the same
-converged problem, separating compilation, cache reload and warm execution.
-
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
@@ -277,6 +239,19 @@ bound, so a large workload keeps its own working set.  Set
 ``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
 trimming.
 
+JAX's own byte bound is left off (``jax_compilation_cache_max_size=-1``).
+With a finite bound JAX also takes a directory lock and re-scans the
+directory on every write, and a cold first value and gradient on
+``input.li383_low_res`` at ``ns=31`` (914 programs, Apple M4, JAX 0.12.0.1)
+took 40.0 s against 22.9 s unbounded (22.2 s with the cache off); a second
+process reloads the cache in 5.6 s against 5.8 s.  VMEX trims the directory
+itself at import: to the entry bound above and to a byte bound that scales with
+the free disk (2 to 20 GiB), oldest entries first.  Without JAX's lock a
+concurrent process can read a half-written entry; JAX then warns and
+compiles that program.  Six concurrent processes on one empty directory
+finished without error.  ``VMEX_COMPILATION_CACHE_MAX_SIZE=<bytes>`` turns
+JAX's bounded cache back on.
+
 JAX never writes a program that contains a host callback to the cache.  The
 fixed-boundary optimization Jacobians (block and per-column GMRES) therefore
 take the host-solved equilibrium as an argument instead of calling the solve
@@ -286,6 +261,21 @@ recompiling.  The reverse-adjoint Jacobian still calls the solve in its graph.
 With jaxlib < 0.10 the cache defaults to off, because those releases crash
 deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
 forces it on.
+
+The solver step and block lanes and the free-boundary vacuum loop and full
+vacuum update are also stored as serialized executables under ``aot/`` in the
+cache directory, so a new process runs them without tracing or lowering.
+Each loads onto the one device its arguments use.  A warm ``cth_like``
+free-boundary solve (36-core x86 host, pinned to 4 loaded cores, JAX 0.12.0.1,
+4 alternated runs) takes 14.8–17.4 s against 16.9–23.2 s before; tracing,
+lowering and loading drop from 4.6–6.1 s to 2.2–2.5 s.  A first free-boundary
+value and gradient in a new process hits the cache for all of its 332
+programs and still spends 51–62 s tracing, lowering and loading them
+(no change outside the noise, 3 runs): those adjoint programs take the
+user's field function as a static argument, which no file can be keyed on.
+The defaults need no change.  Point ``VMEX_COMPILATION_CACHE_DIR`` at
+node-local disk when the home filesystem is slow or shared by many concurrent
+jobs, and set ``VMEX_COMPILATION_CACHE=0`` only when disk is scarce.
 
 High-mode FFT synthesis (commit ``ecfbe31d``, 2026-07-28)
 ---------------------------------------------------------
