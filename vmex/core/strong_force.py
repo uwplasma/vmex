@@ -1168,24 +1168,20 @@ def lift_high_order_state(
     m_values = np.asarray(modes.m, dtype=int)
 
     def fit_modes(table: np.ndarray, *, fixed_boundary: bool) -> np.ndarray:
-        fitted = np.stack(
-            [
-                _constrained_spline_fit(
-                    radial_basis,
-                    table[:, column],
-                    s,
-                    mode_m=int(m_values[column]),
-                    fix_axis=int(m_values[column]) == 0,
-                    fix_edge=fixed_boundary,
-                    curvature_regularization=curvature_regularization,
-                )
-                for column in range(table.shape[1])
-            ],
-            axis=0,
-        )
-        return fitted
+        fitted = []
+        for column, m in enumerate(m_values):
+            start = 1 if not fixed_boundary and m == 0 else 0
+            fitted.append(_constrained_spline_fit(
+                radial_basis, table[start:, column], s[start:], mode_m=int(m),
+                fix_axis=fixed_boundary and m == 0, fix_edge=fixed_boundary,
+                curvature_regularization=curvature_regularization,
+            ))
+        return np.stack(fitted, axis=0)
 
     R_cos_q, R_sin_q, Z_cos_q, Z_sin_q = (fit_modes(table, fixed_boundary=True) for table in physical)
+    # wrout.f replaces m=0 axis lambda by its first interior value.  This is
+    # a closure, not an axis observation: infer the smooth axis limit from
+    # interior data rather than spreading its O(ds) bias through the spline.
     L_cos_q = fit_modes(lambda_physical[0], fixed_boundary=False)
     L_sin_q = fit_modes(lambda_physical[1], fixed_boundary=False)
     gauge = (m_values == 0) & (np.asarray(modes.n, dtype=int) == 0)
@@ -1306,9 +1302,12 @@ def traced_lift(
         )
 
     def projector(nodes: np.ndarray, m: int | None, **endpoints: bool) -> np.ndarray:
+        start = 1 if m == 0 and not endpoints.get("fix_edge", False) else 0
+        if start:
+            endpoints["fix_axis"] = False
         unit = np.eye(nodes.size)
         return np.stack(
-            [_constrained_spline_fit(radial_basis, unit[:, j], nodes, mode_m=m, **endpoints)
+            [_constrained_spline_fit(radial_basis, unit[start:, j], nodes[start:], mode_m=m, **endpoints)
              for j in range(nodes.size)],
             axis=1,
         )

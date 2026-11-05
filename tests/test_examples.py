@@ -116,6 +116,8 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
+    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
     "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
