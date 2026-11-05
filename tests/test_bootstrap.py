@@ -961,12 +961,14 @@ def _spread(xm, xn, bmnc, iota=(0.42, 0.61), nfp=3):
 
 
 def test_equivalent_ripples_vanish_for_omnigenous_and_not_for_helical_fields():
-    # B(zeta) only (poloidally closed contours) and B(theta) (tokamak/QA) give equal
-    # period integrals on every line (m=0 modes average out over a period); a helical
-    # B(theta - zeta) with iota off the helicity does not.
+    # B(zeta) only has poloidally closed contours and equal period integrals.
+    # A helical B(theta - zeta) off its helicity need not.
     np.testing.assert_allclose(_spread([0, 0, 0], [0, 3, 6], [1.0, 0.15, 0.03]), 0.0, atol=1e-7)
     qh = _spread([0, 1], [0, 3], [1.0, 0.15])
     assert np.all(np.asarray(qh) > 1e-3)
+    for scale in np.logspace(-4, 4, 9):
+        np.testing.assert_allclose(_spread([0, 0], [0, 3], scale * np.array([1., .15])), 1e-8, rtol=1e-12)
+        np.testing.assert_allclose(_spread([0, 1], [0, 3], scale * np.array([1., .15])), qh, rtol=1e-12)
 
 
 def test_finite_nu_residual_is_differentiable_and_rows_scale_with_amplitude():
