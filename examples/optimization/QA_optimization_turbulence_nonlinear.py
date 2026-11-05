@@ -177,8 +177,9 @@ def noise_seed():
     state = jnp.zeros((1, N_LAGUERRE, N_HERMITE, NY, NX, NZ), dtype=jnp.complex64)
     profile = 1.0e-3 * (1.0 + 0.2 * jnp.cos(grid.z))
     for ky, kx, amplitude in ((1, 0, 1.0 + 0.2j), (1, 1, 0.3 - 0.1j)):
-        state = state.at[0, 0, 0, ky, kx].set(amplitude * profile)
-        state = state.at[0, 0, 0, -ky, -kx].set(np.conj(amplitude) * profile)
+        mode = jnp.asarray(amplitude * profile, dtype=state.dtype)
+        state = state.at[0, 0, 0, ky, kx].set(mode)
+        state = state.at[0, 0, 0, -ky, -kx].set(jnp.conj(mode))
     return state
 
 
