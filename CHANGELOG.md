@@ -7,9 +7,6 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 - Add pwO vacuum, finite-beta and coil examples with independent transport checks.
 - Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid.
 - Fix constructed-QI first-wall interpolation under a shifted toroidal origin.
-
-## Unreleased
-
 - `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
 
 ## 0.12.0 - 2026-10-21
@@ -133,8 +130,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 - An outdated or missing optional dependency (ESSOS, virtual-casing-jax,
   neo-jax, GKX) now fails with the `pip install -U` command that fixes it,
   and the import guard also covers `booz_xform_jax` and `solvax` (#496).
-- No `RuntimeWarning` when no alpha is lost, and the terminal progress line
-  is cleared properly (#496).
+- No `RuntimeWarning` when no alpha is lost, and the terminal progress line is cleared properly (#496).
 
 ## 0.11.5 - 2026-09-28
 
