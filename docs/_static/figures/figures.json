@@ -785,7 +785,7 @@
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
-        "README.md"
+        "docs/explanation/confinement.rst"
       ],
       "note": "Saved geometry and orbits; see input metadata."
     },
@@ -804,7 +804,7 @@
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
-        "README.md"
+        "docs/explanation/confinement.rst"
       ],
       "note": "Saved geometry and orbits; see input metadata."
     },

@@ -843,6 +843,26 @@ Refine radial and angular sampling when validating the objective.
 ``iota_shear`` is with respect to the table coordinate; convert using
 ``dpsi/ds`` for physical formulas with a nonidentity ``APHI`` flux map.
 
+Saved orbit illustrations
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. image:: ../_static/figures/readme_cyclometry_low_energy.webp
+   :alt: Passing helium sections for both parallel directions
+
+ESSOS sections for 48 selected 100 eV helium ions over 86.4 ms separate the
+parallel velocity signs. Gray contours show the leading transit-action
+Hamiltonian: s is normalized toroidal flux and chi = 5 theta - 3 zeta.
+The model uses zero magnetic moment, 31 radial surfaces, Boozer bounds 8/8
+and omits the radial covariant field component (K=0).
+
+.. image:: ../_static/figures/readme_cyclometry_alpha.webp
+   :alt: Scaled-alpha sections and transit-action contours
+
+Ten selected 3.5 MeV ions are followed for 4.43 ms with length scaled by 6,
+field strength by 4, Boozer bounds 12/12, mu B_star/E = 0.6 and B_star = 9.533 T.
+Contour mismatch and tolerance-sensitive orbit classification require further
+invariant and orbit validation. These selected markers do not estimate losses.
+
 Persistent reference for scalar objectives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
