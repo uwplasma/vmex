@@ -218,6 +218,95 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
+CPU/GPU derivative qualification (2026-11-04)
+---------------------------------------------
+
+Source ``d8791437``, JAX 0.12.0.1, SOLVAX 0.35.0, Boozer transform
+0.5.0, float64. The same Linux host supplied an RTX A4000 and eight
+CPU affinity slots on a Xeon W-2295 (18 physical cores, 36 logical CPUs).
+Other jobs remained active; these are bounded shared-host measurements.
+The persistent compilation cache was not cleared or isolated. First-call
+times therefore include compilation or cache loading, with prior cache
+contents uncontrolled; they are not clean-cache compile measurements.
+Every output pytree was synchronized before stopping the timer.
+
+The fixed-boundary case uses ``input.minimal_seed_nfp2``, with
+``RBC(-1,1)=-0.05``, ``ZBS(-1,1)=0.05``, ``DELT=0.5``, nine radial
+surfaces, ``mpol=ntor=3``, angular grid 12 by 10, ``ftol=1e-10`` and
+1600 iterations. ``max_mode=1`` supplies eight decision variables.
+The scalar loss is aspect ratio squared plus 1000 times magnetic well
+squared. The residual problem combines QA quasisymmetry at three radii
+from 0.2 to 1.0 with aspect-ratio target 6.
+
+===============================  ============  ============
+Operation                        CPU (s)       GPU (s)
+===============================  ============  ============
+Construct both problems          6.83          14.16
+First scalar value and gradient  27.41         51.43
+Warm scalar value and gradient   0.341         0.276
+First residual and Jacobian      17.79         34.60
+Warm residual and Jacobian       0.272         0.253
+===============================  ============  ============
+
+First derivative evaluations exclude construction. The Jacobian follows
+the scalar lane in the same process and can reuse its executables, so its
+first-call time is not an independent cold-process measurement. Warm
+values are medians of four evaluations, alternating two nearby decision
+vectors to avoid measuring only the public result cache.
+
+At the last matched vector, CPU/GPU relative differences are ``1.3e-13``
+for the scalar gradient and ``1.8e-13`` for the Jacobian. A re-solved central
+difference in the normalized all-ones decision direction agrees with the
+scalar adjoint to ``9.3e-10`` relatively on both devices (step ``1e-5``).
+
+Synchronized scalar-stage medians explain why a large kernel gain does not
+become the same workflow gain: block assembly and factorization take
+77.4/6.49 ms on CPU/GPU, root callbacks 71.2/119 ms, and the four Newton
+Krylov steps together 21.2/28.1 ms. Other differentiation and host work
+remain in the complete evaluation. These stage times are nested where
+applicable and should not be added to their parent timers.
+
+The free-boundary check uses the portable DIII-D LASYM field fixture
+(``tests/test_lasym_free_case.py``), 16 surfaces, ``mpol=12``, ``ntor=0``,
+``ftol=1e-7``, a 2500-iteration budget, coupled-root tolerance ``1e-10``
+and adjoint tolerance ``1e-8``. Its loss is the mean of the squared edge
+``R_cos`` and ``Z_sin`` coefficients, differentiated with respect to the
+single MGRID current multiplier. ``boundary_schur`` is the default adjoint.
+
+===============================  ============  ============
+Operation                        CPU (s)       GPU (s)
+===============================  ============  ============
+First free value and gradient    215.28        441.44
+Warm free value and gradient     3.860         1.574
+Warm coupled-root value          2.936         0.945
+===============================  ============  ============
+
+The first call includes the initial root and compilation; it is not an
+isolated compiler timing. The value-only samples follow the gradient and
+include root anchoring. Four warm samples alternate multipliers 1 and
+``1+1e-5``. CPU/GPU values and current derivatives agree to ``5.4e-13``
+and ``5.8e-12`` relatively. Central differences with step ``2e-5`` agree
+with both adjoints to ``7.1e-9`` relatively.
+
+Six Newton anchor steps take about 2.5 s on CPU and 0.53 s on GPU. This
+coupled-root work dominates the warm CPU value; the gradient adds further
+Schur and pullback work. The GPU was explicitly selected for this
+axisymmetric case; automatic placement would select CPU. Its lower warm
+cost must be weighed against the 226 s larger first gradient cost. These
+results do not describe the older coupled-GCROT adjoint or establish a
+3-D free-boundary crossover.
+
+Actual JAX traces were also recorded for the warm free gradient. The CPU
+traced gradient took 4.96 s versus the untraced 3.86 s median, so trace
+overhead is material. These are JAX host/device timelines, not a separate
+Nsight kernel study.
+
+A single equilibrium currently runs on one device. ``vmex.parallel``
+threads independent equilibria; it does not partition one equilibrium
+across hosts. No exclusive full-node or multi-node scaling is established
+by this qualification. The older 0.9.1 GPU matrix above remains a dated
+record of that source and software stack.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
