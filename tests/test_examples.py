@@ -1486,7 +1486,7 @@ def test_vmex_mrx_comparison_example(tmp_path):
     """
     out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
     if "MRX is not installed" in out:
-        assert "pip install mrx" in out
+        assert 'pip install "git+https://github.com/ToBlick/mrx@' in out
         return
     assert "VMEX: iota axis/edge" in out
     assert "force residual" in out and "|B| difference" in out

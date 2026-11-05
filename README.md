@@ -538,9 +538,16 @@ and the [validation record](docs/explanation/validation.md).
 
 ## Comparison with MRX
 
-`python examples/vmex_mrx_comparison.py` (about 4 minutes, `pip install mrx`) relaxes the 2.5 %
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 %
 beta QA deck with [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces,
 starting from the VMEX ns = 65 field.
+
+Install the MRX equilibrium solver from its source repository; the PyPI package with that name
+is a different project. The example uses this revision:
+
+```console
+pip install "git+https://github.com/ToBlick/mrx@dd1942e9efae05c57d62c02dc3207f87f0704f18"
+```
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 
