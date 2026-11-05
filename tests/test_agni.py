@@ -228,3 +228,110 @@ def test_unsupported_inputs_are_rejected(deck):
             agni.make_agni_map(flagged, nodes)
     with pytest.raises(ValueError, match="field period"):
         agni.make_agni_map(runtime, {**nodes, "zeta": np.asarray(nodes["zeta"]) + 2.0 * np.pi})
+
+
+# ---------------------------------------------------------------------------
+# Total derivative through the converged equilibrium (VmecProblem.from_loss)
+# ---------------------------------------------------------------------------
+#
+# Small unstable case: the nfp=4 QI deck at doubled pressure, one toroidal family, a (4, 3) restricted
+# AGNI space on 24x20 nodes.  Its top mode is isolated (gamma^2 ~ 1.5e-4, 20x the numerical-null floor).
+# Three references for the derivative along one boundary harmonic:
+#   * the root of the *frozen-path* residual at p +- h d (the derivative the implicit lane computes);
+#   * the same root with the released m=1 angle-gauge combination set to its re-converged value;
+#   * plain cold re-converged equilibria.
+# A cold re-solve lets the m=1 gauge land where its own path leaves it; the implicit derivative holds it
+# fixed, so the plain difference differs from the gradient by the gauge response (records/total_gradient).
+
+QI_DECK = Path(__file__).resolve().parents[1] / "examples" / "data" / "input.nfp4_QI_finite_beta"
+QI_SHAPE = dict(mpol=4, ntor=3)
+QI_NODES = (8, 24, 20)
+QI_AUTOMORPHISM = {"eps": 0.02, "x_0": 0.6, "m_1": 2.5, "m_2": 3.0}
+
+
+@pytest.fixture(scope="module")
+def total():
+    from vmex.core import optimize as opt
+
+    inp = VmecInput.from_file(QI_DECK)
+    inp = dataclasses.replace(inp, pres_scale=2.0, ns_array=np.asarray([13]), ftol_array=np.asarray([1e-12]),
+                              niter_array=np.asarray([40000]))
+    host = vj.solve_multigrid(inp, verbose=False)
+    runtime = prepare_runtime(inp, resolution_from_input(inp, ns=13))
+    basis = agnimhd.Basis(*QI_NODES, radial="lobatto", automorphism=QI_AUTOMORPHISM, restrict=True, **QI_SHAPE)
+    nodes, diffmat = basis.nodes_and_diffmat(inp.nfp, 0)
+    emap = agni.make_agni_map(runtime, nodes, inp=inp)
+    config = agnimhd.AssemblyConfig(gamma=5.0 / 3.0)
+    probe = agnimhd.SolverConfig(eigensolver="eigsh", sigma=1e-2, eigsh_tol=1e-12)
+    gamma2, _, residual = agnimhd.eigenpair(jax.jit(emap)((host.state, runtime)), diffmat, config, probe)
+    assert float(gamma2) > 1e-4 and float(residual) < 1e-6
+    solver = dataclasses.replace(probe, sigma=2.5 * float(gamma2))
+
+    def loss(state, rt):
+        return agnimhd.growth_rate((state, rt), diffmat, config, solver, equilibrium_map=emap)
+
+    problem = opt.VmecProblem.from_loss(inp, loss, max_mode=3, warm_start=None)
+    return inp, problem, loss
+
+
+def test_total_gradient_matches_reconverged_differences(total):
+    """``problem.value_and_grad`` against references that each fix one source of disagreement."""
+    from vmex.core import implicit as imp
+
+    inp, problem, loss = total
+    x0 = np.asarray(problem.x0)
+    k = list(problem.names).index("RBC(-1,3)")
+    d = np.zeros_like(x0)
+    d[k] = problem.scales[k]
+
+    value, grad = problem.value_and_grad(x0)
+    ad = float(grad @ d)
+    equilibrium = problem.equilibrium_from_x(x0)
+    direct = float(jax.jit(loss)(equilibrium.state, equilibrium.runtime))
+    assert value == pytest.approx(direct, rel=1e-9)  # the problem evaluates the loss at the refined root
+    assert np.all(np.isfinite(grad)) and ad != 0.0
+
+    cfg = imp.make_config(inp, multigrid=True, refine_tol=1e-13)
+    params0 = imp.params_from_input(problem.input_from_x(x0))
+    xstar, mask = imp.solve_implicit_with_aux(params0, cfg)
+    tangent = jax.tree.map(lambda a, b: jnp.asarray(a) - jnp.asarray(b),
+                           imp.params_from_input(problem.input_from_x(x0 + d)), params0)
+    zdot, report = imp.implicit_state_tangent_multi_rhs(params0, cfg, xstar, mask,
+                                                        jax.tree.map(lambda v: v[None], tangent))
+    zdot = jax.tree.map(lambda v: v[0], zdot)
+    P = imp._dof_projector(cfg, mask)
+    loss_jit = jax.jit(loss)
+    shifted = lambda s, h: jax.tree.map(lambda p, t: p + s * h * t, params0, tangent)  # noqa: E731
+
+    def root_value(s, h, gauge_rate=None):
+        """Growth rate on the root of F(z, p + s h d) = 0 with the frozen set held at the base (or the given) gauge."""
+        guess = jax.tree.map(lambda x, z: x + s * h * z, xstar, zdot)
+        if gauge_rate is not None:
+            guess = jax.tree.map(lambda g, r: g + s * h * r, guess, gauge_rate)
+        p_h = shifted(s, h)
+        state = imp._refined_state(cfg, p_h, guess, mask)
+        return float(loss_jit(state, imp.runtime_from_params(p_h, cfg)))
+
+    # (1) the frozen-path fixed point: the implicit derivative to the finite-difference truncation error
+    h = 1e-4
+    frozen_fd = (root_value(+1, h) - root_value(-1, h)) / (2.0 * h)
+    assert frozen_fd == pytest.approx(ad, rel=1e-6)
+
+    # (2) cold re-converged equilibria
+    h = 1e-3
+    cold = [imp.solve_implicit_with_aux(shifted(s, h), cfg)[0] for s in (+1, -1)]
+    cold_fd = (float(loss_jit(cold[0], imp.runtime_from_params(shifted(+1, h), cfg)))
+               - float(loss_jit(cold[1], imp.runtime_from_params(shifted(-1, h), cfg)))) / (2.0 * h)
+    print(f"\nAD {ad:+.8e}  frozen-path FD {frozen_fd:+.8e}  cold FD {cold_fd:+.8e}  gap {(cold_fd - ad) / ad:+.2e}")
+    assert cold_fd * ad > 0.0 and abs(cold_fd - ad) < 0.25 * abs(ad)
+
+    # (3) release the gauge to its re-converged rate: the gap closes
+    def gauge(c):
+        diff = jax.tree.map(lambda a, b: a - b, c, xstar)
+        out = jax.tree.map(lambda a, b: a - b, diff, P(diff))
+        return jax.tree.map(lambda v: v.at[-1, :].set(0.0), out)  # the edge row is the boundary parameters
+
+    rate = jax.tree.map(lambda u, v: 0.5 * (u - v) / h, gauge(cold[0]), gauge(cold[1]))
+    hybrid_fd = (root_value(+1, h, rate) - root_value(-1, h, rate)) / (2.0 * h)
+    print(f"hybrid FD {hybrid_fd:+.8e}  rel to cold {(hybrid_fd - cold_fd) / cold_fd:+.2e}")
+    assert hybrid_fd == pytest.approx(cold_fd, rel=2e-3)
