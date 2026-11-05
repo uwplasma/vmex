@@ -608,6 +608,9 @@ def probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7,
     from .wout import wout_from_result
 
     _require_fixed_boundary(inp)
+    if (len(ns) != 2 or any(isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer))
+                           or n < 7 for n in ns) or ns[0] >= ns[1]):
+        raise ValueError("ns must contain two increasing integer resolutions >= 7")
     fields = []
     for n in ns:
         deck = replace(

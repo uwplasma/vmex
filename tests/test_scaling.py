@@ -766,6 +766,11 @@ def test_probe_axis_field_and_match_b0_from_input_hit_the_target():
     assert probe_axis_field(matched) == pytest.approx(1.3 * probed, rel=1e-8)
 
 
-def test_match_b0_from_input_rejects_free_boundary_decks():
+def test_input_field_rejects_free_boundary_and_invalid_probe_resolutions(monkeypatch):
     with pytest.raises(ValueError, match="coils"):
         match_b0_from_input(VmecInput.from_file(DATA / "input.cth_like_free_bdy"), 1.0)
+    monkeypatch.setattr("vmex.core.multigrid.solve_multigrid",
+                        lambda *args, **kwargs: pytest.fail("invalid probe must not solve"))
+    for ns in ((7, 7), (13, 7), (5, 13), (True, 13), (7., 13), (7,), (7, 13, 17)):
+        with pytest.raises(ValueError, match="two increasing integer resolutions"):
+            probe_axis_field(VmecInput(), ns=ns)
