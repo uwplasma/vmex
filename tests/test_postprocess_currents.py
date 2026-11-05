@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from vmex.core.postprocess import MU0, compute_currents
 
@@ -65,3 +66,31 @@ def test_full_mesh_bsubs_is_not_averaged_as_half_mesh() -> None:
         bsubsmns=bsubsmns, bsubumnc=zeros, bsubvmnc=zeros,
         xm_nyq=np.asarray([1, 2]), xn_nyq=np.asarray([0, 0]))
     np.testing.assert_allclose(currvmnc[2:-1]*MU0, -bsubsmns[2:-1]*[1, 2], rtol=1e-13)
+
+
+@pytest.mark.parametrize("ns", [17, 33, 65])
+@pytest.mark.parametrize("lasym", [False, True])
+def test_uniform_vertical_field_has_zero_current(ns, lasym):
+    """Independent curl oracle on circular tori, with s = r**2.
+
+    For B = e_Z, B_s = sin(theta)/(2*r) and B_theta = r*cos(theta).
+    The parity-aware radial derivative and full-mesh angular derivative
+    cancel exactly; averaging B_s onto a neighboring radius breaks this.
+    A poloidal rotation exercises the asymmetric block as well.
+    """
+    s = np.linspace(0.0, 1.0, ns)
+    half = np.maximum(s - 0.5 / (ns - 1), 0.0)
+    bs = np.zeros((ns, 1))
+    bs[1:, 0] = 0.5 / np.sqrt(s[1:])
+    bu = np.sqrt(half)[:, None]
+    zeros = np.zeros_like(bs)
+    currents = compute_currents(
+        bsubsmns=bs, bsubumnc=bu, bsubvmnc=zeros,
+        xm_nyq=np.array([1]), xn_nyq=np.array([0]), lasym=lasym,
+        bsubsmnc=bs if lasym else None,
+        bsubumns=-bu if lasym else None,
+        bsubvmns=zeros if lasym else None,
+    )
+    for current in currents:
+        if current is not None:
+            np.testing.assert_allclose(MU0 * current[2:-1], 0.0, atol=2e-14)

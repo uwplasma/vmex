@@ -1,8 +1,8 @@
 """Post-processed wout quantities ported from VMEC2000 output routines.
 
-Every function in this module is a direct numpy port of the corresponding
-VMEC2000 Fortran, validated against golden ``wout_*.nc`` files produced by
-VMEC2000 (hiddenSymmetries build, ``version_ = 9.0``):
+These routines follow the corresponding VMEC2000 Fortran output routines,
+with corrections to current reconstruction described below. Golden
+``wout_*.nc`` references use VMEC2000 ``version_ = 9.0``:
 
 - ``compute_currents``   : ``LIBSTELL/read_wout_mod.f90::Compute_Currents``
                            (called from ``wrout.f``); writes ``currumnc`` /
@@ -206,7 +206,11 @@ def compute_currents(*, bsubsmns, bsubumnc, bsubvmnc, xm_nyq, xn_nyq,
     Port of ``read_wout_mod.f90::Compute_Currents`` (called by ``wrout.f``).
     Inputs have shape ``(ns, mnmax_nyq)``: ``bsubs`` is on the full mesh,
     while ``bsubu`` and ``bsubv`` are on the half mesh. Outputs are full-mesh,
-    already divided by ``mu0``.
+    already divided by ``mu0``. The angular derivatives use ``bsubs`` at
+    the same full-mesh surface; averaging adjacent rows would shift these
+    terms radially. This intentionally corrects the legacy current tables,
+    so exact legacy-current parity is not expected. The stored magnetic
+    field, equilibrium solve and WOUT schema are unchanged.
     Returns ``(currumnc, currvmnc, currumns, currvmns)`` with the sine
     partners ``None`` unless ``lasym``.
     """

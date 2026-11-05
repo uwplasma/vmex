@@ -14,7 +14,10 @@ their public ``VacuumOutput`` is supplied:
   internal ``phips``/``chips`` arrays;
 - ``q_factor = 1/iotaf`` (``HUGE`` at iota zeros);
 - ``lmns`` is on the half mesh (interpolated from VMEC's internal full-mesh
-  lambda), ``bsubsmns`` on the full mesh (converted in ``jxbforce.f``);
+  lambda); ``bsubsmns`` and its LASYM partner ``bsubsmnc`` are on the
+  full mesh (converted in ``jxbforce.f``), while ``bsubu/v`` are half-mesh;
+- ``curru/v`` are full-mesh curl coefficients using this mixed-mesh
+  contract, correcting the legacy radial shift of the ``bsubs`` terms;
 - ``lasym`` partner tables (``rmns``, ``zmnc``, ...) exist **only** for
   asymmetric runs; the free-boundary potential/surface tables (``potsin``,
   ``xmpot``, ``xnpot``, ``curlabel``, ``*_sur``) only when ``lfreeb``.
@@ -289,7 +292,7 @@ class WoutData:
     bmns: np.ndarray | None = None
     bsubumns: np.ndarray | None = None
     bsubvmns: np.ndarray | None = None
-    bsubsmnc: np.ndarray | None = None
+    bsubsmnc: np.ndarray | None = None  # FULL mesh, like bsubsmns
     currumns: np.ndarray | None = None
     currvmns: np.ndarray | None = None
     bsupumns: np.ndarray | None = None
