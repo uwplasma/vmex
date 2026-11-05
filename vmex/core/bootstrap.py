@@ -765,7 +765,8 @@ def equivalent_ripple_spread(*, bmnc_b, xm_b, xn_b, iota_b, nfp, bmns_b=None,
     with ``I_j ~ int dl/B`` between consecutive maxima (omnigeneity). In Boozer angles
     ``dl/B ~ (G + iota I) dphi/B^2``, so with maxima on the field-period boundary (pwO,
     QI) this is ``J(theta_0) = <B^-2>_phi`` along the line ``theta = theta_0 + iota phi``
-    over one period. Returns ``std_theta0(J)/mean(J)`` per surface: 0 for QI/pwO
+    over one period. Returns ``sqrt(var(J)/mean(J)^2 + 1e-16)`` per surface,
+    with a dimensionless smoothing floor of ``1e-8``: the floor for QI/pwO
     with poloidally closed contours and aligned period-boundary maxima, ``O(eps)`` otherwise.
     """
     m_b, k_b = jnp.asarray(xm_b), jnp.asarray(xn_b)
@@ -778,7 +779,7 @@ def equivalent_ripple_spread(*, bmnc_b, xm_b, xn_b, iota_b, nfp, bmns_b=None,
     if bmns_b is not None:
         B = B + jnp.einsum("sk,stpk->stp", jnp.asarray(bmns_b), jnp.sin(phase))
     J = jnp.mean(B ** -2, axis=-1)
-    return jnp.sqrt(jnp.var(J, axis=-1) + 1e-16) / jnp.mean(J, axis=-1)
+    return jnp.sqrt(jnp.var(J, axis=-1) / jnp.mean(J, axis=-1) ** 2 + 1e-16)
 
 
 class BootstrapGeometricResidual(_ResidualTerm):
