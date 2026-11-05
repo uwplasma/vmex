@@ -24,18 +24,12 @@ def transport_response(state, _runtime):
                 boundary_kappa_m_s=jnp.inf)
 
 
-def main():
-    """Minimize residence over a declared diffusion interval in SI units."""
-    seed = [0.5]
-    initial = opt.HeliumAshObjective(transport_response, 1., "diffusion only; fixed geometry/source/sink")
-    reference = float(initial.evaluate_state(seed, None).mean_occupation_s)
-    objective = opt.HeliumAshObjective(transport_response, reference, initial.gradient_scope)
-    residual = jax.jit(lambda x: objective(x, None))
-    result = least_squares(residual, seed, bounds=([.2], [2.]))
-    cost = float(objective.total_state(result.x, None))
-    print(f"D = {result.x[0]:.6g} m^2/s; normalized occupation = {cost:.6g}")
-    return result, cost
-
-
-if __name__ == "__main__":
-    main()
+seed = [0.5]
+initial = opt.HeliumAshObjective(transport_response, 1., "diffusion only; fixed geometry/source/sink")
+reference = float(initial.evaluate_state(seed, None).mean_occupation_s)
+objective = opt.HeliumAshObjective(transport_response, reference, initial.gradient_scope)
+residual = jax.jit(lambda x: objective(x, None))
+jacobian = jax.jit(jax.jacrev(residual))
+result = least_squares(residual, seed, jac=jacobian, bounds=([.2], [2.]))
+cost = float(objective.total_state(result.x, None))
+print(f"D = {result.x[0]:.6g} m^2/s; normalized occupation = {cost:.6g}")

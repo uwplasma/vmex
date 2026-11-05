@@ -112,7 +112,6 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
-    "examples/optimization/helium_ash_objective.py": "optional ESSOS residence API; exercised in test_ash_objective.py",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -129,6 +128,7 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/helium_ash_objective.py": "optional ESSOS residence API; exercised in test_problem.py",
     "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
 }
 
