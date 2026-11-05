@@ -466,11 +466,14 @@ precession. It optimizes scalar or correlated feasible-flow trials and bounds
 the angular integration remainder. The [model and SI units](docs/explanation/confinement.rst#full-coulomb-stellarator-proxy)
 specify its collision normalization and orbit assumptions. Select it in the
 same example with `VMEX_HEAT_BOUND_MODEL=coulomb`.
+The [retained QA boundary and endpoint checks](docs/explanation/confinement.rst#reconstructing-the-boundary)
+provide a reproducible six-case constrained optimization comparison.
 
 A stellarator's confinement is set as much by neoclassical transport as by its shape. Collisions and drifts in the 3-D
 field fix the radial electric field, the bootstrap current that changes the rotational transform, and a 1/ν
 loss channel that tokamaks do not have. `vmex --neoclassical` (needs `vmex[neoclassical]`) runs the drift-kinetic solver
-[DKX](https://github.com/uwplasma/DKX) on a solved equilibrium and returns all three:
+[DKX](https://github.com/uwplasma/DKX) on a solved equilibrium and returns:
+
 - the monoenergetic coefficients `D11*`, `D31*`, `D33*` against collisionality;
 - the ambipolar root `E_r(r)`;
 - the particle and heat fluxes of each species at that root;

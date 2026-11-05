@@ -1048,6 +1048,22 @@ are :math:`15/[16\sqrt{2/\pi}]` and :math:`16\sqrt{2/\pi}/5`, respectively.
 The tests also check invariant coupling, nested trial and inverse-majorant
 spaces, complex Fourier data and derivatives of moving constraint charts.
 
+With velocity normalized to the thermal speed, define
+:math:`q=(2/\sqrt{5})v_\parallel(v^2-5/2)` and
+:math:`D_q=\langle q,A_C^\dagger q\rangle` at unit collision strength.
+The usual parallel ion conductivity coefficient is
+:math:`\widehat\kappa=(10/3)\sqrt{2/\pi}\,D_q`; two Sonine polynomials
+give :math:`125/32`. This conversion distinguishes the normalized collision
+response from the conventional conductivity coefficient.
+
+Near a quasisymmetric magnetic axis, a regular expansion must retain the
+constant parallel flow allowed by the leading collision equation. The
+next-order momentum equation selects it. Imposing zero mean flow instead
+generally changes the leading heat response. This is another reason to
+enforce the local moment equations rather than remove their nullspace.
+Regular finite-collision expansions and the trapped-particle
+low-collision limit require separate orderings.
+
 Signed observables require an adjoint estimate. For
 :math:`(A_C-K)z=J`, feasible primal and adjoint residual fluxes with norms
 :math:`\eta_g,\eta_z` give
@@ -1257,7 +1273,11 @@ Checking an optimized boundary
 
 Compare seed and candidate at the same physical density, temperature and
 electric field. Their normalized :math:`\nu`, :math:`E_*` and diffusivity
-units generally differ. If separate feasible trials give a seed lower
+units generally differ. These are fixed local operating values with
+:math:`A_1=0`; the complete pressure profile and an ambipolar electric field
+are not determined by this comparison. The example uses vacuum MHD
+equilibria and prescribes its kinetic profiles for transport evaluation.
+If separate feasible trials give a seed lower
 value :math:`L_s` and candidate upper value :math:`U_c` in m²/s, then
 :math:`\chi_c/\chi_s\le U_c/L_s` when :math:`L_s>0`.
 This comparison measures the response decrease independently of how tight
@@ -1265,34 +1285,143 @@ the inexpensive optimization objective is.
 
 A 48-coefficient vacuum QA boundary search from the unperturbed
 `Landreman--Paul configuration <https://doi.org/10.1103/PhysRevLett.128.035001>`_
-uses six fixed deuterium operating points at 100 eV and 1 keV. Eighty
-L-BFGS-B iterations with augmented Lagrangian constraints reduce the
-refined scalar upper values by about 29.5% and 20.4%, respectively.
-Aspect ratio, volume and rotational transform at :math:`s=0.25,0.5,0.75`
-remain within 0.1% of their seed values; flux and the constant radial
-boundary coefficient are fixed. Refining the equilibrium from 50 radial
-surfaces and ``mpol=8`` to 74 surfaces and ``mpol=10``, with Boozer
-bandwidth increased from 12 to 16, changes these upper values by less
-than 0.01% at :math:`s=0.5`.
+uses six fixed deuterium operating points at 100 eV and 1 keV. It fixes
+flux and the constant radial boundary coefficient and constrains aspect
+ratio, volume and rotational transform at :math:`s=0.25,0.5,0.75` within
+0.1% of their seed values. Select operating points to cover the intended
+domain; every endpoint comparison uses its own physical normalization and
+equilibrium refinement.
 
-Separate continuous-velocity trial calculations on the fitted
-:math:`J(16,20)` fields establish a response decrease of at least 26.2%
-throughout :math:`T=100` eV, :math:`\ln\Lambda=15`,
-:math:`n\in[1.35,1.65]\,10^{20}` m⁻³ and
-:math:`|E_r|\le100` V/m. At the separate point :math:`T=1` keV,
-:math:`n=10^{20}` m⁻³, :math:`\ln\Lambda=17`, :math:`E_r=0`, the seed
-lower value is 0.04582915931 m²/s and the candidate upper value is
-0.04285529594 m²/s, giving at least 6.489% decrease. These tighter
-offline trials are distinct from the compact runtime lower endpoint.
-Angular remainders are included; floating rounding and transfer to the
-untruncated magnetic field remain outside these enclosures.
+.. COULOMB_ENDPOINT_RESULTS
 
-The first design's compact upper value becomes much larger at a held-out
-10 keV operating point. This shows loss of useful bound control there;
-it does not establish an increase of the kinetic response. Include the
-intended collision and electric-field range in the objective, then check
-both endpoints with refined geometry and an independently resolved
-kinetic calculation before adopting the boundary.
+The retained boundary below passes the ``ns=50`` equilibrium refinement with
+``mpol=ntor=10``, a 40-by-40 equilibrium angular grid, Boozer bandwidth 16
+and finite-J band ``(16, 20)``. The maximum relative constraint change is
+0.06420%; the seed and candidate projected force residuals are below
+:math:`1.2\,10^{-13}`. At :math:`s=0.5`, the scalar upper values are:
+
+.. list-table:: Refined upper objectives in m²/s
+   :header-rows: 1
+   :widths: 14 20 22 22 22
+
+   * - :math:`T` (eV)
+     - :math:`E_r` (V/m)
+     - Seed upper
+     - Candidate upper
+     - Upper decrease
+   * - 100
+     - 0
+     - 0.05828122
+     - 0.04025793
+     - 30.92%
+   * - 100
+     - ±100
+     - 0.05828123
+     - 0.04025793
+     - 30.92%
+   * - 1000
+     - 0
+     - 0.45618132
+     - 0.35837079
+     - 21.44%
+   * - 1000
+     - ±1000
+     - 0.45630635
+     - 0.35847936
+     - 21.44%
+
+The cold cases use :math:`n=1.5\,10^{20}` m⁻³ and :math:`\ln\Lambda=15`;
+the warm cases use :math:`n=10^{20}` m⁻³ and :math:`\ln\Lambda=17`.
+At 100 eV and zero field, the seed lower value is 0.04558378 m²/s.
+Its separation from the candidate upper implies at least an 11.68%
+decrease of the specified heat response. The compact warm intervals
+overlap. These are floating-point evaluations of continuous bounds on
+the stated finite-J fields. Their gap excludes physical-field fitting
+error and floating-point rounding. The boundary recipe and example
+reproduce this comparison.
+
+Repeating the endpoint checks with ``FINAL_NS=74`` in the example changes
+each of these six upper values by less than 0.010% relative to ``ns=50``.
+The cold and warm upper decreases remain 30.92% and 21.44%, respectively.
+The largest relative constraint change is 0.06629%, and both projected
+force residuals are below :math:`2.1\,10^{-13}`, with no Jacobian sign
+reversal. At 100 eV and zero field the seed lower and candidate upper
+become 0.04558505 and 0.04026193 m²/s, establishing at least an 11.67%
+decrease within this model. This radial refinement is an observed
+stability check, not an equilibrium-discretization error bound.
+
+The example reports the upper objectives and all five relative constraint
+changes. Its acceptance flag concerns this stated comparison. A sharper
+response assessment can enrich compatible trials at fixed geometry and
+collision majorant; adding toroidal harmonics may matter even when poloidal
+enrichment has saturated. Check the local collision moments again for each
+new trial family. The analytic angular remainder, floating rounding and
+transfer to a different magnetic field remain separate errors.
+
+An upper objective that becomes large at a held-out operating point
+indicates loss of useful bound control there. It does not establish an
+increase of the kinetic response. Check both endpoints with refined
+geometry and an independently resolved kinetic calculation before
+adopting the boundary.
+
+.. _coulomb-boundary-example:
+
+Reconstructing the boundary
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following recipe writes the retained search endpoint from the bundled
+unperturbed seed. Each row is ``(n, m, RBC, ZBS)``, with boundary coefficients
+in metres. Run it from the repository root, then apply the endpoint checks
+above. The native input has SHA-256
+``3462ecbd4380a8c1d300c34e64cc4a488896dd7949f3765647da6be067293b9f``.
+
+.. code-block:: python
+
+   from dataclasses import replace
+   import numpy as np
+   from vmex import VmecInput
+
+   seed = VmecInput.from_file(
+       "examples/data/input.LandremanPaul2021_QA_reactorScale_lowres")
+   seed = seed.change_resolution(mpol=8, ntor=8, ntheta=32, nzeta=32)
+   seed = replace(seed, delt=.7, ns_array=np.array([26]),
+                  ftol_array=np.array([1.e-16]), niter_array=np.array([9000]))
+   rows = [
+       (1, 0, 1.9064422466369999, -1.2717444403250922),
+       (2, 0, 0.1476500390007488, -0.14746788615691736),
+       (3, 0, 0.0018406503104060517, -0.0040993556299859521),
+       (-3, 1, 0.0096989209621897374, 0.0065806954120303943),
+       (-2, 1, 0.058217494048338828, 0.062583612808483263),
+       (-1, 1, 0.39142936145197327, 0.30144754643462107),
+       (0, 1, 1.594901416557253, 2.431203441748),
+       (1, 1, -1.0928541760753896, 1.0222265191955899),
+       (2, 1, -0.27374155746879725, 0.21538510766550095),
+       (3, 1, -0.025452927795619099, 0.022604425382304758),
+       (-3, 2, -0.00064697001239291002, -0.0010071515259912577),
+       (-2, 2, 0.006438238423242813, 0.0092116460650563219),
+       (-1, 2, 0.053852798276748444, 0.0083805736939911567),
+       (0, 2, 0.18828732922468697, 0.17096640715286199),
+       (1, 2, 0.25271545445405619, 0.044091999570264072),
+       (2, 2, 0.055954727436566196, -0.051939931557914945),
+       (3, 2, 0.020099038045834072, -0.018246156105023652),
+       (-3, 3, 0.00024787252381497902, -0.0014337242687387029),
+       (-2, 3, 0.0031344060215325298, 0.003085192461101849),
+       (-1, 3, -0.011828772796366745, -0.018800328415144677),
+       (0, 3, -0.013591653359483487, 0.014461732269095485),
+       (1, 3, -0.006624854825894172, 0.020563318848362558),
+       (2, 3, 0.0012170244651980371, 0.01226530956399784),
+       (3, 3, -0.010785154199466391, 0.0085719040380534198),
+   ]
+   rbc, zbs = seed.rbc.copy(), seed.zbs.copy()
+   for n, m, r, z in rows:
+       rbc[seed.ntor + n, m], zbs[seed.ntor + n, m] = r, z
+   replace(seed, rbc=rbc, zbs=zbs).to_indata("input.QA_retained")
+
+.. code-block:: console
+
+   VMEX_HEAT_BOUND_MODEL=coulomb VMEX_HEAT_BOUND_INCLUDE_HOT=0 \
+   VMEX_HEAT_BOUND_MAX_MODE=3 VMEX_HEAT_BOUND_CANDIDATE="$PWD/input.QA_retained" \
+     python examples/optimization/QA_optimization_heat_bounds.py
 
 Bootstrap current (Redl)
 ------------------------

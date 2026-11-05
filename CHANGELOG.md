@@ -8,7 +8,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
   Continuous-pitch bounds and analytic Maxwell moments enclose the Lorentz response; shared assembly preserves validated values and derivatives, with geometry and model errors separate.
 - Add conserving collision-form and signed-response bounds with local moments, continuous inverse majorants and differentiable constraint charts for full Coulomb collision models.
 - Add a full-Coulomb stellarator heat objective with scalar and correlated feasible flows, stable residual norms, bounded angular-integration remainder and SI Boozer adapter.
-  Extend the existing optimization example; the single-species model retains passing/trapped particles and incompressible electric precession.
+  Extend the existing optimization example with constrained SLSQP, bounded continuation with residual checks, endpoint derivative checks and supplied-boundary validation; the single-species model retains passing/trapped particles and incompressible electric precession.
 
 ## 0.13.0 - 2026-11-03
 
