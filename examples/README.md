@@ -1,5 +1,10 @@
 # Examples
 
+`near_axis_initial_guess.py` uses the optional pyQSC or pyQIC VMEC writer and
+a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
+stellarator-symmetric first-order QA example; it does not constrain the
+converged equilibrium to the near-axis expansion or differentiate the generator.
+
 All runnable examples live under this single `examples/` tree. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
