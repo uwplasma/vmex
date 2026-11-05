@@ -281,9 +281,9 @@ Warm free value and gradient     3.860         1.574
 Warm coupled-root value          2.936         0.945
 ===============================  ============  ============
 
-The first call includes the initial root and compilation; it is not an
-isolated compiler timing. The value-only samples follow the gradient and
-include root anchoring. Four warm samples alternate multipliers 1 and
+The first call includes the initial root and compilation or cache loading;
+it is not an isolated compiler timing. The value-only samples follow the
+gradient and include root anchoring. Four warm samples alternate multipliers 1 and
 ``1+1e-5``. CPU/GPU values and current derivatives agree to ``5.4e-13``
 and ``5.8e-12`` relatively. Central differences with step ``2e-5`` agree
 with both adjoints to ``7.1e-9`` relatively.
@@ -298,14 +298,61 @@ results do not describe the older coupled-GCROT adjoint or establish a
 
 Actual JAX traces were also recorded for the warm free gradient. The CPU
 traced gradient took 4.96 s versus the untraced 3.86 s median, so trace
-overhead is material. These are JAX host/device timelines, not a separate
-Nsight kernel study.
+overhead is material. The GPU trace took 2.31 s versus the untraced
+1.57 s median. These are JAX host/device timelines, not a separate Nsight
+kernel study.
 
 A single equilibrium currently runs on one device. ``vmex.parallel``
 threads independent equilibria; it does not partition one equilibrium
 across hosts. No exclusive full-node or multi-node scaling is established
 by this qualification. The older 0.9.1 GPU matrix above remains a dated
 record of that source and software stack.
+
+Controlled forward-cache qualification (2026-11-04)
+---------------------------------------------------
+
+A separate forward solve at the same source, precision and hardware used
+``input.LandremanPaul2021_QA_lowres``: ``mpol=ntor=8``, the complete
+16/31/50 radial ladder, and ``ftol=1e-12`` broadcast to all three rungs.
+Every final rung converged in 414 iterations; this is the final-rung
+count, not the total over the ladder. Each device first used a distinct
+empty persistent-cache directory, then a fresh process reloaded that
+same directory. Warm entries are medians of three subsequent solves in
+the same process, including output serialization.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 22 22 22
+
+   * - Process/cache state
+     - First solve (s)
+     - Backend compile (s)
+     - Warm solve (s)
+   * - CPU, empty cache
+     - 25.14
+     - 12.39
+     - 7.95
+   * - CPU, fresh-process reload
+     - 11.51
+     - 0.315
+     - 8.11
+   * - GPU, empty cache
+     - 48.00
+     - 39.63
+     - 3.87
+   * - GPU, fresh-process reload
+     - 8.94
+     - 0.812
+     - 3.85
+
+The compile column sums JAX backend-compile event durations; tracing,
+lowering, cache loading and root execution remain in the first-solve
+column. It is not the complete compiler overhead. CPU runs used eight
+affinity slots. Reloaded CPU runs limited to four or one slot had warm
+medians 6.85 s and 4.47 s, respectively, with the same final iteration
+count and converged residuals. This workload does not benefit from giving
+one solve all eight slots. It motivates bounded independent ensembles;
+it does not establish a general thread default or multi-node root scaling.
 
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
