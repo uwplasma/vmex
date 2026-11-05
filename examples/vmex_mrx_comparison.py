@@ -8,11 +8,12 @@ so magnetic surfaces and the rotational transform are outputs, read off
 traced field lines. Agreement between the two is a check on both.
 
 The deck is the 2.5 % beta Landreman-Paul QA with a bootstrap current. Near
-the magnetic axis VMEX needs many radial surfaces at this beta: iota at
-rho = 0.1 moves 0.200 -> 0.188 -> 0.176 -> 0.166 for ns = 33, 65, 129, 257,
-where DESC gives 0.166. To keep the run short this example stops at ns = 65
-and MRX starts from that field, inheriting its near-axis iota; extend
-NS_ARRAY to 129 or 257 to see iota near the axis move toward DESC.
+the magnetic axis VMEX's iota is resolution dependent: at rho = 0.1 the
+recorded sequence is 0.200, 0.188, 0.176, 0.166 for ns = 33, 65, 129, 257.
+A matched, converged reference remains unresolved. This example stops at
+ns = 65 and MRX starts from that field, inheriting its near-axis iota.
+MRX reconstructs weak pressure instead of imposing VMEX's pressure profile,
+so this is a shared-seed consistency check, not matched-profile validation.
 
 The figure shows (a-c) VMEX flux surfaces and MRX Poincare points at three
 toroidal angles, (d) iota, (e) the enclosed toroidal current, and (f) the
