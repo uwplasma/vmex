@@ -210,6 +210,9 @@ def saturate(equilibrium, seeds, label):
             fluxes.append(float(diagnostics.heat_flux_t[-1]))
             wphi.append(float(diagnostics.Wphi_t[-1]))
             wg.append(float(diagnostics.Wg_t[-1]))
+            if not np.isfinite([times[-1], fluxes[-1], wphi[-1], wg[-1]]).all():
+                raise FloatingPointError(
+                    f"tube {tube} produced non-finite diagnostics at step {(chunk + 1) * SAMPLE_STEPS}")
             decision = saturation_stop_decision(
                 times, fluxes, guard=wphi, free_energy_guard=wg,
                 config=SaturationStopConfig(rel_sem=SATURATION_REL_SEM))
