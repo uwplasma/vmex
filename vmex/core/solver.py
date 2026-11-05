@@ -2429,9 +2429,9 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     stop = STOP_HOOK.get()
     # Prefetched-executable consumption + compile attribution.  The
     # structural key selects a background-compiled standalone executable
-    # when one exists (identical lowering — bit-identical iterations); a
-    # first-time structure without one is compiled on demand by the jitted
-    # lane, and the notice makes that pause attributable on screen.
+    # when one exists (identical lowering — bit-identical iterations).
+    # Otherwise bind the cached lane once, avoiding per-block structure work.
+    # The notice makes a first-time compile attributable on screen.
     executable = None
     if not jax.config.jax_disable_jit:
         key = _lane_signature("block_fft" if use_fft else "block", carry, rt)
@@ -2440,6 +2440,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+        if executable is None:
+            try:
+                with placement_neutral((carry, rt)):
+                    executable = lane.executable(carry, rt)
+            except Exception:
+                pass
     # Committed arguments already fix placement, so keep the caller's
     # default-device context out of the lane's jit key: a construction solve
     # and trial solves run inside a device context then share one executable.
@@ -2452,6 +2458,9 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             try:
                 carry = step(executable, carry)
             except Exception:
+                if any(getattr(leaf, "is_deleted", bool)()
+                       for leaf in jax.tree.leaves(carry)):
+                    raise
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.
