@@ -84,7 +84,8 @@ that research budget as one commented set of constants next to the default.
     `vj.essos_tracing_fields` (ESSOS coils, tabulated exterior field); the
     direct exterior field checks the table.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
-    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    [MRX](https://github.com/ToBlick/mrx) (install the source revision in
+    `vmex_mrx_comparison.py`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
     current, and the pressure with VMEX at ns = 65. Without MRX it exits after
     printing the install command.
