@@ -571,7 +571,7 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
 
     def velocity(y):
         _, j_s, j_alpha, tau = fields(y)
-        return jnp.stack([j_alpha, -j_s]) / tau
+        return jnp.stack([j_alpha, -j_s]) / (1.0 if length is not None else tau)
 
     def rhs(y):
         # The LCFS absorbs: the drift fades out over 0.02 in s beyond it, so a
@@ -579,7 +579,8 @@ def drift_orbits(action, bounce_time, s, alpha, s0, alpha0=0.0, *,
         v = velocity(y)
         if length is not None:  # unit speed in the (s cos alpha, s sin alpha) plane
             # slow down near stagnation points of J, where the direction is undefined
-            v = v / jnp.sqrt(v[0] ** 2 + (y[0] * v[1]) ** 2 + (0.1 * speed) ** 2)
+            v = v / jnp.sqrt(jnp.maximum(
+                v[0] ** 2 + (y[0] * v[1]) ** 2 + (0.1 * speed) ** 2, jnp.finfo(dtype).tiny))
         return (0.5 - 0.5 * jnp.tanh((jnp.abs(y[0]) - 1.0) / 0.02)) * v
 
     grid = jnp.stack(jnp.broadcast_arrays(
