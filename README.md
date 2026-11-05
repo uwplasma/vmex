@@ -521,14 +521,21 @@ takes about a minute.
   metrics with it.
 
 **Stellarator** (finite-beta QA, prescribed toroidal current, no certificate yet).
-`python examples/prescribed_current_polishing.py` takes 46 s on a laptop (9 s for the solve, 16 s
-for the polish).
+`python examples/prescribed_current_polishing.py` uses 300 L-BFGS iterations at `ns = 51`,
+`mpol = 5`, `ntor = 4`. One Apple M3 Max CPU run (JAX 0.12.0.1, populated compilation cache) took
+1.8 s for the discrete solve and 4.8 s for polishing; export and readback are additional work.
 
 <img src="docs/_static/figures/readme_polish_stellarator.webp" alt="Force over pressure gradient of the finite-beta QA stellarator before and after polishing">
 
-- The RMS force relative to the pressure gradient falls 12× near the axis, 9× in the bulk and
-  20× at the edge on a held-out grid.
-- L-BFGS stops at |grad| = 4.6e-4 after 150 iterations: a forward result, not a converged one.
+- The RMS force relative to the pressure gradient falls 18× near the axis, 14× in the bulk and
+  30× at the edge on a held-out grid. The final ratios are 0.52, 0.24 and 0.82; these remain
+  substantial force errors, not a high-accuracy equilibrium.
+- L-BFGS stops at |grad| = 1.9e-4 after 300 iterations: a forward result, not a converged one.
+- Experimental WOUT snapshots at `ns = 129, 257` recompute the current on the export mesh.
+  Their serialized profiles preserve at least a 10× reduction after readback, within 2% of
+  the native regional ratios. The files retain `ier_flag = 2` (not converged), include the
+  actual discrete residuals, and come with input decks. They have no stationarity, continuum
+  or implicit-gradient certificate; consumers requiring converged WOUTs should reject them.
 
 `vmex.core.strong_force.traced_lift` is the differentiable form of the lift, for force-balance
 certificates inside gradient-based objectives.

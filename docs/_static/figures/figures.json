@@ -753,22 +753,22 @@
     },
     {
       "path": "docs/_static/figures/readme_polish_stellarator.webp",
-      "bytes": 30648,
-      "sha256": "63582a134fd1c4aa27c63335fa8bc0c88b0fac2174e66186d5a9bd90b73ad61f",
+      "bytes": 30200,
+      "sha256": "5b32185af978f7b6ddb37ecc004915293d37060ad10dad856c467f82c8fccccd",
       "generator": "examples/prescribed_current_polishing.py",
       "command": "python examples/prescribed_current_polishing.py",
       "inputs": [
         "examples/data/input.LandremanPaul2021_QA_beta0p5_bootstrap"
       ],
       "record": null,
-      "generated": "2026-10-19",
+      "generated": "2026-11-04",
       "hardware": "Apple M3 Max (arm64), macOS, CPU",
       "reproducible": "command",
       "bytes_verified": true,
       "used_in": [
         "README.md"
       ],
-      "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after the prescribed-current polish of the finite-beta QA (laptop defaults: mpol 5, ntor 4, ns 51, 150 L-BFGS iterations). Lossless WebP; rerunning the command reproduces these bytes."
+      "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after prescribed-current polishing of the finite-beta QA (mpol 5, ntor 4, ns 51, 300 L-BFGS iterations). Raw final ratios are 0.52, 0.24 and 0.82; no stationarity or continuum certificate. Lossless WebP; numerical and rendering dependencies affect exact bytes."
     },
     {
       "path": "docs/_static/figures/readme_pwo.webp",

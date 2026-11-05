@@ -11,21 +11,25 @@ QA of Landreman, Buller and Drevlak (its file keeps a legacy name).
 It reports the force over pressure-gradient RMS on a finer held-out grid, by
 region, before and after, and saves a bar chart.  This is a forward
 experiment: there is no stationarity certificate (unlike the axisymmetric
-polish), and no WOUT is exported, because the field needs the functional
-``chi(rho)``, not the geometry's ``chipf`` placeholder.
+polish). Experimental WOUT snapshots recompute the current closure on their
+export mesh and retain ``ier_flag = 2`` (not converged). Their serialized
+profiles are checked after reading the files back; this is not certification.
 """
 import os
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 
+import jax
 import numpy as np
 import vmex
 from _polish_figure import polish_figure
 from vmex.core.polish import (
-    evaluate_prescribed_current_force, make_variational_plan, polish_prescribed_current,
+    evaluate_prescribed_current_force, evaluate_tensorized_strong_force,
+    make_variational_plan, polish_prescribed_current, polished_wout_state,
 )
-from vmex.core.solver import prepare_runtime
+from vmex.core.solver import evaluate_forces, prepare_runtime, resolution_from_input
 from vmex.core.strong_force import lift_high_order_state
 
 INPUT_FILE = Path(__file__).parent / "data" / "input.LandremanPaul2021_QA_beta0p5_bootstrap"
@@ -38,14 +42,16 @@ if os.environ.get("VMEX_EXAMPLES_CI") == "1":
 #   NS, SPANS, STEPS = 241, 8, 3000
 #   ANGLES, CURRENT_ANGLES = (48, 40), (64, 48)
 MPOL, NTOR, NTHETA, NZETA = 5, 4, 32, 24
-NS, SPANS, STEPS = 51, 4, 150
+NS, SPANS, STEPS = 51, 4, 300
 ANGLES, CURRENT_ANGLES = (24, 20), (32, 24)
 PRINT_EVERY = 10
+EXPORT_NS = (129, 257)
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 if os.environ.get("VMEX_EXAMPLES_CI") == "1":
     MPOL, NTOR, NTHETA, NZETA = 3, 1, 12, 8
     NS, SPANS, STEPS = 9, 2, 3
     ANGLES, CURRENT_ANGLES = (12, 8), (16, 12)
+    EXPORT_NS = (129,)
 
 ###############################################################################
 # End of input parameters.
@@ -83,13 +89,19 @@ current_grid = make_variational_plan(native, radial_order=9,
 before = evaluate_prescribed_current_force(native, heldout, inp, current_plan=current_grid)
 after = result.samples(heldout)
 regions = (("axis", 0.0, 0.1), ("bulk", 0.1, 0.9), ("edge", 0.9, 1.0))
-ratios = np.zeros((2, len(regions)))
-for j, (label, lo, hi) in enumerate(regions):
-    for i, samples in enumerate((before, after)):
-        weights = native.jacobian_sign * np.asarray(samples.sqrt_g) * heldout.quadrature_weights
-        weights *= ((heldout.rho**2 >= lo) & (heldout.rho**2 < hi))[:, None, None]
-        ratios[i, j] = np.sqrt(np.sum(weights * np.sum(np.asarray(samples.force)**2, axis=-1))
-                               / np.sum(weights * np.asarray(samples.grad_pressure_norm)**2))
+
+def regional_force(samples, plan):
+    """Volume RMS force over pressure-gradient RMS in each declared region."""
+    values = []
+    for _, lo, hi in regions:
+        weights = native.jacobian_sign * np.asarray(samples.sqrt_g) * plan.quadrature_weights
+        weights *= ((plan.rho**2 >= lo) & (plan.rho**2 < hi))[:, None, None]
+        values.append(np.sqrt(np.sum(weights * np.sum(np.asarray(samples.force)**2, axis=-1))
+                              / np.sum(weights * np.asarray(samples.grad_pressure_norm)**2)))
+    return np.asarray(values)
+
+ratios = np.stack([regional_force(samples, heldout) for samples in (before, after)])
+for j, (label, _, _) in enumerate(regions):
     print(f"{label} force/pressure-gradient RMS: {ratios[0, j]:.6g} -> {ratios[1, j]:.6g}")
 print(f"discrete solve {solve_seconds:.2f} s; polish including setup {result.seconds:.2f} s; "
       f"{result.iterations} iterations; optimizer_converged={result.optimizer_converged}")
@@ -112,3 +124,38 @@ ratio_label = r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$ / RMS $|\nabla p|$"
 polish_figure(figure_path, profiles, {"VMEC solve": ratios[0], "polished": ratios[1]}, names,
               ratio_label, ratio_label, bar_format="%.2g", headroom=4.0)
 print(f"Wrote {figure_path}")
+
+### Experimental files: retain the failed convergence status ##################
+
+for ns in EXPORT_NS:
+    export_started = perf_counter()
+    export_input = replace(inp, ns_array=np.array([ns]))
+    state = polished_wout_state(result.geometry, export_input, solve_ns=ns)
+    runtime = prepare_runtime(export_input, resolution_from_input(export_input, ns=ns))
+    _, residual, _ = jax.jit(evaluate_forces)(state, runtime)
+    wout = vmex.wout_from_state(inp=export_input, state=state, converged=False,
+        fsqr=float(residual.fsqr), fsqz=float(residual.fsqz), fsql=float(residual.fsql))
+    with TemporaryDirectory(dir=OUTPUT_DIR) as temporary:
+        candidate = vmex.write_wout(Path(temporary) / f"wout_qa_current_polish_ns{ns}.nc", wout)
+        stored = vmex.read_wout(candidate)
+        reloaded = vmex.high_order_state_from_wout(stored, inp=export_input, degree=5, max_spans=32)
+        basis = np.asarray(reloaded.radial_basis.basis_matrix(np.linspace(0.0, 1.0, ns)))
+        # The NCURR=1 lift recomputes chi. Check the actual file profiles too.
+        fit = lambda values: np.linalg.lstsq(basis, np.asarray(values), rcond=None)[0]  # noqa: E731
+        reloaded = replace(reloaded, pressure=fit(stored.presf),
+            phipf=fit(stored.phipf / (2 * np.pi * native.jacobian_sign)),
+            chipf=fit(stored.chipf / (2 * np.pi * native.jacobian_sign)))
+        check = make_variational_plan(reloaded, radial_order=9,
+            ntheta=2 * ANGLES[0], nzeta=2 * ANGLES[1])
+        readback = regional_force(evaluate_tensorized_strong_force(reloaded, check), check)
+        if not np.isfinite(readback).all() or int(stored.ier_flag) != 2:
+            raise RuntimeError("experimental WOUT readback is invalid")
+        if os.environ.get("VMEX_EXAMPLES_CI") != "1":
+            np.testing.assert_allclose(readback, ratios[1], rtol=0.02, atol=0.0)
+            if np.any(ratios[0] / readback < 10):
+                raise RuntimeError("experimental WOUT did not preserve a 10x force reduction")
+        path = OUTPUT_DIR / candidate.name
+        candidate.replace(path)
+    export_input.to_indata(OUTPUT_DIR / f"input.qa_current_polish_ns{ns}")
+    print(f"Experimental WOUT ns={ns}: force/pressure-gradient RMS {readback}; "
+          f"ier_flag=2, NOT CONVERGED; {perf_counter() - export_started:.2f} s; wrote {path}")
