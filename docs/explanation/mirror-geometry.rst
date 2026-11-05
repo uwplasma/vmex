@@ -465,6 +465,13 @@ device-normalized strong force plateaus at ``0.5733 -> 0.356 -> 0.333``, above
 ``(ns, mpol) = (7, 4)`` lowers it to ``0.2271``; the ``(9, 5)`` rung was stopped
 at the resource gate.
 
+Those historical threshold comparisons use the device-length units, not the
+current minor-radius normalization described above. Reproducing the 16-control
+case with the current diagnostic gives ``0.57328`` in device units and
+``0.0069421`` in minor-radius units. A coarse-grid value below the current
+nominal threshold does not establish radial convergence or an independent
+continuum-force certificate; the rotating lane remains in extended validation.
+
 A beta-zero ablation at ``ns=5``, ``mpol=3``, 32 controls (same record) localizes
 the floor to the racetrack geometry rather than to pressure or current: the
 rotating ellipse gives ``0.430`` with current and ``0.424`` without; a fixed
