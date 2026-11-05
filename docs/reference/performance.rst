@@ -354,6 +354,39 @@ count and converged residuals. This workload does not benefit from giving
 one solve all eight slots. It motivates bounded independent ensembles;
 it does not establish a general thread default or multi-node root scaling.
 
+Bounded CPU ensemble throughput (2026-11-04)
+--------------------------------------------
+
+The existing ``vmex.parallel.ProcessWorkers`` also ran eight independent
+QA members at the preceding resolution and tolerance, with ``PHIEDGE``
+multipliers ``1 + 1e-4 * (i - 3.5)`` for ``i=0,...,7``. Each layout kept
+one process pool. The first eight-member batch includes startup and cache
+reload and is excluded below; entries are medians of two warm batches.
+These calls use ``solve_multigrid`` without WOUT serialization.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 55 45
+
+   * - Workers by cores each
+     - Eight-member warm batch (s)
+   * - 1 by 1
+     - 52.536
+   * - 1 by 8
+     - 75.859
+   * - 4 by 2
+     - 14.539
+   * - 8 by 1
+     - 8.781
+
+All 96 solves converged in 414 final-rung iterations. In the final warm
+batch, all six state fields for all eight members were bitwise identical
+across the four layouts. Eight single-core workers delivered 5.98 times
+the throughput of the single-core serial layout within the eight reserved
+physical cores and a 12 GiB hard memory cap. This is a balanced fixed-boundary
+ensemble result; it does not set a general thread default or distribute
+one equilibrium across devices or hosts.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
