@@ -218,174 +218,32 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
-CPU/GPU derivative qualification (2026-11-04)
----------------------------------------------
+Measuring a workload
+--------------------
 
-Source ``d8791437``, JAX 0.12.0.1, SOLVAX 0.35.0, Boozer transform
-0.5.0, float64. The same Linux host supplied an RTX A4000 and eight
-CPU affinity slots on a Xeon W-2295 (18 physical cores, 36 logical CPUs).
-Other jobs remained active; these are bounded shared-host measurements.
-The persistent compilation cache was not cleared or isolated. First-call
-times therefore include compilation or cache loading, with prior cache
-contents uncontrolled; they are not clean-cache compile measurements.
-Every output pytree was synchronized before stopping the timer.
+Device choice depends on resolution, objective, hardware and software versions.
+Time the complete solve, gradient or residual Jacobian used by your optimizer,
+including host callbacks and transfers. Synchronize JAX results before stopping
+wall-clock timers, and check convergence and derivative agreement before
+comparing performance.
 
-The fixed-boundary case uses ``input.minimal_seed_nfp2``, with
-``RBC(-1,1)=-0.05``, ``ZBS(-1,1)=0.05``, ``DELT=0.5``, nine radial
-surfaces, ``mpol=ntor=3``, angular grid 12 by 10, ``ftol=1e-10`` and
-1600 iterations. ``max_mode=1`` supplies eight decision variables.
-The scalar loss is aspect ratio squared plus 1000 times magnetic well
-squared. The residual problem combines QA quasisymmetry at three radii
-from 0.2 to 1.0 with aspect-ratio target 6.
+Measure three cache states separately: a fresh process with an empty persistent
+cache, a fresh process reusing that cache, and repeated calls in one process.
+Use nearby parameter vectors for warm optimization measurements so the result
+cache cannot satisfy every call. Report VMEX and dependency versions, device,
+precision, resolution, tolerances, iterations and available CPU cores with the
+results. Compilation, cache loading and execution have different costs.
 
-===============================  ============  ============
-Operation                        CPU (s)       GPU (s)
-===============================  ============  ============
-Construct both problems          6.83          14.16
-First scalar value and gradient  27.41         51.43
-Warm scalar value and gradient   0.341         0.276
-First residual and Jacobian      17.79         34.60
-Warm residual and Jacobian       0.272         0.253
-===============================  ============  ============
+Matched fixed- and free-boundary gradient checks at revision ``d8791437`` found
+lower warm GPU costs on selected workloads, with larger first-call costs.
+These results qualify the tested problems and software stack. Benchmark your
+own objective before choosing a device or CPU thread count; small solves can
+slow down when given more threads.
 
-First derivative evaluations exclude construction. The Jacobian follows
-the scalar lane in the same process and can reuse its executables, so its
-first-call time is not an independent cold-process measurement. Warm
-values are medians of four evaluations, alternating two nearby decision
-vectors to avoid measuring only the public result cache.
-
-At the last matched vector, CPU/GPU relative differences are ``1.3e-13``
-for the scalar gradient and ``1.8e-13`` for the Jacobian. A re-solved central
-difference in the normalized all-ones decision direction agrees with the
-scalar adjoint to ``9.3e-10`` relatively on both devices (step ``1e-5``).
-
-Synchronized scalar-stage medians explain why a large kernel gain does not
-become the same workflow gain: block assembly and factorization take
-77.4/6.49 ms on CPU/GPU, root callbacks 71.2/119 ms, and the four Newton
-Krylov steps together 21.2/28.1 ms. Other differentiation and host work
-remain in the complete evaluation. These stage times are nested where
-applicable and should not be added to their parent timers.
-
-The free-boundary check uses the portable DIII-D LASYM field fixture
-(``tests/test_lasym_free_case.py``), 16 surfaces, ``mpol=12``, ``ntor=0``,
-``ftol=1e-7``, a 2500-iteration budget, coupled-root tolerance ``1e-10``
-and adjoint tolerance ``1e-8``. Its loss is the mean of the squared edge
-``R_cos`` and ``Z_sin`` coefficients, differentiated with respect to the
-single MGRID current multiplier. ``boundary_schur`` is the default adjoint.
-
-===============================  ============  ============
-Operation                        CPU (s)       GPU (s)
-===============================  ============  ============
-First free value and gradient    215.28        441.44
-Warm free value and gradient     3.860         1.574
-Warm coupled-root value          2.936         0.945
-===============================  ============  ============
-
-The first call includes the initial root and compilation or cache loading;
-it is not an isolated compiler timing. The value-only samples follow the
-gradient and include root anchoring. Four warm samples alternate multipliers 1 and
-``1+1e-5``. CPU/GPU values and current derivatives agree to ``5.4e-13``
-and ``5.8e-12`` relatively. Central differences with step ``2e-5`` agree
-with both adjoints to ``7.1e-9`` relatively.
-
-Six Newton anchor steps take about 2.5 s on CPU and 0.53 s on GPU. This
-coupled-root work dominates the warm CPU value; the gradient adds further
-Schur and pullback work. The GPU was explicitly selected for this
-axisymmetric case; automatic placement would select CPU. Its lower warm
-cost must be weighed against the 226 s larger first gradient cost. These
-results do not describe the older coupled-GCROT adjoint or establish a
-3-D free-boundary crossover.
-
-Actual JAX traces were also recorded for the warm free gradient. The CPU
-traced gradient took 4.96 s versus the untraced 3.86 s median, so trace
-overhead is material. The GPU trace took 2.31 s versus the untraced
-1.57 s median. These are JAX host/device timelines, not a separate Nsight
-kernel study.
-
-A single equilibrium currently runs on one device. ``vmex.parallel``
-threads independent equilibria; it does not partition one equilibrium
-across hosts. No exclusive full-node or multi-node scaling is established
-by this qualification. The older 0.9.1 GPU matrix above remains a dated
-record of that source and software stack.
-
-Controlled forward-cache qualification (2026-11-04)
----------------------------------------------------
-
-A separate forward solve at the same source, precision and hardware used
-``input.LandremanPaul2021_QA_lowres``: ``mpol=ntor=8``, the complete
-16/31/50 radial ladder, and ``ftol=1e-12`` broadcast to all three rungs.
-Every final rung converged in 414 iterations; this is the final-rung
-count, not the total over the ladder. Each device first used a distinct
-empty persistent-cache directory, then a fresh process reloaded that
-same directory. Warm entries are medians of three subsequent solves in
-the same process, including output serialization.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 34 22 22 22
-
-   * - Process/cache state
-     - First solve (s)
-     - Backend compile (s)
-     - Warm solve (s)
-   * - CPU, empty cache
-     - 25.14
-     - 12.39
-     - 7.95
-   * - CPU, fresh-process reload
-     - 11.51
-     - 0.315
-     - 8.11
-   * - GPU, empty cache
-     - 48.00
-     - 39.63
-     - 3.87
-   * - GPU, fresh-process reload
-     - 8.94
-     - 0.812
-     - 3.85
-
-The compile column sums JAX backend-compile event durations; tracing,
-lowering, cache loading and root execution remain in the first-solve
-column. It is not the complete compiler overhead. CPU runs used eight
-affinity slots. Reloaded CPU runs limited to four or one slot had warm
-medians 6.85 s and 4.47 s, respectively, with the same final iteration
-count and converged residuals. This workload does not benefit from giving
-one solve all eight slots. It motivates bounded independent ensembles;
-it does not establish a general thread default or multi-node root scaling.
-
-Bounded CPU ensemble throughput (2026-11-04)
---------------------------------------------
-
-The existing ``vmex.parallel.ProcessWorkers`` also ran eight independent
-QA members at the preceding resolution and tolerance, with ``PHIEDGE``
-multipliers ``1 + 1e-4 * (i - 3.5)`` for ``i=0,...,7``. Each layout kept
-one process pool. The first eight-member batch includes startup and cache
-reload and is excluded below; entries are medians of two warm batches.
-These calls use ``solve_multigrid`` without WOUT serialization.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 55 45
-
-   * - Workers by cores each
-     - Eight-member warm batch (s)
-   * - 1 by 1
-     - 52.536
-   * - 1 by 8
-     - 75.859
-   * - 4 by 2
-     - 14.539
-   * - 8 by 1
-     - 8.781
-
-All 96 solves converged in 414 final-rung iterations. In the final warm
-batch, all six state fields for all eight members were bitwise identical
-across the four layouts. Eight single-core workers delivered 5.98 times
-the throughput of the single-core serial layout within the eight reserved
-physical cores and a 12 GiB hard memory cap. This is a balanced fixed-boundary
-ensemble result; it does not set a general thread default or distribute
-one equilibrium across devices or hosts.
+For independent equilibria, compare process counts and threads per process
+within a fixed core and memory budget. A single equilibrium runs on one device;
+``vmex.parallel`` schedules independent cases. Cross-node scaling of one
+coupled equilibrium remains unqualified.
 
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
