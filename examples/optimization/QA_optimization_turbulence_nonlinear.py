@@ -193,7 +193,7 @@ saturation_traces = []           # (label, time, heat flux, gate decision) per r
 
 
 def saturate(equilibrium, seeds, label):
-    """Run every tube to an accepted saturated state (outside the derivative)."""
+    """Run every tube to gate acceptance, except in the bounded CI wiring mode."""
     states = []
     for tube, seed in zip(TUBES, seeds):
         geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
@@ -320,9 +320,9 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}, stage state", equilibrium)
-    # Restart every tube from its last saturated state in the new geometry.
+    # Restart every tube from its last carried state in the new geometry.
     saturated_states = saturate(equilibrium, saturated_states, f"mode {max_mode}")
-    report(f"mode {max_mode}, re-saturated", equilibrium)
+    report(f"mode {max_mode}, refreshed", equilibrium)
 
 ### Print, plot and save ######################################################
 
@@ -331,9 +331,10 @@ opt.report_targets(equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    extra=[("heat flux", final_flux, seed_flux, "max")])
 print(f"\nwindow heat flux {seed_flux:.5e} -> {final_flux:.5e} "
       "(one differentiated window each, a noisy estimate)")
-# The number to quote is the gated saturated mean with its standard error.
+# Report the gate verdict with each estimate, including rejected CI windows.
 for label, _, _, decision in saturation_traces:
-    print(f"saturated Q [{label}] = {decision['mean']} +- {decision['sem']}")
+    print(f"Q [{label}] = {decision['mean']} +- {decision['sem']} "
+          f"(gate accepted={decision['saturated']})")
 
 input_path = inp.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", equilibrium.wout)
