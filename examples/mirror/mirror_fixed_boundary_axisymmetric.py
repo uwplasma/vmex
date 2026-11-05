@@ -48,7 +48,6 @@ OUTPUT_DIR = Path("results/mirror_fixed_boundary_axisymmetric")
 # End of input parameters.
 ###############################################################################
 
-jax.config.update("jax_enable_x64", True)
 
 ### Set up the equilibrium ####################################################
 

@@ -179,6 +179,17 @@ def test_vmec_problem_state_objective_hides_failed_trial_branches():
     np.testing.assert_allclose(jax.grad(lambda x: objective(rejected, x)[0])(
         jnp.asarray([2.0])), [4.0])
 
+    for problem, expected_status in ((accepted, 0), (rejected, 1)):
+        with_status = jax.jit(jax.value_and_grad(lambda x: problem.jax_objective_from_state(
+            x, lambda _state, _runtime: jnp.zeros(1), n_extra_terms=1,
+            return_status=True), has_aux=True))
+        (value, (rows, costs, status)), gradient = with_status(jnp.ones(1))
+        assert int(status) == expected_status
+        np.testing.assert_array_equal(rows, [0.0])
+        np.testing.assert_array_equal(costs, [0.0])
+        assert float(value) == (0.0 if expected_status == 0 else 11.0)
+        np.testing.assert_allclose(gradient, [0.0 if expected_status == 0 else 2.0])
+
     extra_value, extra_terms = accepted.jax_extra_costs_from_state(
         jnp.asarray([2.0]),
         lambda state, runtime: jnp.asarray([state[0] ** 2, runtime[0]]),

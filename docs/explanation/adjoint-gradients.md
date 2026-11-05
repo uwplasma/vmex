@@ -133,11 +133,10 @@ inventory, with the call site each class serves:
    `v -> jvp(g, state, v)`; the `precon2d.f` analogue).
 5. `solvax.chunk_map` / `auto_chunk_size` bound memory for Jacobian columns
    and multi-RHS batches (`vmex/core/optimize.py`).
-6. `solvax.SpluFactorization` owns the pivoted sparse factorization used to
-   eliminate the radial bulk in the experimental free-boundary Schur
-   transpose (`vmex/core/freeboundary_implicit.py`). VMEX supplies the
-   physics-specific radial blocks and NESTOR edge response; SOLVAX owns the
-   reusable factorization and transposed solves.
+6. The free-boundary Schur transpose (`vmex/core/freeboundary_implicit.py`)
+   eliminates the radial bulk with LAPACK's banded LU (`gbtrf`, row partial
+   pivoting) in O(ns b^2) memory for blocks of size b. VMEX supplies the
+   physics-specific radial blocks and NESTOR edge response.
 
 The mirror lane keeps its own adjoint solver (`vmex/mirror/implicit.py`).
 
@@ -242,8 +241,7 @@ plug into an optimization campaign is {doc}`/howto/optimize-a-boundary`.
 
 The free-boundary path differentiates the converged coupled VMEX--NESTOR root,
 including direct coil-shape/current parameters, while keeping host iterations
-off the AD tape. The default whole-state transpose is exact but cold-compile
-and memory limited. An advanced boundary-Schur transpose, its full-residual
+off the AD tape. The default boundary-Schur transpose, its full-residual
 certificate, and its current performance limits are documented in
 {doc}`nestor-vacuum`. The supported scope of every AD path is one row of
 {doc}`/reference/capabilities`.

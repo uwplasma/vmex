@@ -27,13 +27,18 @@ single-solve path (which stays byte-identical) and imposes no new dependency.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Iterable, Sequence, TypeVar
+from concurrent.futures import ProcessPoolExecutor
+from typing import Any, Callable, Iterable, Sequence
+
+from solvax.parallel import available_cpus
+from solvax.parallel import map_independent as map_ensemble
+
 
 __all__ = [
+    "ProcessWorkers",
     "available_cpus",
-    "default_workers",
     "evaluate_problems",
     "finite_difference_gradient",
     "finite_difference_jacobian",
@@ -41,94 +46,67 @@ __all__ = [
     "solve_ensemble",
 ]
 
-_T = TypeVar("_T")
-_R = TypeVar("_R")
+_worker_fn: Any = None
 
 
-def available_cpus() -> int:
-    """Return the number of CPUs available, respecting scheduler limits."""
-    counts: list[int] = []
-    process_count = getattr(os, "process_cpu_count", None)
-    if process_count is not None:
-        count = process_count()
-        if count:
-            counts.append(int(count))
-    affinity = getattr(os, "sched_getaffinity", None)
-    if affinity is not None:
-        try:
-            counts.append(len(affinity(0)))
-        except OSError:
-            pass
-    for name in ("SLURM_CPUS_PER_TASK", "PBS_NP", "NSLOTS", "LSB_DJOB_NUMPROC"):
-        try:
-            count = int(os.environ.get(name, ""))
-        except ValueError:
-            continue
-        if count > 0:
-            counts.append(count)
-    counts.append(int(os.cpu_count() or 1))
-    return max(min(counts), 1)
+def _start_worker(build, cores, gpu, cache_dir, slots) -> None:
+    """Pin one spawned worker to its share of the node, then build its function."""
+    global _worker_fn
+    with slots.get_lock():
+        slot = slots.value
+        slots.value += 1
+    if cores:
+        os.sched_setaffinity(0, cores[slot])
+    if gpu:
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu[slot]
+    if cache_dir:
+        os.environ["VMEX_COMPILATION_CACHE_DIR"] = str(cache_dir)
+    _worker_fn = build()
 
 
-def default_workers(n_items: int, workers: int | None = None) -> int:
-    """Resolve the worker count for an ``n_items`` ensemble.
+def _call_worker(item: Any) -> Any:
+    return _worker_fn(item)
 
-    ``None`` uses the CPUs available to this process, including scheduler
-    affinity limits.  An explicit value is clamped to ``[1, n_items]``.
+
+class ProcessWorkers:
+    """A pool of spawned processes, each with its own cores or GPU group.
+
+    ``build`` is a picklable zero-argument factory run once per worker; it
+    returns the function ``map`` applies, for example a problem's ``residual``.
+    Workers share ``cache_dir`` so only the first compiles.  ``threads`` cores
+    are pinned to each worker from the cores this process may use, which also
+    sizes XLA's pool.  ``gpus`` lists device ids dealt round-robin, so
+    ``gpus=[0, 1], workers=4`` gives two workers per GPU.  A script that
+    creates this must guard it with ``if __name__ == "__main__"``.  By default
+    there is one worker per GPU in ``gpus``, otherwise one per ``threads`` cores.
     """
-    n_items = max(int(n_items), 1)
-    if workers is None:
-        return min(n_items, available_cpus())
-    return max(1, min(int(workers), n_items))
 
+    def __init__(self, build: Callable[[], Callable], workers: int | None = None,
+                 *, threads: int = 1, gpus: Sequence[int] = (),
+                 cache_dir: Any = None) -> None:
+        workers = workers or len(gpus) or max(available_cpus() // threads, 1)
+        cores: list[list[int]] = []
+        if not gpus and hasattr(os, "sched_getaffinity"):
+            free = sorted(os.sched_getaffinity(0))
+            if workers * threads > len(free):
+                raise ValueError(f"{workers} x {threads} exceeds {len(free)} cores")
+            cores = [free[i * threads:(i + 1) * threads] for i in range(workers)]
+        gpu = [str(gpus[i % len(gpus)]) for i in range(workers)] if gpus else []
+        context = multiprocessing.get_context("spawn")
+        slots = context.Value("i", 0)
+        self._pool = ProcessPoolExecutor(
+            workers, mp_context=context, initializer=_start_worker,
+            initargs=(build, cores, gpu, cache_dir, slots))
 
-def map_ensemble(
-    fn: Callable[[_T], _R],
-    items: Iterable[_T],
-    *,
-    workers: int | None = None,
-    return_exceptions: bool = False,
-) -> list[_R]:
-    """Apply ``fn`` to each of ``items`` concurrently on CPU; keep input order.
+    def map(self, items: Iterable[Any]) -> list[Any]:
+        """Apply the workers' function to ``items``, keeping their order."""
+        return list(self._pool.map(_call_worker, items))
 
-    The general primitive behind :func:`solve_ensemble`.  ``fn`` must be an
-    *independent* per-item computation (e.g. a full ``vj.solve`` /
-    ``implicit.run`` / ``jax.value_and_grad`` over one input) that shares no
-    mutable state with the others — which every vmex forward solve is, since
-    each builds its own runtime and the compiled-executable cache is
-    thread-safe.  Under those conditions the results are byte-identical to a
-    serial ``[fn(x) for x in items]`` (the concurrency only overlaps the
-    GIL-releasing XLA execution windows).
+    def __enter__(self) -> "ProcessWorkers":
+        return self
 
-    ``workers`` — see :func:`default_workers`.  With ``workers=1`` the pool
-    runs sequentially (a clean serial baseline for scaling measurements).
-
-    ``return_exceptions=False`` (default) re-raises the first item's exception
-    (preserving vmex's typed :class:`~vmex.core.errors.VmecError` taxonomy),
-    exactly as a serial loop would.  ``return_exceptions=True`` instead places
-    the caught exception object in that slot so one failed ensemble member does
-    not abort the batch (useful for optimization ensembles / robustness scans).
-    """
-    items = list(items)
-    if not items:
-        return []
-    n_workers = default_workers(len(items), workers)
-
-    def _call(x: _T) -> Any:
-        if return_exceptions:
-            try:
-                return fn(x)
-            except Exception as exc:  # noqa: BLE001 - deliberately captured
-                return exc
-        return fn(x)
-
-    if n_workers == 1:
-        return [_call(x) for x in items]
-
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        # executor.map preserves input order and propagates exceptions on
-        # iteration (when return_exceptions is False, _call already re-raises).
-        return list(pool.map(_call, items))
+    def __exit__(self, *exc: Any) -> None:
+        self._pool.shutdown()
 
 
 def finite_difference_jacobian(
@@ -138,14 +116,16 @@ def finite_difference_jacobian(
     method: str = "3-point",
     rel_step: float | None = None,
     workers: int | None = None,
+    pool: ProcessWorkers | None = None,
 ) -> Any:
     """Differentiate an opaque host function with independent parallel probes.
 
     ``method="3-point"`` (default) is central and second-order accurate;
     ``"2-point"`` is forward and first-order accurate.  ``workers=None`` uses
-    :func:`default_workers`, while ``workers=1`` is deterministic serial
+    :func:`map_ensemble`, while ``workers=1`` is deterministic serial
     execution.  Every probe receives its own copy of ``x`` and ``fun`` must not
-    mutate shared state.
+    mutate shared state.  With ``pool``, the probes run in that pool's
+    processes through its own function, and ``fun`` and ``workers`` are unused.
     """
     import numpy as np
 
@@ -175,8 +155,8 @@ def finite_difference_jacobian(
             plus[j] += step[j]
             points.extend((minus, plus))
 
-    values = [np.asarray(value, dtype=float).ravel() for value in map_ensemble(
-        fun, points, workers=workers
+    values = [np.asarray(value, dtype=float).ravel() for value in (
+        pool.map(points) if pool else map_ensemble(fun, points, workers=workers)
     )]
     if not values:
         return np.empty((0, 0), dtype=float)
