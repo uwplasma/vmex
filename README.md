@@ -226,6 +226,8 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
 
+`axis_field(inp)` estimates the axis field before solving; compose it with `scale_input` to set a target field, or use `probe=True` for two coarse equilibrium solves.
+
 ## Ballooning stability
 
 The infinite-n ideal ballooning mode ([Dewar and Glasser 1983](https://doi.org/10.1063/1.864113),

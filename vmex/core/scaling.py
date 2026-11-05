@@ -534,13 +534,10 @@ def _estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     diamagnetic variation across it, and the Shafranov shift of the axis off
     the centroid, are not modelled.
 
-    Measured against the solved :func:`axis_field` of 17 example decks: within
-    1.4 % on 13 of them (vacuum and low-beta stellarators, a shaped tokamak, up-down
-    asymmetric decks), 2.5 to 3 % on a 2.5 % beta QH and a tokamak with current,
-    8 to 13 % on the two decks at 2.7 to 2.9 % beta, where the Shafranov shift
-    moves the axis off the centroid.  Use it as a first guess;
-    ``axis_field(inp, probe=True)`` is within 0.5 % for the price of two coarse solves,
-    and :func:`match_b0` on the solved wout is exact.
+    Use the geometric estimate as a first guess. Finite pressure and current
+    can shift the magnetic axis away from the boundary centroid; use
+    ``axis_field(inp, probe=True)`` to include the coarse equilibrium response,
+    then :func:`match_b0` with the production WOUT to set the final field.
 
     The body is a JAX expression, so ``jax.grad`` works with respect to
     ``phi`` and, for an object holding traced arrays (``SimpleNamespace``
