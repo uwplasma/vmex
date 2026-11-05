@@ -231,6 +231,13 @@ def test_axisymmetric_fields_are_invariant_to_field_period_coordinates():
     np.testing.assert_allclose(three.J, one.J, rtol=3e-12, atol=3e-7)
     np.testing.assert_allclose(three.force, one.force, rtol=3e-12, atol=3e-7)
 
+    for state in (one_period, three_periods):
+        tables = high_order_boozer_input_tables(state, 0.7, ntheta=12, nzeta=8)
+        native = evaluate_high_order_fields(state, 0.7, 0.4, state.nfp * 0.3)
+        physical_iota = state.nfp * native.B_contravariant[1] / native.B_contravariant[2]
+        np.testing.assert_allclose(tables["iota"], physical_iota, rtol=3e-13)
+        assert float(tables["iota"]) == pytest.approx(0.4, rel=3e-13)
+
 
 def test_high_order_surface_handoff_is_analytic_and_tangent():
     native = evaluate_high_order_surface(
