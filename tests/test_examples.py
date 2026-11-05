@@ -178,6 +178,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
     "examples/optimization/pwO_optimization.py",
+    "examples/optimization/bootstrap_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_jaxopt.py",
@@ -1085,6 +1086,13 @@ def test_low_transport_example(tmp_path):
     for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
                  "pwO_optimized_nfp3_objectives.csv"):
         assert (tmp_path / name).exists()
+
+
+@pytest.mark.full
+def test_bootstrap_optimization_example(tmp_path):
+    out = _run_example(EXAMPLES / "optimization" / "bootstrap_optimization.py", tmp_path)
+    _assert_cost_decreased(out, "bootstrap")
+    assert (tmp_path / "wout_bootstrap_optimized_nfp3.nc").exists()
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve

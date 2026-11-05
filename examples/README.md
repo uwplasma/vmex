@@ -114,6 +114,13 @@ that research budget as one commented set of constants next to the default.
   A lower proxy does not establish confinement; particle checks remain separate.
   See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
+  `bootstrap_optimization.py` minimizes only the collisionless bootstrap
+  geometric factor of a near-circular seed, with aspect, iota and mirror limits
+  and no symmetry residual. At NFP 3 and 4 the factor falls from about 0.8 to
+  below 0.05, but |B| becomes an egg-crate of isolated maxima and minima rather
+  than a QI or pwO field: epsilon_eff^(3/2) stays near 0.02, and a finite-
+  collisionality D31 check is still needed.
+
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /
   PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
