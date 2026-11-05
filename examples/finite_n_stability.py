@@ -111,7 +111,7 @@ assert sqrtg.dtype == np.float64, "x64 is off; AGNI needs float64"
 eq.validate()
 assert root_residual < 1e-9 and (np.all(sqrtg > 0) or np.all(sqrtg < 0)), (root_residual, sqrtg.min())
 print(f"AGNI map on {N_RHO}x{N_THETA}x{N_ZETA} nodes ({time.perf_counter() - t0:.0f} s): "
-      f"Psi = {float(eq.Psi):.4f} Wb, a = {float(eq.a):.4f} m, beta = {100 * beta:.2f} %, "
+      f"Psi = {float(inp.phiedge):.4f} Wb, a = {float(eq.a):.4f} m, beta = {100 * beta:.2f} %, "
       f"iota in [{iota.min():.4f}, {iota.max():.4f}], min |sqrtg| = {np.abs(sqrtg).min():.3e}, "
       f"PEST root residual {root_residual:.1e}")
 
@@ -197,7 +197,7 @@ fig.savefig(figure_path, dpi=150)
 
 json_path = OUTPUT_DIR / "finite_n_stability.json"
 json_path.write_text(json.dumps(dict(
-    input=INPUT_FILE.name, pres_scale=float(inp.pres_scale), ns=NS_ARRAY[-1], beta=beta, Psi=float(eq.Psi),
+    input=INPUT_FILE.name, pres_scale=float(inp.pres_scale), ns=NS_ARRAY[-1], beta=beta, Psi=float(inp.phiedge),
     a=float(eq.a), iota_range=[float(iota.min()), float(iota.max())], min_abs_sqrtg=float(np.abs(sqrtg).min()),
     basis=dict(n_rho=N_RHO, n_theta=N_THETA, n_zeta=N_ZETA, mpol=MPOL, ntor=NTOR, **AUTOMORPHISM),
     solver=dict(sigma=SIGMA, eigsh_tol=EIGSH_TOL, residual_max=RESIDUAL_MAX, noise_floor=NOISE_FLOOR),
