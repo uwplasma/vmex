@@ -456,8 +456,16 @@ def b00_axis(data: WoutData) -> float:
     return float(np.sum(field**2 * dl) / np.sum(field * dl))
 
 
-def axis_field(data: WoutData, phi: float = 0.0) -> float:
+def axis_field(data: Any, phi: float = 0.0, *, probe: bool = False,
+               ntheta: int = 128, ns: tuple[int, int] = (7, 13)) -> Any:
     """``|B|`` on the magnetic axis at toroidal angle ``phi`` [T].
+
+    For a fixed-boundary input, estimate from flux divided by the normal-plane
+    cross-section area (``ntheta`` points), or use ``probe=True`` for two
+    converged coarse solves at ``ns``. The geometric estimate is differentiable
+    in traced boundary arrays and flux; the coarse solves are host-side.
+    Compose with ``scale_input(inp, b_scale=target/axis_field(inp))`` to set
+    a field before solving. Only the solved-WOUT value is an equilibrium field.
 
     The ``m = 0`` Nyquist harmonics of the half-mesh ``bmnc`` (and ``bmns`` for
     ``lasym``) are extrapolated to ``s = 0`` as ``1.5 b[1] - 0.5 b[2]`` and
@@ -468,6 +476,8 @@ def axis_field(data: WoutData, phi: float = 0.0) -> float:
     ``wout.b0 = rbtor0 / R_axis``, a toroidal-component quantity that differs
     from ``|B|`` wherever the axis is tilted.
     """
+    if hasattr(data, "rbc"):
+        return _probe_axis_field(data, phi, ns) if probe else _estimate_axis_field(data, phi, ntheta)
     cos_n, xn = _axis_harmonics(data.bmnc, data)
     field = float(np.sum(cos_n * np.cos(xn * phi)))
     if data.bmns is not None:
@@ -509,7 +519,7 @@ def _require_fixed_boundary(inp: Any) -> None:
         raise ValueError("the field on axis of a free-boundary deck is set by its coils, not by PHIEDGE")
 
 
-def estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
+def _estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     """Estimate ``|B|`` on the axis at toroidal angle ``phi`` from the input alone [T].
 
     No equilibrium is solved.  ``PHIEDGE`` is the toroidal flux through the
@@ -529,7 +539,7 @@ def estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     asymmetric decks), 2.5 to 3 % on a 2.5 % beta QH and a tokamak with current,
     8 to 13 % on the two decks at 2.7 to 2.9 % beta, where the Shafranov shift
     moves the axis off the centroid.  Use it as a first guess;
-    :func:`probe_axis_field` is within 0.5 % for the price of two coarse solves,
+    ``axis_field(inp, probe=True)`` is within 0.5 % for the price of two coarse solves,
     and :func:`match_b0` on the solved wout is exact.
 
     The body is a JAX expression, so ``jax.grad`` works with respect to
@@ -586,7 +596,7 @@ def estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     return jnp.abs(jnp.asarray(inp.phiedge, dtype=float)) / area_perp
 
 
-def probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7, 13)) -> float:
+def _probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7, 13)) -> float:
     """``|B|`` on the axis at ``phi`` [T] from two coarse solves, extrapolated in ``1/ns``.
 
     The deck is solved at each radial resolution in ``ns`` (single stage,
@@ -624,21 +634,6 @@ def probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7,
         fields.append(axis_field(wout_from_result(deck, result), phi))
     (n1, n2), (b1, b2) = ns, fields
     return (n2 * b2 - n1 * b1) / (n2 - n1)
-
-
-def match_b0_from_input(inp: VmecInput, b0_target: float, phi: float = 0.0, probe: bool = False) -> VmecInput:
-    """Scale ``inp`` so ``|B|`` on axis at ``phi`` becomes about ``b0_target`` [T], before any production solve.
-
-    The field comes from :func:`estimate_axis_field` (no solve) or, with
-    ``probe=True``, :func:`probe_axis_field`.  The deck is then scaled by
-    ``scale_input`` with ``b_scale = b0_target / field``: for a vacuum deck only
-    ``PHIEDGE`` changes, and with pressure or current ``PRES_SCALE`` and
-    ``CURTOR`` follow, so beta, iota and shape stay put.  The achieved
-    ``axis_field`` is off by the error of the field used; solve once and
-    apply :func:`match_b0` to the wout to remove that exactly.
-    """
-    field = probe_axis_field(inp, phi) if probe else float(estimate_axis_field(inp, phi))
-    return scale_input(inp, b_scale=abs(b0_target) / field)
 
 
 def scale_reference(data: WoutData, target: str = "volavgB") -> tuple[float, float]:

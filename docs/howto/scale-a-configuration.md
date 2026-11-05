@@ -89,25 +89,22 @@ $O(h_s)$ error, so define the target at the production `ns`.
 
 ### Before the first solve
 
-If `PHIEDGE` has to be chosen before any production solve,
-{func}`vmex.core.scaling.match_b0_from_input` scales the deck to a target field
-from the input alone. Its field comes from
-{func}`vmex.core.scaling.estimate_axis_field` (no solve, milliseconds) or, with
-`probe=True`, from {func}`vmex.core.scaling.probe_axis_field` (two coarse
-solves):
+Use the existing {func}`vmex.core.scaling.axis_field` with a fixed-boundary
+input to estimate its field without a solve. Set `probe=True` for two converged
+coarse solves instead. Compose either with {func}`vmex.core.scaling.scale_input`:
 
 ```python
-matched = vmex.match_b0_from_input(inp, 5.7, phi=0.0, probe=True)
+matched = vmex.scale_input(inp, b_scale=5.7 / vmex.axis_field(inp, phi=0.0, probe=True))
 ```
 
-`estimate_axis_field` is `|PHIEDGE| / A`, where `A` is the area of the boundary
+The geometric estimate is `|PHIEDGE| / A`, where `A` is the area of the boundary
 cut by the plane normal to the curve through the cross-section centroids. It
 ignores the pressure, the current and the Shafranov shift. Against the solved
 `axis_field` of 17 example decks it is within 1.4 % on 13 (vacuum and low-beta
 stellarators, a shaped tokamak, up-down asymmetric decks), 2.5 to 3 % on a
 2.5 % beta QH and a tokamak with current, and 8 to 13 % on the two decks at
 2.7 to 2.9 % beta. Using the `phi = const` cut instead of the normal plane is
-off by 3 to 25 % on a helical axis. `probe_axis_field` solves at `ns = 7` and
+off by 3 to 25 % on a helical axis. `axis_field(inp, probe=True)` solves at `ns = 7` and
 `13` and extrapolates in `1/ns`; it is within 0.5 % of the `ns = 97` value on
 16 of 17 decks and 0.8 % on the 2.7 % beta, 6 MA QA. It takes 0.3 to 2.5 s warm
 and 10 to 35 s with compilation. Either way, solve once at the production `ns`
