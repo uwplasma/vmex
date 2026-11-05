@@ -130,8 +130,7 @@ record under `benchmarks/` names the revision it was measured at.
 - An outdated or missing optional dependency (ESSOS, virtual-casing-jax,
   neo-jax, GKX) now fails with the `pip install -U` command that fixes it,
   and the import guard also covers `booz_xform_jax` and `solvax` (#496).
-- No `RuntimeWarning` when no alpha is lost, and the terminal progress line
-  is cleared properly (#496).
+- No `RuntimeWarning` when no alpha is lost, and the terminal progress line is cleared properly (#496).
 
 ## 0.11.5 - 2026-09-28
 
