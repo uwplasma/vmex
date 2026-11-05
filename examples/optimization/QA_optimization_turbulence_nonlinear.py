@@ -10,7 +10,8 @@ mean or, with SOFTMAX_TEMPERATURE, by a smooth maximum.
 Each tube is run to saturation once per stage, outside the derivative, and the
 run stops only when GKX's saturation gate accepts the heat-flux trace (at least
 256 retained samples spanning 20 autocorrelation times, relative standard
-error <= 5 %, both half-windows agreeing); a tube that does not saturate
+error <= SATURATION_REL_SEM, stationary heat flux and Wphi/Wg energy guards);
+a tube that does not saturate
 within MAX_SATURATION_STEPS stops the script. Stages after the first restart
 from the previous stage's saturated state. The saturated state is then held
 fixed and the window is differentiated exactly (GKX's checkpointed discrete
@@ -25,8 +26,10 @@ receives a value and a gradient from one reverse sweep through the
 checkpointed window and one reverse equilibrium adjoint. Needs
 ``pip install 'vmex[turbulence]'``.
 
-The five-minute default saturates the seed and takes one short L-BFGS-B step;
-it shows the pipeline, not a transport reduction. Measured with the research
+The default saturates the seed and takes one short L-BFGS-B step;
+it shows the pipeline, not a transport reduction. The timings and fluxes below
+predate the energy guards and need remeasurement under the current policy.
+Measured with the research
 settings on a shared 36-core Xeon host (CPU only, 12 cores, load ~60 from
 other jobs, JAX 0.10.2, GKX 2.4.0): 70 min end to end,
 5.5 GB peak memory. The cold saturation of the seed took 35,696 steps
@@ -53,6 +56,10 @@ from scipy.optimize import minimize
 try:
     import gkx
     from gkx.diagnostics.saturation import SaturationStopConfig, saturation_stop_decision
+    try:
+        from gkx.solvers_nonlinear_diagnostics import prepare_nonlinear_explicit_diagnostics
+    except ImportError:  # GKX 2.6/2.7, before the diagnostic modules were combined.
+        from gkx.solvers_nonlinear_diagnostic_integration import prepare_nonlinear_explicit_diagnostics
 except ImportError:
     raise SystemExit("This example needs GKX: pip install 'vmex[turbulence]'")
 import vmex as vj
@@ -100,8 +107,8 @@ SATURATION_REL_SEM = 0.1
 # Differentiated post-saturation window (below GKX's 1024-step divergence knee):
 WINDOW_STEPS = 256
 
-# The default above fits a 5-minute laptop run. The research settings measured
-# below (70 min on a shared host) are:
+# The earlier flux-only policy fit a 5-minute laptop run; the energy-guarded
+# policy may need longer. The research settings measured below were:
 #   MAX_MODES, MAXITER = [1, 2], [8, 8]
 #   SATURATION_REL_SEM, WINDOW_STEPS = 0.05, 512
 #   MAX_PARAMETER_CHANGE = 5.0
@@ -189,16 +196,22 @@ def saturate(equilibrium, seeds, label):
     states = []
     for tube, seed in zip(TUBES, seeds):
         geometry = tube_geometry(equilibrium.state, equilibrium.runtime, tube)
-        state, fluxes, start = seed, [], time.perf_counter()
+        state, fluxes, times, wphi, wg = seed, [], [], [], []
+        simulation = prepare_nonlinear_explicit_diagnostics(
+            seed, grid, geometry, gk_parameters(geometry), DT, SAMPLE_STEPS,
+            method="rk3", terms=terms, sample_stride=SAMPLE_STEPS,
+            diagnostics_stride=SAMPLE_STEPS, resolved_diagnostics=False)
+        start = time.perf_counter()
         last_print = start
         for chunk in range(MAX_SATURATION_STEPS // SAMPLE_STEPS):
-            state = gkx.integrate_nonlinear(
-                state, grid, geometry, gk_parameters(geometry), DT, SAMPLE_STEPS,
-                method="rk3", terms=terms, return_fields=False)
-            fluxes.append(float(window_flux(state, geometry, 1)))
-            times = DT * SAMPLE_STEPS * np.arange(1, len(fluxes) + 1)
+            local_time, diagnostics, state, _ = simulation.run(state)
+            times.append((times[-1] if times else 0.0) + float(local_time[-1]))
+            fluxes.append(float(diagnostics.heat_flux_t[-1]))
+            wphi.append(float(diagnostics.Wphi_t[-1]))
+            wg.append(float(diagnostics.Wg_t[-1]))
             decision = saturation_stop_decision(
-                times, fluxes, config=SaturationStopConfig(rel_sem=SATURATION_REL_SEM))
+                times, fluxes, guard=wphi, free_energy_guard=wg,
+                config=SaturationStopConfig(rel_sem=SATURATION_REL_SEM))
             if decision["saturated"]:
                 break
             if time.perf_counter() - last_print > 10.0:
