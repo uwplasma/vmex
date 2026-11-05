@@ -631,6 +631,56 @@ def test_legacy_lift_preserves_axis_boundary_and_lambda_gauge():
     np.testing.assert_allclose(imported.boundary_R_cos, high_order.boundary_R_cos, rtol=0.0, atol=2e-13)
 
 
+def test_wout_lambda_axis_closure_does_not_bias_the_continuous_lift():
+    from vmex.core.polish import sample_high_order_state
+    from vmex.core.restart import state_from_wout
+
+    inp = replace(VmecInput.from_file("examples/data/input.circular_tokamak"), lasym=True)
+    inp = inp.change_resolution(mpol=3, ntor=1, ntheta=12, nzeta=8)
+    runtime = prepare_runtime(inp, replace(resolution_from_input(inp), ns=17))
+    source = lift_high_order_state(_initial_state(runtime.setup), runtime,
+                                   inp=inp, degree=3, max_spans=2)
+    mode = int(np.flatnonzero((source.m == 0) & (source.n == 1))[0])
+    nodes = jnp.asarray(source.radial_basis.collocation_nodes)
+    q = source.radial_basis.fit(0.01 + 0.02 * nodes + 0.03 * nodes**2)
+    source = replace(source, L_sin=source.L_sin.at[mode].set(q),
+                     L_cos=source.L_cos.at[mode].set(-0.5 * q))
+    sampled = sample_high_order_state(source, runtime)
+    wout = wout_from_state(inp=inp, state=sampled, fsqr=1., fsqz=1., fsql=1., converged=False)
+    imported = high_order_state_from_wout(wout, inp=inp, radial_basis=source.radial_basis)
+    legacy = state_from_wout(wout, inp=inp)
+    lift = strong_force.traced_lift(runtime, radial_basis=source.radial_basis)
+    traced = jax.jit(lift)(legacy, runtime)
+    gauge = (source.m == 0) & (source.n == 0)
+    for actual in (imported, traced):
+        for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
+            np.testing.assert_allclose(getattr(actual, name), getattr(source, name), atol=2e-12)
+        assert np.max(np.abs(np.asarray(actual.L_sin)[gauge])) == 0.
+        assert np.max(np.abs(np.asarray(actual.L_cos)[gauge])) == 0.
+    plan = make_variational_plan(source, radial_order=6, ntheta=12, nzeta=8)
+    expected = evaluate_tensorized_strong_force(source, plan)
+    actual = evaluate_tensorized_strong_force(imported, plan)
+    np.testing.assert_allclose(actual.B, expected.B, rtol=2e-11, atol=2e-11)
+    np.testing.assert_allclose(actual.force, expected.force, rtol=2e-10, atol=2e-6)
+
+    def scalar(step):
+        moved = replace(legacy, L_sin=legacy.L_sin * (1. + step))
+        fields = evaluate_tensorized_strong_force(lift(moved, runtime), plan)
+        return jnp.mean(fields.force**2)
+
+    h = 1e-5
+    fd = (scalar(h) - scalar(-h)) / (2 * h)
+    assert float(jax.grad(scalar)(0.)) == pytest.approx(float(fd), rel=2e-6)
+    # Removing a synthetic axis observation must not invent an unobserved
+    # spline coefficient when the interior data alone have insufficient rank.
+    short = prepare_runtime(inp, replace(runtime.resolution, ns=5))
+    for operation in (lambda: lift_high_order_state(_initial_state(short.setup), short,
+                                                   radial_basis=source.radial_basis),
+                      lambda: strong_force.traced_lift(short, radial_basis=source.radial_basis)):
+        with pytest.raises(ValueError, match="underdetermined"):
+            operation()
+
+
 def test_wout_lift_evaluates_supplied_profiles_analytically():
     """Pressure and prescribed iota bypass lossy full/half-grid exports."""
 
