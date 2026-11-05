@@ -252,9 +252,9 @@ CPU              1.3-1.6x        --           --
 
 At 384-row blocks the A4000 factor ratio is about 1.0x, so the GPU gain
 shrinks as the dense block work dominates.  The cutoff (2 to 8) changes
-little and is fixed at 8.  ``python benchmarks/block_solver.py --block-factor
-thomas`` (or ``cyclic_reduction``) reproduces the stage and workflow timings
-for either backend.
+little and is fixed at 8. These kernel measurements do not establish a
+complete gradient or Jacobian speedup. Compare both backends on the same
+converged problem, separating compilation, cache reload and warm execution.
 
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
