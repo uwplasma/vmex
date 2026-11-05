@@ -572,3 +572,111 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     assert terms["shape"] == pytest.approx(.5 * (z[1] - 1.) ** 2)
     assert sum(terms.values()) == pytest.approx(.5 * rows @ rows)
     assert Stage.metadata["term_slices"][0][2] == flat.size
+
+
+def test_free_map_failure_pairs_survive_nested_views_and_status_retries(monkeypatch):
+    from types import SimpleNamespace
+    from vmex.core.problem import FunctionProblem
+
+    spec = _spectrum(2)
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
+    shift = np.linspace(.01, .03, flat.size)
+    status, holder = {"valid": True, "calls": 0}, {}
+
+    def residual(x):
+        status["calls"] += 1
+        status["valid"] = x[0] < .5
+        holder["solved"] = object()
+        return (np.full(flat.size + 1, 7.) if not status["valid"]
+                else np.append(flat + shift*x[0], x[1] - 1.))
+
+    def jacobian(x):
+        assert status["valid"], "failed spectrum must not trigger a Jacobian retry"
+        result = np.column_stack((np.append(shift, 0.), np.append(np.zeros(flat.size), 1.),
+                                  np.zeros(flat.size + 1), np.zeros(flat.size + 1)))
+        if .5 < x[1] < .7:
+            result[:] = np.nan
+        if x[1] > .7:
+            holder["solved"] = object()  # a successful retry at a different root
+        return result
+
+    def valid(x):
+        assert np.shape(x) == (4,), "view certificate must receive the root vector"
+        return status["valid"]
+
+    root = FunctionProblem(np.zeros(4), residual=residual, residual_jac=jacobian,
+        names=("boundary0", "boundary1", "frozen2", "frozen3"),
+        metadata={"trial_valid": valid, "holder": holder})
+    stage = root.subproblem([0, 1, 2]).subproblem([0, 1])
+    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
+    ordinary = mapped.kernel
+    cutoff = float(flat[0] + .25*shift[0])
+
+    def kernel(**kwargs):
+        out = ordinary(**kwargs)
+        first = kwargs["bmnc_b"][0, 0]
+        # A finite residual with an undefined derivative must reject the pair.
+        rows = out["residuals1d"].at[0].set(jnp.sqrt((first - cutoff)**2))
+        out["residuals1d"] = jnp.where(first < flat[0] - .1*shift[0], jnp.nan, rows)
+        return out
+
+    mapped.kernel = kernel
+    problem = FreeMapProblem(stage, mapped, SimpleNamespace(state=None, runtime=None),
+        dict(a=.3, b=.1, c=-2., eta_min=2.8), tuple(FreeMapProblem.MAP_BOUNDS), weight=10.)
+    z = problem.x0 + .05
+    rows = problem.residual(z)
+    calls = status["calls"]
+    matrix = problem.residual_jac(z)
+    value, gradient = problem.fun_and_grad(z)
+    assert status["calls"] == calls
+    assert tuple(problem.values(z)) == tuple(FreeMapProblem.MAP_BOUNDS)
+    assert problem.names[:2] == ("boundary0", "boundary1")
+    assert value == pytest.approx(.5 * rows @ rows)
+    np.testing.assert_allclose(gradient, matrix.T @ rows)
+
+    failed = z.copy()
+    failed[0] = .8
+    wall, wall_jac = problem.residual_and_jac(failed)
+    assert np.isfinite(wall).all() and np.isfinite(wall_jac).all()
+    status["valid"] = True  # later external retries cannot relabel the cached pair
+    holder["solved"] = object()
+    assert not problem.metadata["trial_valid"](failed)
+    np.testing.assert_array_equal(problem.residual(failed), wall)
+    step = 1e-6
+    fd = np.column_stack([(problem.residual(failed + h) - problem.residual(failed - h))/(2*step)
+                          for h in step*np.eye(failed.size)])
+    np.testing.assert_allclose(wall_jac, fd, rtol=2e-7, atol=1e-6)
+    assert .5 * wall @ wall > 10 * value
+
+    # Residual success followed by derivative failure/root replacement is atomic.
+    for boundary in ((.05, .6), (.05, .8), (-.2, .05), (.25, .05)):
+        rejected = z.copy()
+        rejected[:2] = boundary
+        r = problem.residual(rejected)
+        j = problem.residual_jac(rejected)
+        cost, grad = problem.fun_and_grad(rejected)
+        assert not problem.metadata["trial_valid"](rejected)
+        assert np.isfinite(r).all() and np.isfinite(j).all()
+        assert cost == pytest.approx(.5 * r @ r)
+        np.testing.assert_allclose(grad, j.T @ r)
+
+    # Interleaving parent and nested view calls must not return another point's status.
+    problem.residual_and_jac(z)
+    view = problem.subproblem([0, 1], x=z)
+    nested = view.subproblem([0])
+    nested.residual([.8])
+    assert not nested.metadata["trial_valid"]([.8])
+    assert problem.metadata["trial_valid"](z)
+    assert nested.metadata["trial_valid"]([.05])
+    np.testing.assert_allclose(nested.residual_jac([.05]), problem.residual_jac(z)[:, :1])
+    scalar, grad = problem.fun_and_grad(z)
+    nested.fun_and_grad([.8])
+    repeated_scalar, repeated_grad = problem.fun_and_grad(z)
+    assert repeated_scalar == scalar
+    np.testing.assert_array_equal(repeated_grad, grad)
+    invalid_seed = root.subproblem([0, 1], x=np.array([.8, 0., 0., 0.]))
+    with pytest.raises(ValueError, match="starting point"):
+        FreeMapProblem(invalid_seed, mapped, SimpleNamespace(state=None, runtime=None),
+            dict(a=.3, b=.1, c=-2., eta_min=2.8), tuple(FreeMapProblem.MAP_BOUNDS), weight=10.)

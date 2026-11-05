@@ -1608,6 +1608,7 @@ def test_subproblem_stage_matches_a_problem_built_at_that_max_mode():
 
     probe = built_at_1.x0 + 0.01 * built_at_1.scales
     residual, jacobian = stage.residual_and_jac(probe)
+    assert stage.metadata["trial_valid"](probe)
     reference_residual, reference_jacobian = built_at_1.residual_and_jac(probe)
     assert jacobian.shape == reference_jacobian.shape
     np.testing.assert_allclose(residual, reference_residual, rtol=1e-10, atol=1e-12)

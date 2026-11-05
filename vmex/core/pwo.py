@@ -14,6 +14,7 @@ import jax
 import jax.numpy as jnp
 
 from .omnigenity import boozer_spectrum_state
+from .problem import FunctionProblem
 
 __all__ = ["squeezed_pwo_coordinates", "mapped_pwo_residual_from_boozer", "MappedPwOResidual",
            "FreeMapProblem", "one_field_period", "qa_precursor", "transport_backtrack"]
@@ -291,13 +292,15 @@ class MappedPwOResidual:
         return self.total_state(eq.state, eq.runtime)
 
 
-class FreeMapProblem:
+class FreeMapProblem(FunctionProblem):
     """A boundary stage with free map parameters in one least-squares problem.
 
     The stage's first residual rows must be ``mapped.spectrum_state``. The map
     does not change the equilibrium, so its Jacobian columns come directly from
     the kernel. Parameters move through a sigmoid inside ``MAP_BOUNDS``, and
-    ``limit_map`` keeps every value valid on every surface.
+    ``limit_map`` keeps every value valid on every surface. The common
+    ``FunctionProblem`` scalar and least-squares interfaces share finite,
+    consistent rejection rows when a stage or mapped trial is invalid.
     """
 
     MAP_BOUNDS = dict(a=(0., .8), b=(-1., 1.), c=(-4., -.5), eta_min=(2.2, 3.1))
@@ -312,13 +315,15 @@ class FreeMapProblem:
         low, high = (np.array([self.MAP_BOUNDS[k][i] for k in names]) for i in (0, 1))
         fixed = np.array([values[k] for k in names], dtype=float)
         index = np.array([i for i, k in enumerate(names) if k in free], dtype=int)
-        self.names, self.index = names, index
+        self._map_names, self.index = names, index
         xm, xn, nfp = booz["xm_b"], booz["xn_b"], booz["nfp"]
         options = dict(mapped.options, limit_map=True)
 
         def parameters(u):
             return jnp.asarray(fixed).at[index].set(low[index]+(high[index]-low[index])*jax.nn.sigmoid(u))
         self._parameters = parameters
+        self._trial = None
+        self._stage_valid = getattr(stage, "metadata", {}).get("trial_valid", lambda x: True)
 
         def rows(spectrum, u):
             out = mapped.kernel(
@@ -334,31 +339,88 @@ class FreeMapProblem:
         clipped = np.clip(fixed[index], low[index]+1e-3*(high[index]-low[index]), high[index]-1e-3*(high[index]-low[index]))
         fraction = (clipped-low[index])/(high[index]-low[index])
         self.x0 = np.concatenate((np.asarray(stage.x0), np.log(fraction/(1-fraction))))
+        self._nmap = jax.eval_shape(rows, jnp.zeros(self.nspec), jnp.zeros(index.size)).size
         self.metadata = dict(getattr(stage, "metadata", {}))
         if slices := self.metadata.get("term_slices"):
-            count = jax.eval_shape(rows, jnp.zeros(self.nspec), jnp.zeros(index.size)).size
-            shift = count - self.nspec
-            self.metadata["term_slices"] = (("pwO and map area", 0, count), *(
+            shift = self._nmap - self.nspec
+            self.metadata["term_slices"] = (("pwO and map area", 0, self._nmap), *(
                 (name, start + shift, stop + shift) for name, start, stop in slices[1:]))
+        self._wall_norm = 1.
+        super().__init__(self.x0, residual_and_jac=self._joint, value_and_grad=self._scalar,
+                         metadata=self.metadata,
+                         names=(*getattr(stage, "names", (f"x[{i}]" for i in range(self.nx))),
+                                *(f"logit({names[i]})" for i in index)),
+                         scales=np.r_[getattr(stage, "scales", np.ones(self.nx)), np.ones(index.size)])
+        initial = self.residual(self.x0)
+        if not self._trial[2]:
+            raise ValueError("the free-map starting point must have valid stage and map derivatives")
+        self._wall_norm = np.sqrt(10.) * max(np.linalg.norm(initial), 1.)
+        self.metadata["trial_valid"] = self._trial_valid
 
-    def residual(self, z):
-        """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""
+    def _wall(self, z):
+        """Return a rejection residual with smooth quadratic cost and exact Jacobian."""
+        size = self._nmap + self._trial[1].size - self.nspec
+        scale = np.maximum(np.abs(self.x0), .01)
+        delta = (np.asarray(z) - self.x0) / scale
+        growth = np.sqrt(1 + delta @ delta)
+        amplitude = self._wall_norm / np.sqrt(size)
+        row = amplitude * delta / (scale * growth)
+        return (np.full(size, amplitude * growth),
+                np.broadcast_to(row, (size, self.x0.size)).copy())
+
+    def _trial_valid(self, z):
+        """Read the certificate belonging to the cached joint evaluation."""
+        self.residual_and_jac(z)
+        return self._trial[2]
+
+    def _scalar(self, z):
+        """Share the exact residual/Jacobian cache with scalar optimizers."""
+        rows, jacobian = self.residual_and_jac(z)
+        return .5 * float(rows @ rows), jacobian.T @ rows
+
+    def _joint(self, z):
+        """Cache one coherent residual/Jacobian pair before exposing either."""
+        self._vg_cache = None
         raw = np.asarray(self.stage.residual(z[:self.nx]))
-        return np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
+        valid = bool(self._stage_valid(z[:self.nx])) and bool(np.isfinite(raw).all())
+        self._trial = [FunctionProblem._key(z), raw, valid]
+        if not valid:
+            return self._wall(z)
+        rows = np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
                                raw[self.nspec:]))
-
-    def residual_jac(self, z):
-        """Return the joint Jacobian over the boundary and the free map variables."""
-        raw = np.asarray(self.stage.residual(z[:self.nx]))
+        if not np.isfinite(rows).all():
+            self._trial[2] = False
+            return self._wall(z)
+        holder = self.metadata.get("holder", {})
+        solved = holder.get("solved")
         full = np.asarray(self.stage.residual_jac(z[:self.nx]))
+        if (not self._stage_valid(z[:self.nx]) or not np.isfinite(full).all()
+                or holder.get("solved") is not solved):
+            self._trial[2] = False
+            return self._wall(z)
         boundary, free = (np.asarray(q) for q in self._columns(
             jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]), jnp.asarray(full[:self.nspec])))
         rest = np.hstack((full[self.nspec:], np.zeros((full.shape[0]-self.nspec, free.shape[1]))))
-        return np.vstack((np.hstack((boundary, free)), rest))
+        jacobian = np.vstack((np.hstack((boundary, free)), rest))
+        if not np.isfinite(jacobian).all():
+            self._trial[2] = False
+            return self._wall(z)
+        return rows, jacobian
+
+    def subproblem(self, active, *, x=None):
+        """Return a plain FunctionProblem view over joint decision variables."""
+        base, free, frozen, embed = self._embedding(active, x)
+        def pair(u):
+            rows, jacobian = self.residual_and_jac(embed(u))
+            return rows, jacobian[:, free]
+        options = self._subproblem_kwargs(base, free, embed)
+        options["residual_and_jac"] = pair
+        view = FunctionProblem(base[free], **options)
+        return self._as_view(view, base, free, frozen, embed)
 
     def values(self, z):
         """Return the map parameters at ``z`` as a dictionary."""
-        return dict(zip(self.names, map(float, self._parameters(jnp.asarray(z[self.nx:])))))
+        return dict(zip(self._map_names, map(float, self._parameters(jnp.asarray(z[self.nx:])))))
 
 
 def one_field_period(inp):
