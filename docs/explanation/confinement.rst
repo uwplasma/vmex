@@ -700,6 +700,750 @@ returns one row :math:`\max(\lambda-\lambda_0,0)` per line (Gaur *et al.*
 usage recipe is in :doc:`/reference/objectives`.
 
 
+
+.. _neoclassical-heat-bounds:
+
+Neoclassical heat bounds
+-------------------------
+
+:class:`vmex.core.neoclassical.NeoclassicalHeatBound` minimizes an upper
+bound for a bounce-averaged, single-reference-well Lorentz model, retaining
+pitch diffusion and magnetic/electric tangential precession. The upper–lower gap
+bounds the remaining trial-space error. See the
+:ref:`optimization recipe <heat-bound-optimization>` and
+``examples/optimization/QA_optimization_heat_bounds.py``.
+
+The reference response vanishes in exact quasisymmetry, while ordinary
+neoclassical transport and bootstrap current remain. This objective does
+not certify total heat loss or an additive positive part of it. Passing
+particles, momentum-conserving collisions, finite orbit width, surface
+potential variation and multiple-well coupling require a fuller model.
+Orbit/Fourier errors and rounding are outside the variational interval.
+
+The two functionals
+~~~~~~~~~~~~~~~~~~~
+
+For periodic label :math:`\alpha` and pitch :math:`\lambda\in[a,b]`, write
+
+.. math::
+
+   (A+K)g=S,\qquad
+   A=-\frac{\nu_D}{w}\partial_\lambda(p\partial_\lambda),\qquad
+   K=\omega(\lambda)\partial_\alpha .
+
+The measure is :math:`w\,d\lambda\,d\alpha/(2\pi)`. Positive :math:`w,p`,
+:math:`\nu_D>0`, :math:`g(a)=0` and natural :math:`p g'(b)=0` make
+:math:`A` positive and self-adjoint. :math:`K` is skew-adjoint because
+:math:`w\omega` is independent of :math:`\alpha`. The response is
+:math:`D=\operatorname{Re}\langle S,g\rangle=\|g\|_A^2`.
+For admissible trials,
+
+.. math::
+
+   L[u]&=2\operatorname{Re}\langle S,u\rangle
+          -\|u\|_A^2-\|Ku\|_{A^{-1}}^2,\\
+   U[h]&=\|h\|_A^2+\|S-Kh\|_{A^{-1}}^2,\qquad L[u]\le D\le U[h].
+
+With :math:`z=(A-K)^{-1}S`, the exact trials are
+:math:`u_*=(g+z)/2` and :math:`h_*=(g-z)/2`. Completing squares gives
+
+.. math::
+
+   D-L[u]&=\|u-u_*\|_A^2+\|K(u-u_*)\|_{A^{-1}}^2,\\
+   U[h]-D&=\|h-h_*\|_A^2+\|K(h-h_*)\|_{A^{-1}}^2.
+
+These error identities establish the enclosure. The residual identity
+
+.. math::
+
+   U-L=\|S-Au-Kh\|_{A^{-1}}^2+\|Ah+Ku\|_{A^{-1}}^2
+
+measures its width. No division by precession occurs at resonance.
+This follows the complementary variational principle of
+`van Rij and Hirshman (1989) <https://doi.org/10.1063/1.859116>`_.
+
+The collision inverse is evaluated continuously:
+
+.. math::
+
+   \|r\|_{A^{-1}}^2=\frac1{\nu_D}\int_a^b\frac1{p(\lambda)}
+       \left|\int_\lambda^b w(t)r(t)\,dt\right|^2d\lambda .
+
+Piecewise-constant coefficients and continuous P1 trials make the cell
+integrands quartic; three-point Gauss integration is exact in real
+arithmetic. The bound encloses that differential equation, not just its
+discrete matrix. The mean Fourier response is integrated directly without
+a redundant solve. Enriching the trial space tightens both endpoints.
+
+For an analytical limit on each retained Fourier block, set
+:math:`T=A^{-1/2}KA^{-1/2}`, :math:`s=A^{-1/2}S` and
+:math:`C=\|s\|^2`. Then
+
+.. math::
+
+   D=\langle s,(I-T^2)^{-1}s\rangle,\qquad
+   C/(1+\Gamma^2)\le D\le C,\quad \Gamma\ge\|T\|.
+
+For small :math:`\Gamma`, :math:`D=C-\|Ts\|^2+R` with
+:math:`0\le R\le\Gamma^4 C`. This explains the collision-dominated limit
+and precession suppression while retaining pitch coupling.
+
+Geometry and heat normalization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Project the Boozer field onto a one-dimensional :math:`B_0` with
+:math:`dl_0=C_B/B_0\,d\zeta`. The QA/QH chart retains :math:`n=mN`
+harmonics; the toroidal chart retains :math:`m=0`. For one well,
+
+.. math::
+
+   J_0&=2\int\sqrt{1-\lambda B_0}\,dl_0,\qquad
+   \tau_g=2\int\frac{dl_0}{\sqrt{1-\lambda B_0}},\\
+   \delta J&=-2\int\frac{\delta B}{B_0}
+       \frac{1-\lambda B_0/2}{\sqrt{1-\lambda B_0}}\,dl_0,\\
+   J_{\psi0}&=\frac{C_{B,\psi}}{C_B}J_0
+       -2\int\frac{B_{0,\psi}}{B_0}
+       \frac{1-\lambda B_0/2}{\sqrt{1-\lambda B_0}}\,dl_0,\\
+   w&=\tau_g/2,\qquad
+   p=2\lambda\int\frac{\sqrt{1-\lambda B_0}}{B_0}\,dl_0 .
+
+Here :math:`\psi` is signed toroidal flux divided by :math:`2\pi`.
+For energy :math:`\mathcal E`, charge :math:`q` and periodic-label factor
+:math:`c=d\alpha/d\alpha_{\rm canonical}`,
+
+.. math::
+
+   S=\frac{dr}{d\psi}\frac{2\mathcal E}{q}
+          \frac{c\,\partial_\alpha\delta J}{\tau_g},\qquad
+   \omega=-\frac{2\mathcal E}{q}\frac{c\,J_{\psi0}}{\tau_g}
+           -c\,\frac{dr}{d\psi}E_r .
+
+The helical chart has :math:`c=-N_{\rm fp}/(\iota-N)`; the toroidal chart
+has :math:`c=1`. The first variation is valid at regular interior pitch;
+it supplies no uniform remainder near moving trapping boundaries.
+
+The conjugate forces are :math:`X_1=-d\ln(nT)/dr+qE_r/T` and
+:math:`X_T=-d\ln T/dr`. With :math:`x=mv^2/(2T)` and
+:math:`I_B=\int dl_0/B_0`,
+
+.. math::
+
+   \chi_T=\frac1{\sqrt{\pi}I_B}\int_0^\infty
+       \sqrt{x}e^{-x}(x-5/2)^2D_x\,dx .
+
+This is the pressure-force diagonal heat coefficient in m²/s. Signed
+heat flux, zero-particle-flux heat transport and fixed-speed diffusion
+are different quantities. The default positive speed rule returns matrix
+and Schur-complement intervals. ``continuous_energy=True`` integrates
+the entire Maxwell axis for exactly :math:`\nu_D(x)=\nu_{\rm th}x^{-3/2}`,
+including infinity; it returns heat and binwise intervals. Its static
+energy bins control trial approximation, not energy quadrature.
+
+JIT/JVP/VJP derivatives pass through equilibrium, Boozer geometry, bounce
+roots and trial solves on a fixed regular well branch. Normalized
+``pitch_fractions`` follow the whole reference trapping interval.
+Invalid topology, unresolved transverse modes and nonfinite data return
+an infinite objective. Fix the scale and trial topology within each stage.
+
+Near-axis limits
+~~~~~~~~~~~~~~~~~
+
+For first-order QS let :math:`\epsilon=\eta r` and
+
+.. math::
+
+   B/B_*=1-\epsilon\cos\chi+
+       \epsilon^2[b_0+b_2\cos2\chi+\widetilde b(\alpha,\chi)]
+       +O(\epsilon^3).
+
+With :math:`\kappa=k^2`, complete elliptic integrals :math:`K,E`,
+:math:`F=E-(1-\kappa)K` and :math:`\ell=|G_0|/(B_*|\iota_0-N|)`,
+
+.. math::
+
+   J_0=8\sqrt2\,\ell\sqrt\epsilon\,F[1+O(\epsilon)],\qquad
+   \tau_g=\frac{4\sqrt2\,\ell}{\sqrt\epsilon}K[1+O(\epsilon)],\qquad
+   A=\frac{\nu_D}{\epsilon}
+       [-K^{-1}\partial_\kappa(F\partial_\kappa)]+O(\nu_D).
+
+The trapped measure is :math:`O(\sqrt\epsilon)`. Second-order symmetry
+breaking gives :math:`\delta J=O(\epsilon^{3/2})` and
+:math:`S=O(\epsilon)`; magnetic precession is :math:`O(\epsilon^{-1})`.
+At fixed positive collision frequency and drift prefactors,
+
+.. math::
+
+   g=O(\epsilon^2),\qquad D_{\rm ref}=O(\epsilon^{7/2}).
+
+This is a model asymptotic. Physical bounce averaging also requires
+:math:`\nu_D\ell/v\ll\epsilon^{3/2}` and small orbit width; fixed physical
+parameters violate these conditions sufficiently close to the axis.
+Joint limits can change the response power.
+
+The first and second precession terms are derived by
+`Rodríguez and Mackenbach (2023) <https://doi.org/10.1017/S0022377823001125>`_.
+Regular :math:`\Phi(\psi)` gives :math:`E_r=O(r)` and electric precession
+:math:`O(1)`. Fixed nonzero :math:`E_r` is a different annular ordering.
+A common fractional power in particle fluxes cancels from ambipolarity;
+it does not itself imply fractional powers of :math:`E_r`.
+
+Two numerical choices follow:
+
+* ``radial_interpolation="radius"`` differentiates a quadratic interpolant
+  in :math:`r=a\sqrt{s}`, then applies :math:`dr/d\psi`. It reproduces
+  the radial derivative of :math:`B_0+rB_1+r^2B_2` exactly. The default
+  ``"flux"`` preserves earlier results.
+* Well-relative diagnostics compare :math:`\delta B` with
+  :math:`B_{0,\max}-B_{0,\min}`. Small :math:`\delta B/B_0` alone is
+  insufficient when the well shrinks.
+
+Generic QI has finite on-axis variation :math:`B_0(\varphi)` and different
+power counting. Its second-order action contains both
+:math:`\delta J[B_2]` and :math:`\tfrac12\delta^2J[B_1,B_1]`.
+The linear-action adapter omits the latter; an exactly translated well
+demonstrates the missing cancellation. It is not a controlled
+second-order QI model.
+
+The effective trapped fraction has :math:`f_t\sim1.4624\sqrt{\eta r}`
+in the QS outer limit. A half-power bootstrap expansion requires a
+separate momentum-conserving closure; this even-in-parallel-velocity
+response cannot calculate bootstrap current. The source-dependent
+potato-orbit region requires the nonlocal treatment discussed by
+`Helander (2000) <https://doi.org/10.1063/1.874137>`_.
+
+Validation and design use
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The reference campaign encloses 832/832 independent exact-cell responses:
+169 manufactured and 221 each for QA, QH and a toroidal QI projection.
+At all 17 sampled fields from −1 to +1 kV/m, the 12-node speed-rule width
+is at most 10% on sampled collision rows 10–100 s⁻¹ for QA and
+0.1–100 s⁻¹ for QH/QI. Three continuous-energy widths are
+5.85%, 6.66% and 5.95%. These are sampled-grid/model statements.
+
+An eight-iteration, three-coefficient QA optimization gives continuous-energy
+intervals for the maximum over six scenarios:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Shape
+     - Lower (m²/s)
+     - Upper (m²/s)
+   * - Seed
+     - 0.0100217194
+     - 0.0104519299
+   * - Candidate
+     - 0.0008243780
+     - 0.0008826379
+
+The intervals establish a 91.19% decrease of the maximum reference response;
+pointwise guaranteed decreases are 82.72–92.36%. AD differs from re-solved
+finite differences by 0.08925%. The run reaches its iteration budget.
+A higher Boozer bandwidth changes one candidate upper endpoint by 11%,
+so a narrow variational interval does not establish geometry convergence.
+
+Independent DKX fixed-speed Lorentz diffusion at 1 keV and zero electric
+field changes by −5.8815% at 100 s⁻¹ and +0.1254% at 1000 s⁻¹; the
+adverse sign survives angular refinement. A separate QA result is
+4.73 million times the reference upper endpoint. These comparisons
+establish no uniform reduction of physical heat transport.
+
+Near-axis checks use second-order QA/QH equilibrium coefficients from QSC.
+All 48 model intervals enclose exact-cell references. Last-three-radius
+exponents 3.5033 (QA) and 3.5039 (QH) approach 7/2. Independent orbit
+integrals show first-order relative errors proportional to :math:`\epsilon`
+and second-order errors proportional to :math:`\epsilon^2` for action
+and precession. These validate the stated reference equation, not a
+full-transport closure.
+
+Acceptance needs separate variational, orbit/radial/Fourier and fuller
+kinetic checks. A physical application of the conserving theorem below must
+establish its orbit measure and skew operator, include the relevant
+trapped–passing coupling, and resolve geometry and finite-orbit-width effects.
+
+.. _conserving-collision-bounds:
+
+Conserving Coulomb collision forms
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:func:`vmex.core.neoclassical.conserving_transport_bounds` evaluates the
+complementary construction for supplied collision and orbit forms, retaining
+the local conserved moments. It accepts rectangular orbit images so that a
+continuous residual can be represented in a larger space than the trials.
+This API supplies the constrained algebra; the Boozer objective above
+continues to use its stated Lorentz model.
+
+For Maxwellians :math:`M_a` at a common temperature and common flow, the
+full linearized Landau collision form is
+
+.. math::
+
+   a_C(f,g)=\frac12\sum_{a,b}\gamma_{ab}\int
+       \frac{M_aM_b'}{|\boldsymbol u|}
+       (\Pi_{\boldsymbol u}\Delta_{ab}f)^*\cdot
+       (\Pi_{\boldsymbol u}\Delta_{ab}g)\,d\mu_x\,d^3v\,d^3v',
+
+where :math:`\boldsymbol u=\boldsymbol v-\boldsymbol v'`,
+:math:`\Pi_{\boldsymbol u}=I-\boldsymbol u\boldsymbol u^T/u^2`,
+:math:`\Delta_{ab}g=\nabla_vg_a/m_a-\nabla_{v'}g_b/m_b`, and the symmetric
+coefficients :math:`\gamma_{ab}` contain the Coulomb constants.
+Both test-particle and field-particle terms are included. Write
+:math:`a_C(f,g)=\langle\mathcal B f,\mathcal B g\rangle`, so
+:math:`A_C=\mathcal B^*\mathcal B`. At each position the kernel contains
+species densities, common momentum and common energy. Streaming couples
+these local fields to the dissipative velocity sector.
+
+Let :math:`(A_C+K)g=S` with :math:`K^*=-K` in the stated kinetic measure.
+Choose collision pair fluxes satisfying
+:math:`\mathcal B^*F_u=Ku` and :math:`\mathcal B^*F_h=S-Kh`. Then
+
+.. math::
+
+   L&=2\operatorname{Re}\langle S,u\rangle
+        -\|\mathcal B u\|^2-\|F_u\|^2,\\
+   U&=\|\mathcal B h\|^2+\|F_h\|^2,\\
+   D-L&=\|\mathcal B g-\mathcal B u+F_u\|^2,\qquad
+   U-D=\|\mathcal B h+F_h-\mathcal B g\|^2.
+
+These identities establish the continuum bounds without a Coulomb spectral
+gap. Flux feasibility requires :math:`PKu=0` and :math:`P(S-Kh)=0`, where
+:math:`P` projects onto the local collision kernel. Removing all of that
+kernel changes the response. For example,
+
+.. math::
+
+   A=\begin{pmatrix}0&0\\0&\nu\end{pmatrix},\qquad
+   K=\begin{pmatrix}0&k\\-k&0\end{pmatrix}
+
+gives :math:`D=\nu/k^2` for :math:`S=(1,0)^T`, but :math:`D=0` for
+:math:`S=(0,1)^T`. An unconstrained pseudoinverse gives a false zero upper
+in the first case and a false positive lower in the second.
+The first balance grows with collision frequency because the source acts
+on a conserved moment whose flux is set by streaming.
+
+An explicit continuous inverse-norm majorant follows from auxiliary Landau
+forms :math:`a_p` with kernel :math:`|u|^p\Pi_u`, for even
+:math:`p=2,4,\ldots`. Their operators map complete degree-:math:`d`
+velocity polynomials to degree at most :math:`d+p-2`. A polynomial flux
+
+.. math::
+
+   F=\sum_p |u|^{p+1}\mathcal B q_p,\qquad
+   \sum_p A_pq_p=r
+
+therefore satisfies :math:`\mathcal B^*F=r` throughout velocity space when
+all resulting polynomial coefficients match. Its norm is
+:math:`\sum_{p,q}a_{p+q+1}(q_p,q_q)`. Minimizing this finite quadratic form
+gives a Gram matrix :math:`G` such that :math:`\|r\|_{A_C^\dagger}^2\le r^*Gr`.
+The Maxwell kernel :math:`p=2` supplies a feasible initial lift; enriching
+the flux space can tighten the bound. A truncated Coulomb matrix inverse
+does not supply this continuum majorant.
+
+The committed tests include exact low-degree brackets. For unit mass,
+density and pair coefficient at :math:`T=1/2`, the normalized parallel-heat
+polynomial has :math:`a_C=16\sqrt{2/\pi}/15`, :math:`a_2=8` and
+:math:`a_5=1024\sqrt{2/\pi}/5`. Its one-trial lower and Maxwell-flux upper
+are :math:`15/[16\sqrt{2/\pi}]` and :math:`16\sqrt{2/\pi}/5`, respectively.
+The tests also check invariant coupling, nested trial and inverse-majorant
+spaces, complex Fourier data and derivatives of moving constraint charts.
+
+With velocity normalized to the thermal speed, define
+:math:`q=(2/\sqrt{5})v_\parallel(v^2-5/2)` and
+:math:`D_q=\langle q,A_C^\dagger q\rangle` at unit collision strength.
+The usual parallel ion conductivity coefficient is
+:math:`\widehat\kappa=(10/3)\sqrt{2/\pi}\,D_q`; two Sonine polynomials
+give :math:`125/32`. This conversion distinguishes the normalized collision
+response from the conventional conductivity coefficient.
+
+Near a quasisymmetric magnetic axis, a regular expansion must retain the
+constant parallel flow allowed by the leading collision equation. The
+next-order momentum equation selects it. Imposing zero mean flow instead
+generally changes the leading heat response. This is another reason to
+enforce the local moment equations rather than remove their nullspace.
+Regular finite-collision expansions and the trapped-particle
+low-collision limit require separate orderings.
+
+Signed observables require an adjoint estimate. For
+:math:`(A_C-K)z=J`, feasible primal and adjoint residual fluxes with norms
+:math:`\eta_g,\eta_z` give
+
+.. math::
+
+   \left|\operatorname{Re}\langle J,g\rangle-c\right|
+       \le\eta_g\eta_z,\qquad
+   c=\operatorname{Re}\{\langle J,g_0\rangle+
+               \langle z_0,S-(A_C+K)g_0\rangle\}.
+
+:func:`vmex.core.neoclassical.conserving_goal_interval` evaluates this
+interval. Polarizing dissipative bounds alone omits the antisymmetric
+cross response. The physical current moment and its kinetic model remain
+caller inputs.
+
+Full-Fokker–Planck variational transport predates this implementation:
+see `Taguchi (1982) <https://doi.org/10.1143/JPSJ.51.1630>`_ and
+`van Rij and Hirshman (1989) <https://doi.org/10.1063/1.859116>`_.
+The common-temperature assumption is essential for this exact Landau
+entropy form; unequal-temperature symmetry-restoring operators are
+different models, as discussed by
+`Sugama et al. (2019) <https://doi.org/10.1063/1.5115440>`_.
+``valid`` checks the supplied finite algebra and conservation chart. The
+caller must establish the exact orbit images, continuous inverse majorant,
+measure and boundary conditions; rounding remains outside the theorem.
+
+.. _full-coulomb-stellarator-proxy:
+
+Full-Coulomb stellarator upper objective
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:class:`vmex.core.neoclassical.ConservingHeatBound` evaluates a continuous
+single-species Landau upper bound directly from the equilibrium's Boozer
+spectrum. It includes the test-particle and field-particle collision terms,
+parallel streaming, mirror trapping and the incompressible DKES electric
+drift. Tangential magnetic drift and interspecies collisions are outside
+this objective. To specify the physical response, write the distribution
+as a Maxwellian plus a perturbation, :math:`f=F_M+f_1`, and use the standard
+pressure and temperature forces
+
+.. math::
+
+   A_1=\frac{d\ln p}{d\psi}+\frac{Ze\Phi'}{T},\qquad
+   A_2=\frac{d\ln T}{d\psi},\qquad
+   \frac{\partial_\psi F_M|_{\mathcal E}}{F_M}
+      =A_1+\left(\frac{mv^2}{2T}-\frac52\right)A_2.
+
+Here :math:`\mathcal E=mv^2/2+Ze\Phi` and temperature is in energy units.
+The conductive heat flux is
+
+.. math::
+
+   Q^\psi=\left\langle\int\left(\frac{mv^2}{2}-\frac{5T}{2}\right)
+                (\boldsymbol v_d\cdot\nabla\psi)f_1\,d^3v\right\rangle_\psi,
+   \qquad Q^\psi/T=-L_{21}A_1-L_{22}A_2.
+
+The objective bounds :math:`\chi_r=(L_{22}/n)(dr/d\psi)^2` at
+:math:`A_1=0`, so :math:`Q^r=-n\chi_r\,dT/dr`. Setting the particle flux
+to zero would require a different combination of transport coefficients.
+These conventions and the incompressible trajectory choice follow
+`Landreman et al. (2014) <https://doi.org/10.1063/1.4870077>`_.
+
+The trajectory restriction is also an entropy requirement. For motion that
+preserves :math:`F_M`, let :math:`\mathcal V=\dot z^a\partial_a` act on
+:math:`g=f_1/F_M`, with entropy measure :math:`w\,dz=\mathcal J F_M\,dz`.
+With periodic or matching zero-flux boundary conditions, integration by
+parts gives
+
+.. math::
+
+   \operatorname{Re}(g,\mathcal Vg)_w
+      =-\frac12\int w\,\sigma\,|g|^2\,dz,
+   \qquad \sigma=\frac{1}{w}\partial_a(w\dot z^a).
+
+A nonzero :math:`\sigma` therefore prevents treating this advection as the
+skew operator in the complementary bound. Changing only the entropy weight
+can also change the Landau collision adjoint. A magnetic-drift extension
+must establish the orbit measure, collision form and local moment balances
+together. The distinct local equations discussed by
+`Sugama et al. (2016) <https://doi.org/10.1063/1.4945618>`_ illustrate why
+conservation, entropy production and intrinsic ambipolarity need separate
+checks. The current objective does not implement that extension.
+
+The underlying :func:`vmex.core.neoclassical.conserving_stellarator_proxy`
+takes a finite Fourier representation of :math:`J=\widehat B^{-2}` in
+:math:`x=\theta-h\zeta`, :math:`y=N_{\rm fp}\zeta`. Its complex coefficients
+define the real part of the Fourier sum; :math:`h` is an integer multiple
+of :math:`N_{\rm fp}`. Define
+
+.. math::
+
+   D=(\iota-h)\partial_x+N_{\rm fp}\partial_y,\qquad
+   D_\perp=\frac{G+hI}{G+\iota I}\partial_x
+                  -\frac{N_{\rm fp}I}{G+\iota I}\partial_y,
+   \qquad P_0=D^{-1}D_\perp J,\quad\langle P_0\rangle=0.
+
+Angle brackets here denote a uniform angular average. Each nonconstant
+Fourier coefficient of :math:`P_0` is obtained by multiplying that of
+:math:`J` by the ratio of the :math:`D_\perp` and :math:`D` wave numbers.
+The implementation rejects a resonant chart; it does not replace the
+denominator by a fitted floor. Set :math:`P=P_0+c` and
+
+.. math::
+
+   F=JD_\perp J-PDJ,\qquad
+   E=JD_\perp P-\tfrac12PD_\perp J.
+
+The odd heat-flow trial :math:`-\widehat B P v_\parallel(v^2-5/2)` satisfies
+the local particle, momentum and energy balances. Its residual contains
+only the heat polynomial :math:`q_1=v_\parallel(v^2-5/2)` and the stress
+polynomial :math:`q_2=(v_\parallel^2-v^2/3)(v^2-5/2)`. Continuous inverse
+norm bounds :math:`\mu_j\ge\langle q_j,A_C^\dagger q_j\rangle` give
+
+.. math::
+
+   U(c)=\frac1{\langle J\rangle}\left[
+      \frac{4\nu}{3}\sqrt{\frac2\pi}\langle P^2\rangle
+      +\frac{9\mu_2}{16\nu}\left\langle\frac{F^2}{J^3}\right\rangle
+      +\frac{(E_*\langle J\rangle)^2\mu_1}{\nu}
+                       \left\langle\frac{E^2}{J^4}\right\rangle\right].
+
+This is a positive scalar quadratic in :math:`c`; its minimum requires
+one division. The defaults are the explicit Maxwell-kernel flux lifts
+
+.. math::
+
+   A_2^{-1}q_1=q_1/8,\quad \mu_1=4\sqrt{2/\pi},\qquad
+   A_2^{-1}q_2=(v_\parallel^2-v^2/3)(v^2/14-1/6),\quad
+   \mu_2=\frac{9368}{2205}\sqrt{2/\pi}.
+
+These auxiliary fluxes bound the inverse of the Coulomb operator; they do
+not replace its collision law by Maxwell-molecule collisions. Sharper
+continuous inverse bounds may be supplied. A finite Coulomb matrix inverse
+alone is insufficient. At :math:`E_*=0`, an isobaric trial also gives
+:math:`L=25\nu\langle P_0^2\rangle/(16\mu_1\langle J\rangle)`.
+At finite electric field this compact objective returns the universal
+lower endpoint zero.
+
+An optional ``macro_order`` adds a correlated flow to the upper trial.
+For a finite polynomial generator :math:`\varphi`, set
+:math:`\Psi=J^3\varphi`, with density and parallel-flow moments
+:math:`n=-D\Psi` and :math:`j=eD_\perp\Psi`, where
+:math:`e=E_*\langle J\rangle`. Parallel stress and energy moments are
+completed by periodic parallel primitives so that the local particle,
+momentum and energy balances hold identically. The resulting homogeneous
+trial :math:`w=P_e+\widehat B P_o` has velocity degree three; its complete
+orbit image has degree four. A finite binomial polynomial for
+:math:`J^{-3}` times :math:`D^{-1}P_0` supplies the scalar generator.
+The expanded primitive band must also be nonresonant.
+
+The affine family is :math:`h=h_0+c_0(-\widehat Bq_1)+c_1w`, with
+:math:`h_0=-\widehat BP_0q_1`. Its two coefficients minimize the same
+positive collision and residual functional. Static Maxwell-kernel flux
+identities supply the complete degree-four inverse majorant, including
+the coupled stress modes. The heat block can use ``heat_inverse_bound``;
+``stress_inverse_bound`` applies to the scalar diagnostic only, since a
+single stress norm does not determine that complete block. With the
+compatible default constants, this affine family contains the scalar
+family and can improve its upper bound.
+
+The selected affine branch is differentiated directly, with no minimum
+switch between two objectives. It reports ``scalar_upper`` for comparison
+and retains the original lower endpoint. Grid forms are assembled once;
+only small polynomial matrices depend on each collision/field scenario.
+After solving for the coefficients, the implementation combines the
+residual fields before evaluating their positive norms. This avoids
+cancellation in an expanded quadratic when two trial contributions
+nearly cancel; no clipping or change of the bound is required.
+The moment constraints hold by construction; the positive two-variable
+solve is checked before returning a valid result. As with the scalar bound, geometry-fitting and
+floating-point errors remain separate.
+
+Rational angular weights have an explicit integration correction. Write
+:math:`J=j_0(1-r_J)` and establish
+:math:`\|r_J\|_\infty\le\rho<1` from the Fourier amplitudes. For integer
+:math:`p`, the tail after degree :math:`M` in the binomial expansion is
+
+.. math::
+
+   T_{p,M}(\rho)=\rho^{M+1}\sum_{k=0}^{p-1}
+      {M+p\choose p-1-k}\frac{\rho^k}{(1-\rho)^{k+1}}.
+
+The grid resolves every term through degree :math:`M+4` in the retained
+Fourier band. For the nonnegative numerators :math:`F^2,E^2`, replacing
+the sampled weight :math:`J^{-p}` by
+:math:`J^{-p}+2j_0^{-p}T_{p,M}` bounds the remaining quadrature error.
+The scalar minimization uses these corrected weights. A fixed
+``rho_bound`` above the current relative Fourier amplitude makes this
+tail correction differentiable when a Fourier coefficient crosses zero.
+Floating-point rounding remains separate from the analytic bound.
+For generator order :math:`L`, the correlated refinement uses
+:math:`(M+2L+12)K_i+1` points in each angular direction to resolve its
+complete polynomial products before applying the same weight-tail bound.
+
+``ConservingHeatBound`` fits :math:`J` on the chosen grid and reports the
+sampled relative magnetic-field fitting error. The interval applies to
+that finite representation. Refine ``geometry_order``, ``fit_grid`` and
+the Boozer transform independently; the integration correction does not
+bound the change to a different magnetic field.
+
+The state objective returns heat diffusivity in m\ :sup:`2`/s. With
+:math:`v_t=\sqrt{2eT_{\rm eV}/m}` and
+:math:`\tau=|G+\iota I|/(B_{00}v_t)`, its operating inputs become
+
+.. math::
+
+   \nu=\tau\nu_C,\qquad
+   E_*=-\tau E_r\frac{dr}{d\psi},\qquad
+   \chi_r=\left(\frac{2T_{\rm eV}}{Z}\right)^2
+              \tau\left(\frac{dr}{d\psi}\right)^2D.
+
+Here ``collision_strengths`` means
+:math:`\nu_C=n(Ze)^4\ln\Lambda/(8\pi\epsilon_0^2m^2v_t^3)` in
+s\ :sup:`-1`, and ``radial_electric_fields`` means :math:`E_r=-d\Phi/dr`
+in V/m. The adapter uses the signed toroidal flux recorded in ``psi_b``
+and its corresponding ``psi_edge``. A native WOUT reader may choose the
+opposite radial orientation: compare the same physical :math:`E_r` after
+converting it separately in each chart, rather than copying :math:`E_*`.
+The flux radius :math:`r=a\sqrt{\psi/\psi_{\rm edge}}` fixes its derivative
+even when the computational radial mesh uses a nonlinear flux profile.
+The loss is the smooth upper envelope over the selected surfaces,
+collision strengths and electric fields; ``scale`` is a fixed positive
+diffusivity scale in m\ :sup:`2`/s.
+
+Checking an optimized boundary
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Compare seed and candidate at the same physical density, temperature and
+electric field. Their normalized :math:`\nu`, :math:`E_*` and diffusivity
+units generally differ. These are fixed local operating values with
+:math:`A_1=0`; the complete pressure profile and an ambipolar electric field
+are not determined by this comparison. The example uses vacuum MHD
+equilibria and prescribes its kinetic profiles for transport evaluation.
+If separate feasible trials give a seed lower
+value :math:`L_s` and candidate upper value :math:`U_c` in m²/s, then
+:math:`\chi_c/\chi_s\le U_c/L_s` when :math:`L_s>0`.
+This comparison measures the response decrease independently of how tight
+the inexpensive optimization objective is.
+
+A 48-coefficient vacuum QA boundary search from the unperturbed
+`Landreman--Paul configuration <https://doi.org/10.1103/PhysRevLett.128.035001>`_
+uses six fixed deuterium operating points at 100 eV and 1 keV. It fixes
+flux and the constant radial boundary coefficient and constrains aspect
+ratio, volume and rotational transform at :math:`s=0.25,0.5,0.75` within
+0.1% of their seed values. Select operating points to cover the intended
+domain; every endpoint comparison uses its own physical normalization and
+equilibrium refinement.
+
+.. COULOMB_ENDPOINT_RESULTS
+
+The retained boundary below passes the ``ns=50`` equilibrium refinement with
+``mpol=ntor=10``, a 40-by-40 equilibrium angular grid, Boozer bandwidth 16
+and finite-J band ``(16, 20)``. The maximum relative constraint change is
+0.06420%; the seed and candidate projected force residuals are below
+:math:`1.2\,10^{-13}`. At :math:`s=0.5`, the scalar upper values are:
+
+.. list-table:: Refined upper objectives in m²/s
+   :header-rows: 1
+   :widths: 14 20 22 22 22
+
+   * - :math:`T` (eV)
+     - :math:`E_r` (V/m)
+     - Seed upper
+     - Candidate upper
+     - Upper decrease
+   * - 100
+     - 0
+     - 0.05828122
+     - 0.04025793
+     - 30.92%
+   * - 100
+     - ±100
+     - 0.05828123
+     - 0.04025793
+     - 30.92%
+   * - 1000
+     - 0
+     - 0.45618132
+     - 0.35837079
+     - 21.44%
+   * - 1000
+     - ±1000
+     - 0.45630635
+     - 0.35847936
+     - 21.44%
+
+The cold cases use :math:`n=1.5\,10^{20}` m⁻³ and :math:`\ln\Lambda=15`;
+the warm cases use :math:`n=10^{20}` m⁻³ and :math:`\ln\Lambda=17`.
+At 100 eV and zero field, the seed lower value is 0.04558378 m²/s.
+Its separation from the candidate upper implies at least an 11.68%
+decrease of the specified heat response. The compact warm intervals
+overlap. These are floating-point evaluations of continuous bounds on
+the stated finite-J fields. Their gap excludes physical-field fitting
+error and floating-point rounding. The boundary recipe and example
+reproduce this comparison.
+
+Repeating the endpoint checks with ``FINAL_NS=74`` in the example changes
+each of these six upper values by less than 0.010% relative to ``ns=50``.
+The cold and warm upper decreases remain 30.92% and 21.44%, respectively.
+The largest relative constraint change is 0.06629%, and both projected
+force residuals are below :math:`2.1\,10^{-13}`, with no Jacobian sign
+reversal. At 100 eV and zero field the seed lower and candidate upper
+become 0.04558505 and 0.04026193 m²/s, establishing at least an 11.67%
+decrease within this model. This radial refinement is an observed
+stability check, not an equilibrium-discretization error bound.
+
+The example reports the upper objectives and all five relative constraint
+changes. Its acceptance flag concerns this stated comparison. A sharper
+response assessment can enrich compatible trials at fixed geometry and
+collision majorant; adding toroidal harmonics may matter even when poloidal
+enrichment has saturated. Check the local collision moments again for each
+new trial family. The analytic angular remainder, floating rounding and
+transfer to a different magnetic field remain separate errors.
+
+An upper objective that becomes large at a held-out operating point
+indicates loss of useful bound control there. It does not establish an
+increase of the kinetic response. Check both endpoints with refined
+geometry and an independently resolved kinetic calculation before
+adopting the boundary.
+
+.. _coulomb-boundary-example:
+
+Reconstructing the boundary
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following recipe writes the retained search endpoint from the bundled
+unperturbed seed. Each row is ``(n, m, RBC, ZBS)``, with boundary coefficients
+in metres. Run it from the repository root, then apply the endpoint checks
+above. The native input has SHA-256
+``3462ecbd4380a8c1d300c34e64cc4a488896dd7949f3765647da6be067293b9f``.
+
+.. code-block:: python
+
+   from dataclasses import replace
+   import numpy as np
+   from vmex import VmecInput
+
+   seed = VmecInput.from_file(
+       "examples/data/input.LandremanPaul2021_QA_reactorScale_lowres")
+   seed = seed.change_resolution(mpol=8, ntor=8, ntheta=32, nzeta=32)
+   seed = replace(seed, delt=.7, ns_array=np.array([26]),
+                  ftol_array=np.array([1.e-16]), niter_array=np.array([9000]))
+   rows = [
+       (1, 0, 1.9064422466369999, -1.2717444403250922),
+       (2, 0, 0.1476500390007488, -0.14746788615691736),
+       (3, 0, 0.0018406503104060517, -0.0040993556299859521),
+       (-3, 1, 0.0096989209621897374, 0.0065806954120303943),
+       (-2, 1, 0.058217494048338828, 0.062583612808483263),
+       (-1, 1, 0.39142936145197327, 0.30144754643462107),
+       (0, 1, 1.594901416557253, 2.431203441748),
+       (1, 1, -1.0928541760753896, 1.0222265191955899),
+       (2, 1, -0.27374155746879725, 0.21538510766550095),
+       (3, 1, -0.025452927795619099, 0.022604425382304758),
+       (-3, 2, -0.00064697001239291002, -0.0010071515259912577),
+       (-2, 2, 0.006438238423242813, 0.0092116460650563219),
+       (-1, 2, 0.053852798276748444, 0.0083805736939911567),
+       (0, 2, 0.18828732922468697, 0.17096640715286199),
+       (1, 2, 0.25271545445405619, 0.044091999570264072),
+       (2, 2, 0.055954727436566196, -0.051939931557914945),
+       (3, 2, 0.020099038045834072, -0.018246156105023652),
+       (-3, 3, 0.00024787252381497902, -0.0014337242687387029),
+       (-2, 3, 0.0031344060215325298, 0.003085192461101849),
+       (-1, 3, -0.011828772796366745, -0.018800328415144677),
+       (0, 3, -0.013591653359483487, 0.014461732269095485),
+       (1, 3, -0.006624854825894172, 0.020563318848362558),
+       (2, 3, 0.0012170244651980371, 0.01226530956399784),
+       (3, 3, -0.010785154199466391, 0.0085719040380534198),
+   ]
+   rbc, zbs = seed.rbc.copy(), seed.zbs.copy()
+   for n, m, r, z in rows:
+       rbc[seed.ntor + n, m], zbs[seed.ntor + n, m] = r, z
+   replace(seed, rbc=rbc, zbs=zbs).to_indata("input.QA_retained")
+
+.. code-block:: console
+
+   VMEX_HEAT_BOUND_MODEL=coulomb VMEX_HEAT_BOUND_INCLUDE_HOT=0 \
+   VMEX_HEAT_BOUND_MAX_MODE=3 VMEX_HEAT_BOUND_CANDIDATE="$PWD/input.QA_retained" \
+     python examples/optimization/QA_optimization_heat_bounds.py
+
 Bootstrap current (Redl)
 ------------------------
 

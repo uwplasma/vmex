@@ -196,6 +196,9 @@ __all__ = [
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_smooth_state",  # noqa: F822 - provided lazily by __getattr__ below
+    "NeoclassicalHeatBound",  # noqa: F822 - provided lazily by __getattr__ below
+    "ConservingHeatBound",  # noqa: F822 - provided lazily by __getattr__ below
+    "neoclassical_heat_bounds_state",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
@@ -212,6 +215,9 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
     if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
         from . import gammac
         return getattr(gammac, name)
+    if name in ("NeoclassicalHeatBound", "ConservingHeatBound", "neoclassical_heat_bounds_state"):
+        from . import neoclassical
+        return getattr(neoclassical, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

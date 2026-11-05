@@ -701,6 +701,193 @@ coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.
 
+.. _heat-bound-optimization:
+
+Reference-model heat bounds
+---------------------------
+
+:class:`vmex.core.neoclassical.NeoclassicalHeatBound` minimizes a
+smooth maximum of upper heat-diffusivity bounds over prescribed surfaces,
+collision frequencies and electric fields. It retains reference bounce
+geometry, Lorentz pitch diffusion and magnetic/electric tangential precession.
+The upper–lower gap bounds the uncertainty remaining from
+the trial space. The mathematical scope and proof are in
+:ref:`neoclassical-heat-bounds`.
+
+.. code-block:: python
+
+   heat = vmex.NeoclassicalHeatBound(
+       surfaces=[0.5], pitch_fractions=np.linspace(0.0, 1.0, 49),
+       temperature_ev=1000.0, collision_frequencies=[100.0, 1000.0],
+       radial_electric_fields=[-250.0, 0.0, 250.0],
+       helicity_m=1, helicity_n=0, well_center=0.0,
+       mboz=6, nboz=6, nalpha=13, nenergy=8,
+       scale=reference_diffusivity,
+   )
+
+   def loss(state, runtime):
+       return heat.total_state(state, runtime) + shape_constraints(state, runtime)
+
+   problem = opt.VmecProblem.from_loss(inp, loss, max_mode=1)
+
+``temperature_ev`` is in eV, collision frequencies in s\ :sup:`-1`, electric
+fields in V/m, and diffusivities in m\ :sup:`2`/s. The default speed law
+is the stated cold-scatterer Lorentz model; other positive deflection
+frequencies can be supplied with ``collision_factors``. The objective's
+``scale`` is a fixed positive reference diffusivity. It must not change with
+the candidate geometry.
+
+Full normalized pitch fractions include the current reference well's whole
+trapped interval at every shape. Fixed physical ``pitch_edges`` are also
+supported, but a restricted interval changes the boundary-value problem and
+cannot certify omitted populations. Insufficient transverse Fourier
+resolution and changes to the selected well branch reject a candidate.
+
+``compute_state`` returns both bounds, the relative gap, transport-matrix
+and zero-particle-flux heat intervals, and reference-geometry diagnostics.
+The default uses a positive discrete speed rule. To enclose the continuous
+Maxwellian integral for the exact cold-scatterer Lorentz law, set
+``continuous_energy=True`` and supply static ``energy_edges`` beginning at
+zero and ending at infinity. The analytic mode returns heat and per-bin
+intervals instead of monoenergetic, matrix and Schur-complement fields.
+Refine the energy trial bins until their bound gap is useful, then hold
+them fixed during differentiation and optimization. A small discrete-speed
+gap does not certify that an energy resonance has been integrated accurately.
+The smooth maximum bounds the sampled scenarios; a scan alone does not
+certify every collision frequency and electric field between its samples.
+The certificate excludes the reference-field approximation, passing and
+exactly omnigenous background transport, finite orbit width, continuous
+energy quadrature in the default mode, and floating-point rounding. A general QI field need not
+be close to the chosen one-dimensional reference.
+
+Run ``examples/optimization/QA_optimization_heat_bounds.py`` for a boundary
+optimization with an independently re-solved directional derivative check,
+refined orbit/pitch/energy evaluation, and a final radial-resolution check.
+The example writes the candidate input, matched final-grid WOUTs and a compact
+JSON result. It evaluates the refined bound at both endpoints; tighter energy
+trial bins and orbit/Fourier resolution are separate convergence checks.
+Use ``radial_interpolation="radius"`` for near-axis radial stencils and inspect
+``reference_perturbation_well_rms`` and ``reference_perturbation_well_max``.
+These diagnose closeness relative to the shrinking well depth.
+
+The independent full-angle comparison in :ref:`neoclassical-heat-bounds`
+shows why a fuller kinetic check over the intended operating range is
+required before adopting a boundary.
+
+For conserving collision models, the low-level
+:func:`vmex.core.neoclassical.conserving_transport_bounds` accepts a trial
+collision Gram, exact rectangular orbit images, source coefficients, source
+loads and a continuous collision-inverse majorant. The construction and
+full-Landau assumptions are in :ref:`conserving-collision-bounds`.
+The residual generators can differ from the trial basis and can be redundant;
+their metric belongs in ``inverse_bound``. The columns of ``invariants`` encode the local conserved
+moments. For example, the smallest streaming-coupled invariant problem is:
+
+.. code-block:: python
+
+   from vmex.core.neoclassical import conserving_transport_bounds
+
+   collision = jnp.diag(jnp.array([0., 1.]))
+   source = jnp.array([1., 0.])
+
+   def upper(k):
+       orbit = jnp.array([[0., k], [-k, 0.]])
+       return conserving_transport_bounds(
+           collision, orbit, source, source, collision,
+           invariants=jnp.array([[1.], [0.]]),
+           constraint_rows=(0,), constraint_columns=(1,),
+       )["upper"]
+
+Here ``upper(k)=1/k**2`` and ``jax.grad(upper)(k)=-2/k**3`` for nonzero
+``k``. A truncated collision inverse suffices for this finite-dimensional
+example; a continuous Coulomb model requires a feasible pair-flux majorant.
+Select independent constraint rows and pivot columns at the start of a
+stage and keep their indices fixed. The chart itself remains differentiable.
+Remove only joint collision/orbit gauges from the trial basis. Singular
+charts, incompatible conserved moments and nonpositive reduced forms reject
+the evaluation; damping a collision invariant changes the model.
+
+For a signed observable, evaluate the same forms for its source ``J`` and
+pass both results, their source loads and the weak orbit Gram to
+:func:`vmex.core.neoclassical.conserving_goal_interval`. It returns primal–adjoint
+error bounds on the complete signed response, including its antisymmetric
+part. Supply ``orbit_error_bound`` when the weak orbit Gram has a proved
+Frobenius-norm integration-error bound; its contribution to the radius is
+that bound times the primal and adjoint coefficient norms. This correction
+does not cover errors in other forms. A collapsed interval radius can be nonsmooth.
+
+The separate :class:`vmex.core.neoclassical.ConservingHeatBound` constructs
+an inexpensive full-Coulomb upper bound directly from the Boozer spectrum:
+
+.. code-block:: python
+
+   heat = vmex.ConservingHeatBound(
+       [.5], temperature_ev=1000., collision_strengths=[1.e4, 1.e5],
+       radial_electric_fields=[-250., 0., 250.], geometry_order=(4, 2),
+       fit_grid=128, helicity=0, scale=1.)
+   # As with other terms, pass heat.total_state to VmecProblem.from_loss.
+
+Set ``macro_order=6`` to use the correlated upper refinement. It solves a
+two-variable quadratic on exactly feasible flow functions and reports
+``scalar_upper`` alongside the selected upper endpoint, in the same m²/s
+units. The option is fixed during optimization. Gradients require a fixed
+nonresonant Fourier chart and an independent trial pair.
+
+The strengths are the Landau prefactor :math:`\Gamma n/(m^2v_t^3)` in s⁻¹,
+not Lorentz deflection rates. The returned intervals have shape
+``(surface, collision_strength, electric_field)`` and units m²/s. It retains
+passing/trapped particles and the full single-species collision operator,
+with incompressible electric precession. Its main theory, unit conversion,
+finite-J geometry scope and integration remainder are given in
+:ref:`full-coulomb-stellarator-proxy`. The compact lower endpoint is zero
+at finite electric field. A reduced upper bound alone does not establish
+that the response decreased; separated endpoint intervals can do so.
+
+Set ``VMEX_HEAT_BOUND_MODEL=coulomb`` when running the same optimization
+example to select this objective. It starts from the unperturbed reactor-scale
+QA seed, with fixed local deuterium density and temperature. The default
+six cases combine 100 eV and 1 keV with zero and both signs of the
+specified radial electric field. Set ``VMEX_HEAT_BOUND_INCLUDE_HOT=1`` to
+include the three 10 keV cases. ``VMEX_HEAT_BOUND_MAX_MODE`` and
+``VMEX_HEAT_BOUND_MAXITER`` control the boundary space and iteration budget;
+their Coulomb defaults are three and 80.
+The remaining resolution and physical settings are grouped at the top.
+
+The loss is a smooth maximum of upper values normalized to their seed
+values. A bounded SLSQP solve imposes two-sided inequalities on aspect
+ratio, volume and transform at three radii. The search tolerance is half
+the final relative constraint tolerance, leaving margin for equilibrium
+refinement. The released interior angular coordinates follow the existing
+radial interpolation of boundary changes. Both objective values and
+adjoints include that parameter dependence. Re-solved directional
+differences check the heat gradient at both endpoints; the search also
+checks the constraint Jacobian at the seed. Failed root refinements reject
+the trial. A separate
+candidate solve clears the native initializer caches and checks that the
+state and response are independent of their previous contents. If a
+converged native solution fails the prescribed-coordinate root check,
+bounded continuation from a certified equilibrium supplies another initial
+guess. Every intermediate root must pass the same residual and Jacobian
+checks. Ten consecutive rejected trials stop the search and retain its
+best feasible accepted boundary for endpoint validation; this does not
+mark the optimizer as converged.
+The final check increases equilibrium and Boozer resolution, evaluates
+the finite-J objective at both endpoints and reports the off-objective
+surfaces separately. The recorded acceptance flag requires all selected
+upper values to decrease, all constraints to meet their tolerances and
+the candidate derivative check to pass.
+It does not by itself certify a decrease of the kinetic response.
+No full drift-kinetic matrix solve occurs inside the loss.
+Set ``VMEX_HEAT_BOUND_CANDIDATE=/absolute/path/to/input`` to check an
+existing boundary with the same endpoint tests. Its field-period count
+and fixed boundary coefficients must match the selected seed; the seed
+supplies toroidal flux and equilibrium profiles. This mode skips the search.
+Set ``VMEX_HEAT_BOUND_MACRO_ORDER=6`` as well to select the correlated
+refinement in that same example; omitting it retains the scalar objective.
+``VMEX_EXAMPLES_CI=1`` runs a small two-iteration execution check and records
+its acceptance status without treating that short run as a completed design.
+The Lorentz example retains its augmented-Lagrangian L-BFGS-B search.
+
 Resources and reproducibility
 -----------------------------
 

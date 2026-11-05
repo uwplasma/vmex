@@ -2,6 +2,14 @@
 
 Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
 
+## Unreleased
+
+- Add a differentiable Boozer reference-well heat objective with pitch diffusion and tangential precession.
+  Continuous-pitch bounds and analytic Maxwell moments enclose the Lorentz response; shared assembly preserves validated values and derivatives, with geometry and model errors separate.
+- Add conserving collision-form and signed-response bounds with local moments, continuous inverse majorants and differentiable constraint charts for full Coulomb collision models.
+- Add a full-Coulomb stellarator heat objective with scalar and correlated feasible flows, stable residual norms, bounded angular-integration remainder and SI Boozer adapter.
+  Extend the existing optimization example with constrained SLSQP, bounded continuation with residual checks, endpoint derivative checks and supplied-boundary validation; the single-species model retains passing/trapped particles and incompressible electric precession.
+
 ## 0.13.0 - 2026-11-03
 
 - Add pwO vacuum, finite-beta and coil examples with independent transport checks.
@@ -187,14 +195,6 @@ A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
 features; XLA rejected the other node's executables ("Target machine feature
 ... is not supported on the host machine") and recompiled on every run.
 
-## 0.11.1 - 2026-09-23
-
-Free-boundary trials are anchored on the coupled root their gradients
-differentiate (#432), the exterior field is accurate next to the plasma
-surface, optimization results are the states the objective scored (#427), and
-the optimization examples were re-tuned against a five-minute budget. Full
-notes in the GitHub release.
-
-## 0.11.0 and earlier
+## 0.11.1 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).
