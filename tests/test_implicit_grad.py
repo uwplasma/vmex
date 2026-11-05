@@ -46,7 +46,9 @@ from vmex.core.errors import AdjointSolveError
 from vmex.core.input import VmecInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache.pkl"
+FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache_held_m1.pkl"
+# Host solves as the implicit path runs them: the m=1 constrained family held.
+_held_solve = im._holding_m1(solver.solve)
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +101,7 @@ def _perturb(p0: im.ImplicitParams, field: str, idx, h: float) -> im.ImplicitPar
 
 def _outputs(name: str, inp: VmecInput, cfg, params) -> dict:
     """Host solve at ``params`` -> derived scalars (identical policy always)."""
-    result = solver.solve(
+    result = _held_solve(
         im.input_with_params(inp, params), cfg.resolution,
         ftol=cfg.ftol, max_iterations=cfg.max_iterations, mode="cli",
     )
@@ -171,7 +173,7 @@ def case(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -184,7 +186,7 @@ def solovev(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -895,7 +897,7 @@ def lasym():
     cfg = im.make_config(inp, ftol=LASYM_CASE["ftol"],
                          max_iterations=LASYM_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)
@@ -1231,7 +1233,7 @@ def lasym_3d():
     cfg = im.make_config(inp, ftol=LASYM3D_CASE["ftol"],
                          max_iterations=LASYM3D_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)

@@ -43,11 +43,14 @@ inherits the preconditioning for free.  The raw-force formulation
 (``formulation="raw"``) is kept for the informational with/without-
 preconditioner comparison in the tests.
 
-The m=1 constrained Z force is evaluated in its converged branch (zeroed —
-``residue.f90`` zeroes ``gcz(m=1)`` once ``fsqz < 1e-6``, which always holds
-at the fixed point), so the corresponding constrained combinations are *not*
-degrees of freedom: they are frozen at their converged values, exactly
-mirroring the forward solver's behavior near convergence.
+The m=1 constrained Z force is evaluated in its converged branch (zeroed, as
+``residue.f90`` does once ``fsqz < 1e-6``), so the constrained combinations
+are *not* degrees of freedom.  VMEC2000 releases them before that threshold,
+which leaves each root where its own iteration path did, and they move the
+surfaces.  Implicit host solves therefore never release them
+(:data:`vmex.core.solver.HOLD_M1`): they stay on the ``profil3d.f`` guess
+of the input, and the assembled state takes them from ``p`` (:func:`_held`),
+so the root and its derivative are functions of the input alone.
 
 Anchoring the fixed point
 -------------------------
@@ -71,9 +74,10 @@ Degrees of freedom / boundary handling
 In fixed-boundary mode the R/Z edge spectral row never evolves: the full
 state is assembled as ``x = mask*z + edge_mask*boundary(p) + frozen`` where
 ``z`` are the evolved dofs, the edge row comes (differentiably) from the
-boundary parameters, and the remaining entries (structurally zero families,
-released m=1 combinations, the lambda axis row overwritten by the ``totzsp``
-closure) are frozen constants.  The fixed-boundary dof mask is constructed
+boundary parameters, the m=1 constrained combinations come from the
+boundary's interior guess (:func:`_held`), and the remaining entries
+(structurally zero families, the lambda axis row overwritten by the
+``totzsp`` closure) are frozen constants.  The fixed-boundary dof mask is constructed
 directly from those mode-table invariants; :func:`_dof_mask` remains the
 independent structural-zero oracle and handles coupled free-boundary maps.
 
@@ -81,27 +85,13 @@ Gradient checking solver-sensitive metrics
 ------------------------------------------
 The adjoint gradient is the derivative of the fixed point of the *frozen*
 residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
-once at the base parameters, not re-derived.  For solver-sensitive metrics
-(``iota`` at ``ncurr=1``, mirror ratio, magnetic well, Boozer/QI residual) a
-naive re-solve FD is *not* a valid reference — it can sign-flip; use
-:func:`frozen_path_directional_fd`, which reproduces the adjoint to solver
-accuracy (full rationale on that function; ``tests/test_implicit_grad.py``).
-
-At a tight ``ftol``, with the state anchored as above, the difference that
-remains between the adjoint and a cold re-solve FD is the released m=1
-``Z_sin`` pair combination alone.  The linearization holds it at its
-converged value.  Each cold solve instead freezes it wherever its own path
-left it, which moves it by about 0.5 per unit boundary change on
-``li383_low_res``.  In the continuum this coordinate is an angle gauge, so
-iota depends on it only through discretization error.  On
-``li383_low_res``, ``d(mean iota)/d(RBC(1,1))`` is -2.5515 from the adjoint
-and -2.5261 from the re-solves (1.0%).  Adding the iota response to that
-drift alone closes the gap to 2e-6
-(``test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family``).
-The gap does not fall monotonically as ``mpol``/``ntor``/``ns`` are refined.
-Over ``mpol`` 4-8 and ``ns`` 16-64 it spans 0.06-1.0% on ``RBC(1,1)`` and
-0.1-2.8% on ``ZBS(-1,1)``.  The finest case tested, ``mpol = 8`` and
-``ns = 32``, gives 0.27% and 0.87%.
+once at the base parameters, not re-derived.
+:func:`frozen_path_directional_fd` reproduces the adjoint to solver accuracy.
+With the m=1 constrained family held on the input's guess, a cold re-solve
+FD is also the map the adjoint differentiates: on ``li383_low_res`` they agree
+to 3e-6 on mean iota and 1e-4 on an interior ``Z_sin`` objective, where the
+released family left 1-3 % and up to 140x
+(``test_li383_resolve_fd_matches_the_implicit_derivative``).
 
 Strict and optimization-safe callback lanes
 ---------------------------------------------
@@ -180,14 +170,14 @@ from .geometry import (
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .residuals import (
-    m1_physical_to_constrained, m1_residue_rotation, scalxc_scale_force,
-    zero_m1_z_force,
+    hold_m1_family, m1_physical_to_constrained, m1_residue_rotation,
+    scalxc_scale_force, zero_m1_z_force,
 )
 from .setup import (
     RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess,
     rescale_boundary_volume)
 from .solver import (
-    STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
+    HOLD_M1, STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
     _static_tables, evaluate_forces, prepare_runtime, resolution_from_input,
     solve,
@@ -1043,9 +1033,31 @@ def _dof_projector(cfg: ImplicitConfig, dof_mask: SpectralState) -> Callable:
     return P
 
 
+def _holding_m1(fn: Callable) -> Callable:
+    """Run ``fn`` with :data:`vmex.core.solver.HOLD_M1` set."""
+    @functools.wraps(fn)
+    def run(*args, **kwargs):
+        token = HOLD_M1.set(True)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            HOLD_M1.reset(token)
+    return run
+
+
+def _held(x: SpectralState, rt_p: SolverRuntime) -> SpectralState:
+    """``x`` with the m=1 constrained family on ``p``'s interior guess, where
+    the held host solve leaves it, so the derivative follows the guess."""
+    res = rt_p.resolution
+    if not (bool(rt_p.setup.lconm1) and int(res.ntor) > 0):
+        return x
+    return hold_m1_family(x, _initial_state(rt_p.setup), rt_p.modes, lasym=bool(res.lasym))
+
+
 def _assemble(z: SpectralState, rt_p: SolverRuntime, frozen: SpectralState,
               P: Callable, edge_mask: SpectralState) -> SpectralState:
-    """``x = frozen + P(z - frozen) + edge_mask*(boundary(p) - frozen)``.
+    """``x = frozen + P(z - frozen) + edge_mask*(boundary(p) - frozen)``,
+    with the m=1 constrained family then set from ``p`` (:func:`_held`).
 
     At ``z = P(x*)`` and the solved parameters this reproduces ``x*``
     exactly; the edge term carries the differentiable boundary dependence
@@ -1062,7 +1074,7 @@ def _assemble(z: SpectralState, rt_p: SolverRuntime, frozen: SpectralState,
             e = getattr(edge_mask, name)
             x = x + e * (boundary[name][None, :] - getattr(frozen, name))
         out[name] = x
-    return SpectralState(**out)
+    return _held(SpectralState(**out), rt_p)
 
 
 def _raw_force_state(
@@ -1474,6 +1486,7 @@ def _fsq(result) -> float:
     return total if np.isfinite(total) else np.inf
 
 
+@_holding_m1
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     key = _params_key(params)
     hit = _LAST_SOLVE.get(cfg)
@@ -1655,6 +1668,7 @@ def _anchor_residual(cfg: ImplicitConfig, params: ImplicitParams,
     return float(_tree_norm(F(_dof_projector(cfg, dof_mask)(state), params)))
 
 
+@_holding_m1
 def _resumed_refinement(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState, dof_mask: SpectralState,
                         iterations: int) -> SpectralState | None:
@@ -4050,26 +4064,16 @@ def frozen_path_directional_fd(
     integral (``wb``, ``aspect``, for which a naive re-solve FD is already
     exact and :func:`jax.grad` matches it to ``rtol <= 1e-6``).
 
-    A naive full re-solve at ``params +/- h*tangent`` lets the solver's internal
-    convergence logic -- the ``bcovar`` preconditioner, the ``tcon`` constraint
-    scaling, the m=1 ``gcz`` zeroing branch (``residue.f90``), the dof mask, the
-    multigrid schedule, and exactly where the ``ftol`` crossing lands -- re-form
-    slightly differently at each perturbed point.  For a solver-sensitive metric
-    that path variation is an O(1) contribution that can inflate or even
-    sign-flip the finite difference (measured on ``li383_low_res``:
-    ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
-
-    The implicit adjoint deliberately does *not* differentiate through that
-    logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
-    preconditioner / mask / branch captured once at ``params``; see the module
-    docstring), which is the stable, physical gradient.  This helper reproduces
-    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
-    ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
-    adjoint uses) from the converged ``z*`` before central-differencing
-    ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
-    contracted with ``tangent`` to solver accuracy -- the gradient check a naive
-    re-solve FD cannot provide for these metrics.
+    The implicit adjoint linearizes the fixed point of the **frozen** residual
+    ``F`` (preconditioner / mask / branch captured once at ``params``; see the
+    module docstring).  This helper captures ``F`` once at ``params`` and
+    Newton-solves ``F(z, params +/- h*tangent) = 0`` from the converged ``z*``
+    before central-differencing ``metric_fn``, so it equals :func:`jax.grad` of
+    the metric contracted with ``tangent`` to solver accuracy, independent of
+    where each re-solve's ``ftol`` crossing lands.  A naive re-solve once
+    sign-flipped ``d(iota_edge)/d(RBC(-1,1))`` on ``li383_low_res`` (+0.045
+    against -0.773) because the released m=1 family moved with the path;
+    implicit solves now hold that family (module docstring).
 
     The Newton steps go through the recycling GCROT solve rather than plain
     restarted GMRES: from a warm start already at the root the step's RHS
