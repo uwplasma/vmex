@@ -7,17 +7,20 @@ VMEX geometry and relaxes it with Newton steps until J x B - grad p vanishes,
 so magnetic surfaces and the rotational transform are outputs, read off
 traced field lines. Agreement between the two is a check on both.
 
-The deck is the 2.5 % beta Landreman-Paul QA with a bootstrap current. Near
+The deck is the 2.5 % beta Landreman–Buller–Drevlak QA with a bootstrap current. Near
 the magnetic axis VMEX needs many radial surfaces at this beta: iota at
 rho = 0.1 moves 0.200 -> 0.188 -> 0.176 -> 0.166 for ns = 33, 65, 129, 257,
-where DESC gives 0.166. To keep the run short this example stops at ns = 65
-and MRX starts from that field, inheriting its near-axis iota; extend
-NS_ARRAY to 129 or 257 to see iota near the axis move toward DESC.
+without establishing the continuum limit. A matched, independently converged
+DESC reference is not available. To keep the run short this example stops at
+ns = 65 and MRX starts from that field, so near-axis agreement is a consistency
+check. Extend NS_ARRAY to examine VMEX's radial-resolution dependence.
 
 The figure shows (a-c) VMEX flux surfaces and MRX Poincare points at three
 toroidal angles, (d) iota, (e) the enclosed toroidal current, and (f) the
 pressure. MRX normalizes its field to unit energy; its amplitude is fixed by
 matching the VMEX toroidal flux, which sets every other quantity in SI units.
+MRX reconstructs pressure from the relaxed field; it does not impose VMEX's
+pressure profile, so this is not a matched-profile equilibrium benchmark.
 
 MRX is optional: ``pip install mrx`` (Python >= 3.11). Without it the script
 prints the install command and exits. A full run takes about 4 minutes on a
@@ -244,8 +247,8 @@ ax.legend(fontsize=9)
 
 fig.suptitle(f"QA, 2.5% beta with bootstrap current: VMEX (ns={ns}) and MRX "
              f"({MRX_RESOLUTION}, p={MRX_DEGREE}, {NEWTON_STEPS} Newton steps)\n"
-             "VMEX near-axis iota converges slowly with ns: 0.188, 0.176, 0.166 at rho = 0.1 "
-             "for ns = 65, 129, 257 (DESC 0.166)", fontsize=11)
+             "VMEX near-axis iota depends on ns: 0.188, 0.176, 0.166 at rho = 0.1 "
+             "for ns = 65, 129, 257; continuum limit unresolved", fontsize=11)
 figure_path = OUTPUT_DIR / "vmex_mrx_comparison.png"
 fig.savefig(figure_path, dpi=150)
 print(f"Wrote {figure_path}")
