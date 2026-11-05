@@ -29,7 +29,10 @@ NPHI = 61
 NS, MPOL, NTOR = 17, 5, 6
 NTHETA, NZETA = 24, 16
 FTOL, MAX_ITERATIONS = 1e-12, 4000
-USE_LAMBDA_SEED = True         # True seeds the angle; False keeps the default zero-lambda guess.
+# Lambda shifts the geometric poloidal angle to a straight-field-line angle.
+# True initializes it from the near-axis map; False starts from zero.
+# VMEX solves for lambda in both cases; this only sets the initial guess.
+USE_LAMBDA_SEED = True
 OUTPUT_DIR = Path("output_near_axis_initial_guess")
 
 ###############################################################################
