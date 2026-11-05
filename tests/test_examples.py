@@ -177,6 +177,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
+    "examples/optimization/QI_optimization_finite_n.py",
     "examples/optimization/QI_optimization_jaxopt.py",
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
@@ -960,6 +961,22 @@ def test_finite_n_stability(tmp_path):
     assert [row["family"] for row in families] == [0]
     assert families[0]["verdict"] in {
         "unstable", "unresolved", "no resolved instability in the checked space"}
+
+
+def test_qi_finite_n_optimization_example(tmp_path):
+    """Smoke only: the AGNI stability optimization runs and writes its outputs.
+
+    The tiny basis does not resolve the physics, so no growth rate is asserted;
+    the default-settings numbers are checked by running the example itself.
+    """
+    pytest.importorskip("agnimhd")
+    script = EXAMPLES / "optimization" / "QI_optimization_finite_n.py"
+    out = _run_example(script, tmp_path, timeout=1800)
+    _assert_cost_decreased(out, "QI-finite-n")
+    assert "rejected trials: 0" in out and "UNRESOLVED" not in out
+    outdir = tmp_path / "output_QI_optimization_finite_n"
+    assert (outdir / "QI_finite_n_optimized.png").exists()
+    assert (outdir / "input.QI_finite_n_optimized").exists()
 
 
 @pytest.mark.parametrize("case", [
