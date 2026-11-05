@@ -263,6 +263,70 @@ action behavior, and it does not certify confinement: pair the residual with a
 mirror ceiling, a transform floor and an independent neoclassical (NEO) or particle-tracing check.
 
 
+.. _confinement-pwo-bootstrap:
+
+Bootstrap current of a pwO field
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In the :math:`1/\nu` regime the parallel bootstrap current is
+:math:`\langle j_\parallel B\rangle\propto G_{\rm bs}` times the profile gradients
+(`Shaing and Callen 1983 <https://doi.org/10.1063/1.864108>`_; `Nakajima et al.
+1989 <https://doi.org/10.1088/0029-5515/29/4/006>`_). With Boozer covariant
+components :math:`G` (toroidal) and :math:`I` (poloidal, the enclosed current),
+:math:`\xi=\sqrt{1-\lambda B}` and :math:`\langle\cdot\rangle` the flux-surface average,
+
+.. math::
+
+   G_{\rm bs}=-\frac{f_s+\langle uB^2\rangle}{f_t},\qquad
+   f_s=\frac{3\langle B^2\rangle}{4}\int_0^{1/B_{\max}}
+       \frac{\lambda\langle g_4\rangle}{\langle\xi\rangle}\,d\lambda,
+
+.. math::
+
+   \mathbf B\!\cdot\!\nabla u=-(\mathbf B\times\nabla\psi)\!\cdot\!\nabla B^{-2},\qquad
+   \mathbf B\!\cdot\!\nabla(g_4/\xi)=+(\mathbf B\times\nabla\psi)\!\cdot\!\nabla\xi^{-1},
+
+with :math:`u=g_4=0` where :math:`B=B_{\max}`, the global maximum. Quasi-axisymmetry gives
+:math:`G_{\rm bs}=G/\iota`, and any omnigenous field gives
+:math:`(MG+NI)/(\iota M-N)` (`Landreman and Catto 2012
+<https://arxiv.org/abs/1112.5725>`_), which is :math:`-I` for QI. Helander, Geiger and
+Maassberg (2011) relate the stellarator bootstrap current to the tokamak value.
+
+`Calvo et al. (2025) <https://arxiv.org/abs/2505.02546v3>`_ evaluate this for a pwO field
+whose :math:`B=B_M` region is bounded by two families of contours
+:math:`\theta-a_i\zeta=\text{const}`. Writing :math:`\chi_i` for the indicator of
+region :math:`i`, the part of :math:`\langle j_\parallel B\rangle` proportional to
+:math:`G` is proportional to
+
+.. math::
+
+   \Delta=\sum_i\frac{\langle\chi_i\rangle}{\iota-a_i},
+
+and the enclosed-current part is removed by :math:`I(0)=0`. The bootstrap current
+vanishes for arbitrary profiles if and only if :math:`\Delta=0`, which needs
+:math:`\iota-a_1` and :math:`\iota-a_2` of opposite sign.
+
+The mapped field of :ref:`confinement-mapped-pwo` has poloidally closed contours and a
+bounce length :math:`2D(\eta)/N` independent of the field line, so its :math:`\Delta`
+vanishes for every :math:`(a,b,c,\eta_{\min})` and :math:`\iota`. The mapped
+target therefore carries zero bootstrap current by construction. The current of an
+optimized boundary comes from the unmapped band between the cut contour of one period
+and the next, where :math:`B_{\max}` lives. A flat band with
+:math:`B=\text{const}` is sufficient for :math:`\Delta=0`, not necessary. With
+``BOOTSTRAP_TERM = "band"`` the optimizer adds
+
+.. math::
+
+   r^{\rm band}_{sjk}=\sqrt{\frac{w_b\,w_s}{N_\gamma N_{\rm band}}}
+     \frac{B_{sjk}-\overline{B}_s}{B_{00,s}},
+
+the spread of :math:`B` over :math:`N_{\rm band}` nodes per gamma line across the band
+(:class:`~vmex.core.pwo.FreeMapProblem`, ``band_weight`` :math:`=w_b`). The price is a
+higher edge :math:`\epsilon_{\rm eff}`. Check the current with the finite-collisionality
+DKX :math:`\langle j_\parallel B\rangle`, not with the 1/nu geometry alone: a reduced
+:math:`G_{\rm bs}` does not by itself guarantee a smaller current at reactor collisionality.
+
+
 Bounce action
 ~~~~~~~~~~~~~
 
