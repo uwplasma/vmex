@@ -218,10 +218,13 @@ class MappedPwOResidual:
         return out
 
     def spectrum_state(self, state, rt):
-        """Return the flat Boozer spectrum and iota, for a term whose map parameters vary."""
+        """Pack cosine, optional sine and iota rows for a term whose map parameters vary."""
         booz = boozer_spectrum_state(state, rt, surfaces=self.surfaces, mboz=self.mboz,
                                      nboz=self.nboz, oversample=self.oversample)
-        return jnp.concatenate((booz["bmnc_b"].ravel(), booz["iota_b"]))
+        spectrum = [booz["bmnc_b"].ravel()]
+        if "bmns_b" in booz:
+            spectrum.append(booz["bmns_b"].ravel())
+        return jnp.concatenate((*spectrum, booz["iota_b"]))
 
     def residuals_state(self, state, rt):
         """Return the flat traceable least-squares residual."""
@@ -303,23 +306,25 @@ class FreeMapProblem:
         booz = boozer_spectrum_state(equilibrium.state, equilibrium.runtime, surfaces=mapped.surfaces,
                                      mboz=mapped.mboz, nboz=mapped.nboz, oversample=mapped.oversample)
         ns, nm = booz["bmnc_b"].shape
-        self.stage, self.nx, self.nspec = stage, stage.x0.size, ns*nm+ns
-        names = tuple(values)
+        has_sine = "bmns_b" in booz
+        self.stage, self.nx, self.nspec = stage, stage.x0.size, ns*nm*(1+has_sine)+ns
+        names = tuple(self.MAP_BOUNDS)
         low, high = (np.array([self.MAP_BOUNDS[k][i] for k in names]) for i in (0, 1))
         fixed = np.array([values[k] for k in names], dtype=float)
         index = np.array([i for i, k in enumerate(names) if k in free], dtype=int)
         self.names, self.index = names, index
         xm, xn, nfp = booz["xm_b"], booz["xn_b"], booz["nfp"]
+        options = dict(mapped.options, limit_map=True)
 
         def parameters(u):
             return jnp.asarray(fixed).at[index].set(low[index]+(high[index]-low[index])*jax.nn.sigmoid(u))
         self._parameters = parameters
 
         def rows(spectrum, u):
-            a, b, c, eta_min = parameters(u)
-            out = mapped_pwo_residual_from_boozer(
-                bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[ns*nm:],
-                nfp=nfp, a=a, b=b, c=c, eta_min=eta_min, weights=mapped.weights, limit_map=True)
+            out = mapped.kernel(
+                bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[-ns:],
+                bmns_b=spectrum[ns*nm:2*ns*nm].reshape(ns, nm) if has_sine else None,
+                nfp=nfp, weights=mapped.weights, **(options | dict(zip(names, parameters(u)))))
             area = jnp.sqrt(100.)*jnp.maximum(area_floor-out["mapped_area_fraction"], 0.)
             return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area))
         self._rows = jax.jit(rows)
