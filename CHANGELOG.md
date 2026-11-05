@@ -2,11 +2,10 @@
 
 Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
 
-## Unreleased
+## 0.13.0 - 2026-11-03
 
 - Add pwO vacuum, finite-beta and coil examples with independent transport checks.
-- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid.
-- Fix constructed-QI first-wall interpolation under a shifted toroidal origin.
+- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid; fix constructed-QI first-wall interpolation under a shifted toroidal origin.
 - `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
 
 ## 0.12.0 - 2026-10-21
