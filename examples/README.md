@@ -34,7 +34,8 @@ that research budget as one commented set of constants next to the default.
     converged equilibrium with AGNI (`pip install "vmex[agni]"`, with an
     `agnimhd` that has `Basis(restrict=True)`; `vmex.core.agni.make_agni_map`): the NFP = 4 QI deck
     at 5.1 % beta, one eigensolve per toroidal family, a dense cross-check, and
-    the dominant mode's radial and (m, n) structure. Unlike the other scripts
+    the dominant mode's radial and (m, n) structure (conventions and limits:
+    [finite-n stability with AGNI](../docs/explanation/finite-n-stability.md)). Unlike the other scripts
     it takes about ten minutes on 16 cores. Values are lower bounds that rise
     with the Fourier bandwidth; the printed header states the model limits.
   - `force_balance_polishing.py` — enable the optional, VMEC-safe polishing

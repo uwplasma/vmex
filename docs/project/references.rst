@@ -254,3 +254,19 @@ Numerical implementation:
     (2025), arXiv:2410.04576 — the inertia coefficient used here and the
     hinge-plus-maximum objective over surfaces, field lines and ballooning
     parameters that DESC's ``BallooningStability`` implements.
+
+52. R. Gaur, S. Patil, P. Gupta, D. Patch, and T. Qian, “AGNI: A differentiable
+    MHD stability solver & optimizer for magnetic confinement fusion
+    devices,” arXiv:2608.01750 — the global finite-n energy principle and
+    normalization behind :func:`vmex.core.agni.make_agni_map`
+    (:doc:`/explanation/finite-n-stability`).
+
+53. I. B. Bernstein, E. A. Frieman, M. D. Kruskal, and R. M. Kulsrud, “An energy
+    principle for hydromagnetic stability problems,” *Proceedings of the Royal
+    Society A* 244, 17 (1958), doi:10.1098/rspa.1958.0023 — the energy
+    principle for static ideal MHD.
+
+54. R. L. Dewar, C. Cuthbert, and R. Ball, “Strong ‘quantum’ chaos in the global
+    ballooning mode spectrum of three-dimensional plasmas,” *Physical Review
+    Letters* 86, 2321 (2001), doi:10.1103/PhysRevLett.86.2321 — the global
+    stellarator ideal spectrum and its Fourier cutoff.
