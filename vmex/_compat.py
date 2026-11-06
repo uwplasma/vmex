@@ -774,9 +774,9 @@ def require_x64() -> None:
 # Floors of the optional extras, equal to pyproject.toml (a test pins them).
 # Checked where each is first used, so that an environment left behind by
 # `git pull` over an editable install fails with the fix, not a TypeError.
-OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.11",
+OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.12",
                      "neo-jax": "1.1.1", "gkx": "2.6.0",
-                     "dkx": "2.8.0"}
+                     "dkx": "2.13.0"}
 
 
 def require_optional(name: str, feature: str) -> None:
