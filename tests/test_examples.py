@@ -137,6 +137,7 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
     "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
+    "examples/optimization/helium_ash_objective.py": "optional ESSOS residence API; exercised in test_problem.py",
     "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
 }
 
