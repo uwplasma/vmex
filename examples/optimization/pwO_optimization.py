@@ -1,12 +1,13 @@
 #!/usr/bin/env python
-"""Optimize a boundary for piecewise omnigenity with a magnetic well.
+"""Optimize a boundary for piecewise omnigenity.
 
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number.
 The residual vector holds the mapped pwO contour
-variance, the aspect ratio, a floor on the rotational transform, the magnetic
-well and a ceiling on the mirror ratio, and VMEX supplies its exact Jacobian.
+variance, the aspect ratio, a floor on the rotational transform and a ceiling
+on the mirror ratio, and VMEX supplies its exact Jacobian.
 The final boundary is re-solved on a finer radial ladder before it is saved.
+Uncomment the well target to add a magnetic well.
 The commented objectives add a constructed-field maximum-J continuation
 proxy and a kinetic bootstrap response to prescribed low-beta test profiles.
 """
@@ -51,7 +52,8 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 MAX_MODES = [1, 2, 3, 4, 5]
 MAX_NFEV = [15]*len(MAX_MODES)
 ASPECT_TARGET = 6.0
-MAGNETIC_WELL_TARGET = 0.04  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
+MAGNETIC_WELL_TARGET = 0.0
+# MAGNETIC_WELL_TARGET = 0.04  # enable a well for finite-beta continuation
 MAGNETIC_WELL_WEIGHT = 1e2
 ELONGATION_LIMIT = 10.0
 NS_ARRAY = np.array([35])
@@ -66,7 +68,7 @@ GAMMA_C_WEIGHT = 100.0
 
 # Targets:
 IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
-MIRROR_LIMIT = 0.2                # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+MIRROR_LIMIT = 0.24               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
@@ -138,6 +140,7 @@ def boozer_spectrum(equilibrium_state, solver_context):
     return pwo.spectrum_state(equilibrium_state, solver_context)
 
 equilibrium = opt.solve_equilibrium(inp)
+vj.write_wout(f"wout_pwO_seed_nfp{NFP}.nc", equilibrium.wout)
 
 
 # Each term is (function, target, weight).

@@ -665,11 +665,12 @@ Install ``vmex`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3, 4, 5]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.20), the axis
+(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.24), the axis
 excursion, the edge-Jacobian ratio and the elongation. The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
-The magnetic-well target is 0.04. The boundary is re-solved on a finer radial
+The magnetic-well objective is off by default. Uncomment the 0.04
+``MAGNETIC_WELL_TARGET`` line to enable it. The boundary is re-solved on a finer radial
 ladder before export; transport and particle confinement are checked separately.
 Commented objective entries add a constructed-field maximum-J continuation
 penalty and a kinetic current response to specified low-beta test profiles

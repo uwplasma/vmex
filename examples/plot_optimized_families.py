@@ -9,8 +9,9 @@ The QA/QH/QP inputs are read from the current directory. The QI comparison
 uses the four validated inputs bundled in ``examples/data``. Each column shows
 four equally spaced toroidal cuts over one field period, the 3-D boundary, and
 ``|B|`` on the LCFS in Boozer coordinates. The pwO figure compares the
-``pwO_optimization.py`` seed and result and adds their ``epsilon_eff^(3/2)``
-and ``|iota|`` profiles; it needs ``vmex[neoclassical]``.
+``pwO_optimization.py`` seed and result using their saved WOUTs and CLI trace
+files, adding measured loss curves and ``|iota|`` profiles. Trace both WOUTs
+with ``vmex --trace`` before drawing this comparison.
 """
 
 from dataclasses import replace
@@ -113,34 +114,24 @@ def _pwo_seed():
     inp = vj.VmecInput.from_file(DATA / f"input.minimal_seed_nfp{PWO_NFP}")
     rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
     rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -0.05, 0.05
-    return replace(inp, rbc=rbc, zbs=zbs, delt=0.5, ftol_array=np.array([1e-10]), niter_array=np.array([30000]))
-
-
-def _solve(inp, ladder=(37, 45, 55, 71)):
-    """Solve on the final radial grid, restarting in small steps as the example does."""
-    equilibrium = None
-    for ns in ladder:
-        equilibrium = opt.solve_equilibrium(
-            replace(inp, ns_array=np.array([ns])), verbose=False, raise_on_max_iterations=True,
-            initial_state=None if equilibrium is None else equilibrium.solution)
-    return equilibrium
+    if PWO_NFP >= 3:
+        rbc[inp.ntor + 1, 1] = zbs[inp.ntor + 1, 1] = 0.005
+    return replace(inp, rbc=rbc, zbs=zbs)
 
 
 def _draw_pwo(output):
-    from vmex.core.neoclassical import screen_transport
-
     result = vj.VmecInput.from_file(QS_INPUT_DIR / f"input.pwO_optimized_nfp{PWO_NFP}")
     cases = ((_pwo_seed(), "Near-circular seed", "#566a79"), (result, "pwO", "#c56627"))
     figure = plt.figure(figsize=(8.1, 7.5), dpi=PLOT_DPI)
     grid = figure.add_gridspec(3, 3, height_ratios=(1.0, 1.2, 1.05), hspace=0.38, wspace=0.6)
     profile, iota = figure.add_subplot(grid[:2, 2]), figure.add_subplot(grid[2, 2])
     for column, (inp, title, color) in enumerate(cases):
-        equilibrium = _solve(inp)
-        wout, ns = equilibrium.wout, int(equilibrium.wout.ns)
-        half = (np.arange(ns - 1) + 0.5) / (ns - 1)
-        surfaces = half[np.abs(half[:, None] - np.linspace(0.1, 0.9, 8)).argmin(axis=0)]
-        q = np.asarray(screen_transport(wout, surfaces))
-        profile.semilogy(surfaces, q, "o-", color=color, label=f"{title}, mean {q.mean():.1e}")
+        stem = f"pwO_seed_nfp{PWO_NFP}" if column == 0 else f"pwO_optimized_nfp{PWO_NFP}"
+        wout = vj.read_wout(QS_INPUT_DIR / f"wout_{stem}.nc")
+        ns = int(wout.ns)
+        trace = np.load(QS_INPUT_DIR / f"{stem}_trace.npz")
+        profile.plot(1e3 * trace["times"], 100 * trace["loss_fractions"], color=color,
+                     label=f"{title}, {100 * trace['loss_fractions'][-1]:.2f}%")
         iota.plot(np.linspace(0, 1, ns), np.abs(wout.iotaf), color=color)
         cross = figure.add_subplot(grid[0, column]); _cross_sections(cross, inp)
         cross.set_title(f"{title}\nnfp {inp.nfp}", loc="left", fontsize=10)
@@ -150,7 +141,7 @@ def _draw_pwo(output):
         boozer = figure.add_subplot(grid[2, column]); _boozer(figure, boozer, wout, f"pwo{column}")
         if column == 0:
             boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$", fontsize=8)
-    profile.set_xlabel("$s$", fontsize=8); profile.set_ylabel(r"$\epsilon_{\rm eff}^{3/2}$", fontsize=8)
+    profile.set_xlabel("time [ms]", fontsize=8); profile.set_ylabel("alpha-particle loss [%]", fontsize=8)
     profile.legend(fontsize=7, frameon=False, loc="upper left"); iota.set_xlabel("$s$", fontsize=8); iota.set_ylabel(r"$|\iota|$", fontsize=8)
     for axis in (profile, iota):
         axis.tick_params(labelsize=7); axis.spines[["top", "right"]].set_visible(False)

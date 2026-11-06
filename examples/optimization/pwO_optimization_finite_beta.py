@@ -98,6 +98,12 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
+for path in (INPUT_FILE, WOUT_FILE):
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Missing {path.name}; run pwO_optimization.py with NFP = {NFP} "
+            "and MAGNETIC_WELL_TARGET = 0.04 first")
+
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(inp.mpol, MINIMUM_MPOL)
 inp = replace(inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4),

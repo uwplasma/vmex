@@ -1084,15 +1084,18 @@ def test_qi_optimization_example(tmp_path):
 
 
 @pytest.mark.full
-@pytest.mark.parametrize(("nfp", "optional"), [(3, False), (3, True), (5, False)])
-def test_low_transport_example(tmp_path, nfp, optional):
-    """The flat script runs with either both optional entries or neither."""
+@pytest.mark.parametrize(("nfp", "optional", "well"),
+                         [(3, False, False), (3, True, False), (5, False, False), (3, False, True)])
+def test_low_transport_example(tmp_path, nfp, optional, well):
+    """The flat script supports optional entries and an uncommented well target."""
     pytest.importorskip("booz_xform_jax")
     source = (EXAMPLES / "optimization" / "pwO_optimization.py").read_text()
     if optional:
         pytest.importorskip("dkx.bootstrap")
         source = re.sub(r"(?m)^    # (?=\(|    )", "    ", source)
     source = source.replace("NFP = 3", f"NFP = {nfp}")
+    if well:
+        source = source.replace("# MAGNETIC_WELL_TARGET = 0.04", "MAGNETIC_WELL_TARGET = 0.04")
     directory = tmp_path / "examples" / "optimization"
     directory.mkdir(parents=True)
     (directory.parent / "data").symlink_to(DATA_DIR, target_is_directory=True)
@@ -1100,13 +1103,17 @@ def test_low_transport_example(tmp_path, nfp, optional):
     script.write_text(source)
     out = _run_example(script, tmp_path)
     _assert_cost_decreased(out, "pwO")
-    stem = f"pwO_optimized_nfp{nfp}_well0.04"
+    stem = f"pwO_optimized_nfp{nfp}" + ("_well0.04" if well else "")
     for name in (f"input.{stem}", f"wout_{stem}.nc", f"{stem}_objectives.csv"):
         assert (tmp_path / name).exists()
     costs = np.loadtxt(tmp_path / f"{stem}_objectives.csv", delimiter=",", skiprows=1, ndmin=2)
     np.testing.assert_allclose(costs[:, 1], costs[:, 2:].sum(axis=1), rtol=1e-12, atol=1e-12)
+    columns = (tmp_path / f"{stem}_objectives.csv").read_text().splitlines()[0].split(",")
+    assert ("magnetic_well" in columns) == well
+    if well:
+        assert np.any(costs[:, columns.index("magnetic_well")] > 0)
+    assert (tmp_path / f"wout_pwO_seed_nfp{nfp}.nc").exists()
     if optional:
-        columns = (tmp_path / f"{stem}_objectives.csv").read_text().splitlines()[0]
         assert "constructed_maximum_j" in columns and "j_boot_dkx" in columns
 
 
@@ -1120,6 +1127,13 @@ def test_pwo_optional_setup_keeps_dkx_lazy_and_shared_seeds_circular():
                    and "dkx" in ast.unparse(node) for node in tree.body)
     assert "screen_transport" not in source
     from dataclasses import replace
+    from types import SimpleNamespace
+
+    figure = ast.parse((EXAMPLES / "plot_optimized_families.py").read_text())
+    seed_function = next(node for node in figure.body if isinstance(node, ast.FunctionDef)
+                         and node.name == "_pwo_seed")
+    plot_scope = dict(DATA=DATA_DIR, vj=SimpleNamespace(VmecInput=VmecInput), replace=replace)
+    exec(compile(ast.Module(body=[seed_function], type_ignores=[]), "figure seed", "exec"), plot_scope)
 
     seed_setup = source[source.index("rbc, zbs ="):source.index("### Set up the objective")]
     for nfp in (1, 2, 3, 4, 5):
@@ -1135,6 +1149,10 @@ def test_pwo_optional_setup_keeps_dkx_lazy_and_shared_seeds_circular():
         exec(compile(seed_setup, "example seed", "exec"), scope)
         np.testing.assert_array_equal(scope["inp"].rbc, expected_r)
         np.testing.assert_array_equal(scope["inp"].zbs, expected_z)
+        plot_scope["PWO_NFP"] = nfp
+        figure_seed = plot_scope["_pwo_seed"]()
+        np.testing.assert_array_equal(figure_seed.rbc, expected_r)
+        np.testing.assert_array_equal(figure_seed.zbs, expected_z)
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve
