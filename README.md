@@ -570,10 +570,11 @@ pip install "git+https://github.com/ToBlick/mrx@dd1942e9efae05c57d62c02dc3207f87
   ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
 - **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
-  mostly XLA compilation, which a repeated solve in one process skips. In the older
-  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
-  shipped deck or problem size ran faster than on the CPU.
+  mostly XLA compilation, which a repeated solve in one process skips.
+
+  CPU/GPU performance depends on the problem, software versions and cache state.
+  Measure complete solves and derivatives on your hardware using the
+  [performance guidance](https://vmex.readthedocs.io/en/latest/reference/performance.html#measuring-a-workload).
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
