@@ -10,6 +10,7 @@ exactly, so the batched path is a pure efficiency win with identical gradients.
 from __future__ import annotations
 
 import dataclasses
+import types
 from pathlib import Path
 
 import jax
@@ -528,3 +529,52 @@ def test_chunk_size_resolver_accepts_auto_and_rejects_other_strings():
 def test_tree_bytes_is_exact_from_shapes():
     tree = {"a": jnp.zeros((3, 4)), "b": np.zeros(5, dtype=np.float32)}
     assert im._tree_bytes(tree) == 3 * 4 * 8 + 5 * 4
+
+
+def test_block_factor_backends_agree_and_auto_follows_the_platform(monkeypatch):
+    """Thomas and cyclic reduction give the same certified responses.
+
+    Eleven surfaces put the cutoff-8 reduction through one real level
+    (``ns <= 8`` would be plain Thomas); ``"auto"`` is Thomas on the host
+    and cyclic reduction when the placement device or default backend is a GPU.
+    """
+    inp = _small_solovev_setup()[0]
+    inp = dataclasses.replace(inp, ns_array=np.asarray([11]))
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000)
+    p0 = im.params_from_input(inp)
+    state, mask = im.solve_implicit_with_aux(p0, cfg)
+    rhs = jax.tree.map(lambda v: jax.random.normal(
+        jax.random.PRNGKey(4), (2, *v.shape), v.dtype), state)
+    out = {}
+    original = im._block_factor
+    for method in ("thomas", "cyclic_reduction"):
+        def factor(lower, diagonal, upper, _cfg, method=method):
+            if method == "cyclic_reduction":
+                return im.block_cyclic_reduction_factor(lower, diagonal, upper)
+            return im.block_thomas_factor(lower, diagonal, upper, normalized=True)
+        monkeypatch.setattr(im, "_block_factor", factor)
+        c = cfg
+        system = im._raw_block_system(
+            p0, c, state, mask, im._active_state_fields(c), 4)
+        assert hasattr(system.factors, "levels") == (method == "cyclic_reduction")
+        out[method] = []
+        for transpose in (False, True):
+            solution, report = im._raw_block_solve(
+                system, rhs, c, transpose=transpose)
+            assert np.all(np.asarray(report.converged))
+            out[method].append(solution)
+    for got, reference in zip(out["cyclic_reduction"], out["thomas"]):
+        assert _relative_difference(got, reference) < 1e-10
+
+    monkeypatch.setattr(im, "_block_factor", original)
+    monkeypatch.setattr(im, "block_thomas_factor", lambda *_a, **_k: "thomas")
+    monkeypatch.setattr(im, "block_cyclic_reduction_factor", lambda *_a, **_k: "cyclic")
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "cyclic"
+    for device in ("gpu", "cuda", "rocm", types.SimpleNamespace(platform="gpu")):
+        assert original(None, None, None, dataclasses.replace(cfg, device=device)) == "cyclic"
+    assert original(None, None, None, dataclasses.replace(cfg, device="cpu")) == "thomas"
+    monkeypatch.setattr(jax, "default_backend", lambda: "cpu")
+    assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "thomas"
+    with jax.default_device(jax.devices("cpu")[0]):
+        assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "thomas"
