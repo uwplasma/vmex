@@ -381,3 +381,33 @@ def test_polish_cli_flags_override_file_directives():
     options, sources = cli._resolve_polish_cli(args, file_options)
     assert options.polish is True and sources["polish"] == "cli"
     assert options.polish_fail == "error" and sources["polish_fail"] == "cli"
+
+
+@pytest.mark.parametrize("extra", [[], ["--drift-surfaces"]])
+def test_plot_drift_surfaces_is_forwarded_only_when_requested(tmp_path, monkeypatch, extra):
+    from vmex.core import plotting
+
+    path = tmp_path / "wout_example.nc"
+    path.touch()
+    calls = []
+    monkeypatch.setattr(plotting, "plot_wout", lambda path, **kwargs: calls.append(kwargs) or {})
+    assert _run_cli(["--plot", str(path), "--quiet", *extra])[0] == 0
+    assert calls[0]["drift_surfaces"] == bool(extra)
+
+
+@pytest.mark.parametrize("args,message", [
+    (["--drift-surfaces"], "requires --plot"),
+    (["--doctor", "--drift-surfaces"], "requires --plot"),
+    (["--test", "--drift-surfaces"], "requires --plot"),
+    (["--plot", "--drift-surfaces"], "requires a PATH"),
+    (["--plot", "boozmn_example.nc", "--drift-surfaces"], "toroidal WOUT"),
+    (["--plot", "mout_example.nc", "--drift-surfaces"], "toroidal WOUT"),
+    (["--plot", "input.mirror", "--drift-surfaces"], "toroidal WOUT"),
+])
+def test_drift_surface_cli_rejects_invalid_combinations(tmp_path, monkeypatch, capsys, args, message):
+    monkeypatch.chdir(tmp_path)
+    for name in ("boozmn_example.nc", "mout_example.nc", "input.mirror"):
+        (tmp_path / name).write_text("&MIRROR\n/\n")
+    with pytest.raises(SystemExit) as caught:
+        cli.main(args)
+    assert caught.value.code == 2 and message in capsys.readouterr().err
