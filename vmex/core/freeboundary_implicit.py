@@ -32,7 +32,7 @@ from jax.flatten_util import ravel_pytree
 from scipy.linalg import get_lapack_funcs
 from scipy.sparse.linalg import LinearOperator, gcrotmk
 from solvax import (
-    auto_chunk_size, block_thomas_factor, block_thomas_solve,
+    auto_chunk_size, block_thomas_solve,
 )
 from solvax import gmres as _solvax_gmres
 
@@ -1330,9 +1330,9 @@ def _anchor_norm(z, params, field_parameters, frozen, rcon0, zcon0, dof_mask,
         None, cfg=cfg, formulation="preconditioned"))
 
 
-@jax.jit
-def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
-    """Block-Thomas factors of the scaled bulk block tridiagonal.
+@functools.partial(jax.jit, static_argnames=("cfg",))
+def _anchor_factor(lower, diagonal, upper, row_scale, column_scale, *, cfg):
+    """Factors of the scaled bulk block tridiagonal.
 
     The same two-sided scaling the Schur adjoint's banded LU uses; here the
     factors only precondition, so the fixed-boundary refinement's JAX block
@@ -1342,10 +1342,11 @@ def _anchor_factor(lower, diagonal, upper, row_scale, column_scale):
     ns = diagonal.shape[0]
     previous = jnp.maximum(jnp.arange(ns) - 1, 0)
     following = jnp.minimum(jnp.arange(ns) + 1, ns - 1)
-    return block_thomas_factor(
+    return im._block_factor(
         row_scale[:, :, None] * lower * column_scale[previous][:, None, :],
         row_scale[:, :, None] * diagonal * column_scale[:, None, :],
-        row_scale[:, :, None] * upper * column_scale[following][:, None, :])
+        row_scale[:, :, None] * upper * column_scale[following][:, None, :],
+        cfg.implicit)
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
@@ -1544,7 +1545,7 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
                                          zcon0, mask, z_at, bsqvac)),
             cfg=cfg, probe_chunk_size=chunk)
         factors = _anchor_factor(lower, diagonal, upper, row_scale,
-                                 column_scale)
+                                 column_scale, cfg=cfg)
         coupling = (_anchor_coupling(
             z_at, params, field_parameters, state, rcon0, zcon0, mask,
             response_at, factors, row_scale, column_scale, cfg=cfg)
