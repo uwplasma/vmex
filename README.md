@@ -74,8 +74,8 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.11` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.12` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.13.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -84,12 +84,12 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.35.0 | `pip install vmex` | `pip install "solvax>=0.35.0"` |
-| `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
+| `solvax` | 0.35.1 | `pip install vmex` | `pip install "solvax>=0.35.1"` |
+| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.11 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.11"` |
+| `virtual-casing-jax` | 0.0.12 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.12"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
-| `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
+| `dkx` | 2.13.0 | `vmex[neoclassical]` | `pip install "dkx>=2.13.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
@@ -225,6 +225,8 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [gradient tutorial](https://vmex.readthedocs.io/en/latest/tutorials/first-gradient.html) and
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
+
+`axis_field(inp)` estimates the axis field before solving; compose it with `scale_input` to set a target field, or use `probe=True` for two coarse equilibrium solves.
 
 ## Ballooning stability
 
@@ -538,9 +540,16 @@ and the [validation record](docs/explanation/validation.md).
 
 ## Comparison with MRX
 
-`python examples/vmex_mrx_comparison.py` (about 4 minutes, `pip install mrx`) relaxes the 2.5 %
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 %
 beta QA deck with [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces,
 starting from the VMEX ns = 65 field.
+
+Install the MRX equilibrium solver from its source repository; the PyPI package with that name
+is a different project. The example uses this revision:
+
+```console
+pip install "git+https://github.com/ToBlick/mrx@dd1942e9efae05c57d62c02dc3207f87f0704f18"
+```
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 

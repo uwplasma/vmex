@@ -552,7 +552,7 @@
         "README.md",
         "docs/explanation/validation.md"
       ],
-      "note": "Needs the optional mrx package (pip install mrx). VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. The bytes come from one run and were not re-derived."
+      "note": "Needs the MRX equilibrium solver from its official source repository, using the install command in examples/vmex_mrx_comparison.py. VMEX solves the deck to ns = 65 and MRX relaxes that field with 10 Newton steps on (12, 16, 16), p = 3; the example writes this WebP beside its PNG. These historical bytes predate the current MRX API and were not re-derived."
     },
     {
       "path": "docs/_static/figures/readme_wall_tracing.webp",

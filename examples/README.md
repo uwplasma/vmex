@@ -1,5 +1,10 @@
 # Examples
 
+`near_axis_initial_guess.py` uses the optional pyQSC or pyQIC VMEC writer and
+a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
+stellarator-symmetric first-order QA example; it does not constrain the
+converged equilibrium to the near-axis expansion or differentiate the generator.
+
 All runnable examples live under this single `examples/` tree. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
@@ -84,7 +89,8 @@ that research budget as one commented set of constants next to the default.
     `vj.essos_tracing_fields` (ESSOS coils, tabulated exterior field); the
     direct exterior field checks the table.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
-    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    [MRX](https://github.com/ToBlick/mrx) (install the source revision in
+    `vmex_mrx_comparison.py`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
     current, and the pressure with VMEX at ns = 65. Without MRX it exits after
     printing the install command.
