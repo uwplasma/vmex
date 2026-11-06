@@ -207,7 +207,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
             ess_alpha=ESS_ALPHA, restart_from=equilibrium,
-            progress=True)
+            jacobian_batch_size=1, progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:
