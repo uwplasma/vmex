@@ -290,6 +290,13 @@ def test_active_unsupported_indata_modes_fail_in_production_parser(
     assert caught.value.code == code
 
 
+def test_vacuum_selector_is_accepted() -> None:
+    """educational_VMEC decks may carry VAC_1_2; only a non-default value warns."""
+    VmecInput.from_indata_text("&INDATA\nVAC_1_2 = 1\n/\n")
+    with pytest.warns(RuntimeWarning, match="VAC_1_2"):
+        VmecInput.from_indata_text("&INDATA\nVAC_1_2 = 2\n/\n")
+
+
 def test_neutral_legacy_modes_remain_accepted() -> None:
     """Default-valued legacy controls do not require deck surgery."""
     inp = VmecInput.from_indata_text(
