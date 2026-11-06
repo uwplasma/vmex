@@ -65,7 +65,7 @@ Homepage = "https://github.com/uwplasma/vmex"
 Documentation = "https://vmex.readthedocs.io/en/latest/"
 Repository = "https://github.com/uwplasma/vmex"
 Issues = "https://github.com/uwplasma/vmex/issues"
-Changelog = "https://github.com/uwplasma/vmex/releases"
+"Release notes" = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
 optimizers = [

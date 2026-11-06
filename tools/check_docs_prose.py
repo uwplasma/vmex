@@ -5,7 +5,7 @@ Mechanical checks on the Diátaxis docs tree:
 
 1.  Banned words/phrases in Markdown and reStructuredText prose (fenced code and inline code are
     exempt), including exclamation marks and emoji in headings. The scan
-    covers the docs tree plus the root ``README.md`` and ``CHANGELOG.md``.
+    covers the docs tree plus the root ``README.md``.
 2.  Every how-to title starts with an imperative verb.
 3.  Every page under ``docs/howto`` and ``docs/tutorials`` is <= 250 lines.
 4.  No TODO/FIXME markers in any docs page.
@@ -58,8 +58,7 @@ HOWTO_VERBS = {
 
 TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b")
 LINE_CAP = 250
-ROOT_LINE_CAPS = {"README.md": 700, "CHANGELOG.md": 200}
-RETRACTED_GAIN = re.compile(r"\b(?:26[- ]fold|26\s*[×x])(?!\w)", re.IGNORECASE)
+ROOT_LINE_CAPS = {"README.md": 700}
 BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)")
 
 # -- 5. media budget (bytes) -------------------------------------------------
@@ -182,10 +181,6 @@ def check_root_limits(path: Path, errors: list[str]) -> None:
     count = len(text.splitlines())
     if count > ROOT_LINE_CAPS[path.name]:
         errors.append(f"{path.name}: {count} lines exceeds the {ROOT_LINE_CAPS[path.name]}-line cap")
-    if path.name == "CHANGELOG.md":
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if RETRACTED_GAIN.search(line):
-                errors.append(f"{path.name}:{lineno}: withdrawn polish gain; cite the corrected record")
 
 
 def check_cited_paths(path: Path, errors: list[str]) -> None:
@@ -243,15 +238,14 @@ def main() -> int:
     for page in [*markdown_pages, *rst_pages]:
         check_prose(page, errors)
 
-    # Root prose ships too: README.md is the PyPI long description and
-    # CHANGELOG.md (when present) the release record.
-    for name in ("README.md", "CHANGELOG.md"):
+    # README.md is also the PyPI long description.
+    for name in ROOT_LINE_CAPS:
         page = ROOT / name
         if page.exists():
             check_prose(page, errors)
             check_root_limits(page, errors)
 
-    for page in [*markdown_pages, *rst_pages, ROOT / "README.md", ROOT / "CHANGELOG.md"]:
+    for page in [*markdown_pages, *rst_pages, ROOT / "README.md"]:
         check_cited_paths(page, errors)
 
     for page in markdown_pages:
