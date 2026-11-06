@@ -84,7 +84,8 @@ that research budget as one commented set of constants next to the default.
     `vj.essos_tracing_fields` (ESSOS coils, tabulated exterior field); the
     direct exterior field checks the table.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
-    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    [MRX](https://github.com/ToBlick/mrx) (install the source revision in
+    `vmex_mrx_comparison.py`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
     current, and the pressure with VMEX at ns = 65. Without MRX it exits after
     printing the install command.
@@ -190,6 +191,7 @@ that research budget as one commented set of constants next to the default.
   roughly twice its symmetric equivalent. The vacuum QI script closes with the
   NEO_JAX effective ripple of the seed and the optimized boundary, computed on
   the asymmetric Boozer spectrum.
+- `drift_surfaces.py` integrates bounce-averaged drift surfaces of a QA equilibrium from its Boozer spectrum, prints `s_max` and the conservation of J, differentiates `s_max` with `jax.grad`, and plots the orbits over the J contours.
 - `optimization/QA_maxJ_continuation.py` and `QI_maxJ_continuation.py` walk the
   constructed maximum-J target into the resolved certificate; the QA script
   states where maximum-J and quasisymmetry conflict near the axis.

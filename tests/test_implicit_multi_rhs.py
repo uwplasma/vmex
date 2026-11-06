@@ -256,16 +256,22 @@ def test_block_preconditioned_corrector_recovers_a_poor_direct_solve(monkeypatch
 
 
 def test_raw_block_probe_chunking_preserves_exact_factors():
-    """Bounded VJP batches assemble the same local block Jacobian."""
+    """Bounded VJP batches assemble the same local block Jacobian.
+
+    ``probe_chunk_size`` bounds only the per-row reverse build, which a
+    supplied ``runtime`` selects; the default colored build sizes its batches
+    from ``_COLORED_PROBE_BUDGET`` (varied in the colored-versus-local test).
+    """
 
     _, cfg, params = _small_solovev_setup()
     state, mask = im.solve_implicit_with_aux(params, cfg)
     active = im._active_state_fields(cfg)
+    runtime = im.runtime_from_params(params, cfg)
     scalar = im._raw_block_system(
-        params, cfg, state, mask, active, probe_chunk_size=1
+        params, cfg, state, mask, active, probe_chunk_size=1, runtime=runtime
     )
     chunked = im._raw_block_system(
-        params, cfg, state, mask, active, probe_chunk_size=4
+        params, cfg, state, mask, active, probe_chunk_size=4, runtime=runtime
     )
     for name in ("lower", "diagonal", "upper", "row_scale", "column_scale"):
         np.testing.assert_allclose(

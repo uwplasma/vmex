@@ -376,6 +376,7 @@ def _projected_residual_lane(z, params, field_parameters, frozen, rcon0,
         presf_ns_scale=_presf_ns_scale_traceable(
             params, icfg.inp, int(icfg.resolution.ns)),
     )
+    state = im._held(state, rt)
     if response is not None:
         bsqvac = _linearized_bsqvac(state, rt, response)
     elif fixed_bsqvac is None:
@@ -477,6 +478,7 @@ def _continuation(stage) -> dict:
     return dict(initial_state=stage.continuation_state)
 
 
+@im._holding_m1
 def _host_solve_and_mask_impl(
     cfg, params_np, field_parameters_np, *, error_on_no_convergence=True,
 ):
@@ -556,18 +558,14 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
-    # The projector's complement (the m=1 pair's antisymmetric Z, released only
-    # early in a VMEC run) has no equation at the root, so the host leaves it
-    # wherever its history did. The adjoint holds it fixed, so hold it at the
-    # one reference here too: left to vary, a gradient missed 0.96 % of a
-    # converged central difference on a boundary-spectrum objective.
+    # Released gauge entries (ntor = 0, lasym n = 0) have no equation at the
+    # root; hold them at the one reference, as the adjoint does.  The m=1
+    # family proper comes from p (im._held).
     project = im._dof_projector(icfg, jax.tree.map(jnp.asarray, mask))
 
     def held_directions(solved):
-        reference_state = reference.result.state
-        return jax.tree.map(
-            lambda active, base, base_active: active + base - base_active,
-            project(solved), reference_state, project(reference_state))
+        ref = reference.result.state
+        return im._held(jax.tree.map(lambda a, b, c: a + b - c, project(solved), ref, project(ref)), rt)
 
     state = held_directions(state)
 
@@ -588,8 +586,7 @@ def _host_solve_and_mask_impl(
                 # Outside Newton's basin: descend closer, from where it stopped.
                 stage = solve(**_continuation(stage), ftol=factor * icfg.ftol,
                               error_on_no_convergence=False)
-                state = held_directions(stage.result.state)
-                rcon0, zcon0 = stage.rcon0, stage.zcon0
+                state, rcon0, zcon0 = held_directions(stage.result.state), stage.rcon0, stage.zcon0
                 state, report = _anchor_root(
                     cfg, params, field_parameters, state, mask, rcon0, zcon0)
         if error_on_no_convergence and not report.certified:
@@ -848,6 +845,10 @@ def _solve_bwd_impl(cfg, saved, state_bar):
     params_bar, field_bar = parameter_pullback(
         jax.tree.map(jnp.negative, lam)
     )
+    # The returned held family depends on p as well as entering the residual.
+    _, held_pullback = jax.vjp(
+        lambda p: im._held(frozen, im.runtime_from_params(p, cfg.implicit)), params)
+    params_bar = jax.tree.map(jnp.add, params_bar, held_pullback(state_bar)[0])
     return params_bar, field_bar
 
 
@@ -1243,10 +1244,15 @@ def _host_boundary_schur_adjoint(
         # outside the strict certificate. Continue from it with the original
         # coupled operator; this changes no mathematics and usually needs only
         # a small correction rather than a cold whole-state Krylov search.
+        # A start worse than zero (a reduced solve that does not invert the
+        # operator) only adds digits to reduce: the raw operator needs about
+        # 2000 products for 1e-8 from zero, so a residual 13 times ||rhs||
+        # exhausts the 3000 the budget allows.
         im._count(icfg, adjoint_certificate_fallbacks=1)
         return _host_adjoint(
             coupled_residual, z_star, params, field_parameters, frozen, rcon0,
-            zcon0, rhs, icfg, x0=solution, fail=fail)
+            zcon0, rhs, icfg, fail=fail,
+            x0=solution if residual_norm < rhs_norm else None)
     return solution
 
 
