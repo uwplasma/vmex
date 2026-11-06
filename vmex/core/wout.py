@@ -14,7 +14,10 @@ their public ``VacuumOutput`` is supplied:
   internal ``phips``/``chips`` arrays;
 - ``q_factor = 1/iotaf`` (``HUGE`` at iota zeros);
 - ``lmns`` is on the half mesh (interpolated from VMEC's internal full-mesh
-  lambda), ``bsubsmns`` on the full mesh (converted in ``jxbforce.f``);
+  lambda); ``bsubsmns`` and its LASYM partner ``bsubsmnc`` are on the
+  full mesh (converted in ``jxbforce.f``), while ``bsubu/v`` are half-mesh;
+- ``curru/v`` are full-mesh curl coefficients using this mixed-mesh
+  contract, correcting the legacy radial shift of the ``bsubs`` terms;
 - ``lasym`` partner tables (``rmns``, ``zmnc``, ...) exist **only** for
   asymmetric runs; the free-boundary potential/surface tables (``potsin``,
   ``xmpot``, ``xnpot``, ``curlabel``, ``*_sur``) only when ``lfreeb``.
@@ -99,7 +102,7 @@ _ATTRS = {
     "bmnc": ("cosmn component of mod-B, half mesh", None),
     "bsubumnc": ("cosmn covariant u-component of B, half mesh", None),
     "bsubvmnc": ("cosmn covariant v-component of B, half mesh", None),
-    "bsubsmns": ("sinmn covariant s-component of B, half mesh", None),
+    "bsubsmns": ("sinmn covariant s-component of B, full mesh", None),
     "currumnc": ("cosmn covariant u-component of J, full mesh", None),
     "currvmnc": ("cosmn covariant v-component of J, full mesh", None),
     "rmns": ("sinmn component of cylindrical R, full mesh", "m"),
@@ -109,7 +112,7 @@ _ATTRS = {
     "bmns": ("sinmn component of mod-B, half mesh", None),
     "bsubumns": ("sinmn covariant u-component of B, half mesh", None),
     "bsubvmns": ("sinmn covariant v-component of B, half mesh", None),
-    "bsubsmnc": ("cosmn covariant s-component of B, half mesh", None),
+    "bsubsmnc": ("cosmn covariant s-component of B, full mesh", None),
     "currumns": ("sinmn covariant u-component of J, full mesh", None),
     "currvmns": ("sinmn covariant v-component of J, full mesh", None),
     "potsin": ("Vacuum potential sin modes", None),
@@ -289,7 +292,7 @@ class WoutData:
     bmns: np.ndarray | None = None
     bsubumns: np.ndarray | None = None
     bsubvmns: np.ndarray | None = None
-    bsubsmnc: np.ndarray | None = None
+    bsubsmnc: np.ndarray | None = None  # FULL mesh, like bsubsmns
     currumns: np.ndarray | None = None
     currvmns: np.ndarray | None = None
     bsupumns: np.ndarray | None = None
