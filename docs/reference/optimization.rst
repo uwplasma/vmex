@@ -658,29 +658,31 @@ for a bounded cold run.
 Low-transport optimization
 --------------------------
 
-Install ``vmex[neoclassical]`` and run the vacuum example::
+Install ``vmex`` and run the vacuum example::
 
    python examples/optimization/pwO_optimization.py
 
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
-mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
+mode ladder (``MAX_MODES = [1, 2, 3, 4, 5]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
+(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.20), the axis
 excursion, the edge-Jacobian ratio and the elongation. The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
-The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
-add it. The verified boundary is re-solved on a finer radial grid and compared
-with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
-The pwO variance does not establish confinement; trace particles to qualify a
-boundary.
+The magnetic-well target is 0.04. The boundary is re-solved on a finer radial
+ladder before export; transport and particle confinement are checked separately.
+Commented objective entries add a constructed-field maximum-J continuation
+penalty and a kinetic current response to specified low-beta test profiles
+(``vmex[neoclassical]``). The first penalizes outward-increasing bounce action,
+not its absolute value; it needs an actual-field well-matching check. The
+kinetic response does not certify a self-consistent finite-pressure current.
 
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
 Run the vacuum example first, with the same ``NFP`` and the magnetic well enabled
-(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.01`` and its WOUT; from a
+(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.04`` and its WOUT; from a
 vacuum hill it does not reach a well). The zero-current pressure is
 proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
 and the beta error and a Mercier floor join the objective list. It uses the same

@@ -1084,13 +1084,44 @@ def test_qi_optimization_example(tmp_path):
 
 
 @pytest.mark.full
-def test_low_transport_example(tmp_path):
+@pytest.mark.parametrize(("nfp", "optional"), [(3, False), (3, True), (5, False)])
+def test_low_transport_example(tmp_path, nfp, optional):
+    """The flat script runs with either both optional entries or neither."""
     pytest.importorskip("booz_xform_jax")
-    pytest.importorskip("neo_jax")
-    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
-    for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
-                 "pwO_optimized_nfp3_objectives.csv"):
+    source = (EXAMPLES / "optimization" / "pwO_optimization.py").read_text()
+    if optional:
+        pytest.importorskip("dkx.bootstrap")
+        source = re.sub(r"(?m)^    # (?=\(|    )", "    ", source)
+    source = source.replace("NFP = 3", f"NFP = {nfp}")
+    directory = tmp_path / "examples" / "optimization"
+    directory.mkdir(parents=True)
+    (directory.parent / "data").symlink_to(DATA_DIR, target_is_directory=True)
+    script = directory / "pwO_optimization.py"
+    script.write_text(source)
+    out = _run_example(script, tmp_path)
+    _assert_cost_decreased(out, "pwO")
+    stem = f"pwO_optimized_nfp{nfp}_well0.04"
+    for name in (f"input.{stem}", f"wout_{stem}.nc", f"{stem}_objectives.csv"):
         assert (tmp_path / name).exists()
+    costs = np.loadtxt(tmp_path / f"{stem}_objectives.csv", delimiter=",", skiprows=1, ndmin=2)
+    np.testing.assert_allclose(costs[:, 1], costs[:, 2:].sum(axis=1), rtol=1e-12, atol=1e-12)
+    if optional:
+        columns = (tmp_path / f"{stem}_objectives.csv").read_text().splitlines()[0]
+        assert "constructed_maximum_j" in columns and "j_boot_dkx" in columns
+
+
+def test_pwo_optional_setup_keeps_dkx_lazy_and_shared_seeds_circular():
+    """Disabled kinetic diagnostics do not import DKX or change other examples' seeds."""
+    from vmex.core.input import VmecInput
+
+    source = (EXAMPLES / "optimization" / "pwO_optimization.py").read_text()
+    tree = ast.parse(source)
+    assert not any(isinstance(node, (ast.Import, ast.ImportFrom))
+                   and "dkx" in ast.unparse(node) for node in tree.body)
+    assert "screen_transport" not in source
+    for nfp in (3, 4, 5):
+        inp = VmecInput.from_file(DATA_DIR / f"input.minimal_seed_nfp{nfp}")
+        assert inp.nfp == nfp and inp.rbc[inp.ntor + 1, 1] == inp.zbs[inp.ntor + 1, 1] == 0
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve

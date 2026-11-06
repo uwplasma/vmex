@@ -32,8 +32,8 @@ from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
 NFP = 4
-INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
-WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
+INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}_well0.04")
+WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}_well0.04.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
 MAX_MODES = [1, 2, 3]  # boundary mode ladder of the plasma stage; the joint stage uses the last
 SURFACES = np.linspace(.25, .75, 3)
