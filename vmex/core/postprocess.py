@@ -1,8 +1,8 @@
 """Post-processed wout quantities ported from VMEC2000 output routines.
 
-Every function in this module is a direct numpy port of the corresponding
-VMEC2000 Fortran, validated against golden ``wout_*.nc`` files produced by
-VMEC2000 (hiddenSymmetries build, ``version_ = 9.0``):
+These routines follow the corresponding VMEC2000 Fortran output routines,
+with corrections to current reconstruction described below. Golden
+``wout_*.nc`` references use VMEC2000 ``version_ = 9.0``:
 
 - ``compute_currents``   : ``LIBSTELL/read_wout_mod.f90::Compute_Currents``
                            (called from ``wrout.f``); writes ``currumnc`` /
@@ -172,11 +172,7 @@ def _current_terms(bs, bu, bv, xm_nyq, xn_nyq, *, shalf, sfull, ohs, ns):
     t3 = np.zeros((ns, mn))
     odd = (np.asarray(xm_nyq).astype(int) % 2) == 1
     for j in range(1, ns - 1):  # Fortran js = 2, ns-1
-        t1[j] = np.where(
-            odd,
-            0.5 * (shalf[j + 1] * bs[j + 1] + shalf[j] * bs[j]) / sfull[j],
-            0.5 * (bs[j + 1] + bs[j]),
-        )
+        t1[j] = bs[j]  # bsubs is already on the full mesh
         bu0 = bu[j] / shalf[j]
         bu1 = bu[j + 1] / shalf[j + 1]
         t2[j] = np.where(
@@ -208,8 +204,13 @@ def compute_currents(*, bsubsmns, bsubumnc, bsubvmnc, xm_nyq, xn_nyq,
     """Current-density harmonics ``currXmn = sqrt(g)*J^X`` (X = u, v) [A].
 
     Port of ``read_wout_mod.f90::Compute_Currents`` (called by ``wrout.f``).
-    Inputs are the file-convention half-mesh ``bsub*`` tables shaped
-    ``(ns, mnmax_nyq)``; outputs are full-mesh, already divided by ``mu0``.
+    Inputs have shape ``(ns, mnmax_nyq)``: ``bsubs`` is on the full mesh,
+    while ``bsubu`` and ``bsubv`` are on the half mesh. Outputs are full-mesh,
+    already divided by ``mu0``. The angular derivatives use ``bsubs`` at
+    the same full-mesh surface; averaging adjacent rows would shift these
+    terms radially. This intentionally corrects the legacy current tables,
+    so exact legacy-current parity is not expected. The stored magnetic
+    field, equilibrium solve and WOUT schema are unchanged.
     Returns ``(currumnc, currvmnc, currumns, currvmns)`` with the sine
     partners ``None`` unless ``lasym``.
     """

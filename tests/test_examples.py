@@ -116,6 +116,9 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
+    "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
+    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
     "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
@@ -1126,6 +1129,49 @@ def test_qa_turbulence_optimization_examples(tmp_path, kind):
     assert (tmp_path / f"wout_QA_turbulence_{kind}_optimized.nc").exists()
 
 
+@pytest.mark.parametrize("bad", [None, "time", "flux", "wphi", "wg"])
+def test_nonlinear_turbulence_example_saturation_endpoints(bad):
+    """Use the final scan sample and reject every nonfinite endpoint guard."""
+    import time
+    from types import SimpleNamespace
+
+    source = (EXAMPLES / "optimization" / "QA_optimization_turbulence_nonlinear.py").read_text()
+    function = next(node for node in ast.parse(source).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "saturate")
+    endpoint = {key: np.array([0.0, value]) for key, value in
+                (("time", 0.1), ("flux", 7.0), ("wphi", 3.0), ("wg", 5.0))}
+    if bad is not None:
+        endpoint[bad][-1] = np.nan
+    state = object()
+    diagnostics = SimpleNamespace(heat_flux_t=endpoint["flux"], Wphi_t=endpoint["wphi"],
+                                  Wg_t=endpoint["wg"])
+    simulation = SimpleNamespace(run=lambda _: (endpoint["time"], diagnostics, state, None))
+    seen = []
+
+    def gate(times, fluxes, **kwargs):
+        seen.append((times.copy(), fluxes.copy(), kwargs))
+        return dict(saturated=True, mean=7.0, sem=0.0)
+
+    namespace = dict(np=np, time=time, TUBES=[(0.5, 0.0)], grid=None, DT=0.05,
+                     SAMPLE_STEPS=2, MAX_SATURATION_STEPS=4, SATURATION_REL_SEM=0.1,
+                     terms=None, ci_smoke=False, saturation_traces=[],
+                     tube_geometry=lambda *args: None, gk_parameters=lambda _: None,
+                     prepare_nonlinear_explicit_diagnostics=lambda *args, **kwargs: simulation,
+                     saturation_stop_decision=gate, SaturationStopConfig=lambda **kwargs: kwargs)
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "example", "exec"), namespace)
+    equilibrium = SimpleNamespace(state=None, runtime=None)
+    if bad is not None:
+        with pytest.raises(FloatingPointError, match="non-finite diagnostics"):
+            namespace["saturate"](equilibrium, [None], "seed")
+        assert not seen and not namespace["saturation_traces"]
+    else:
+        assert namespace["saturate"](equilibrium, [None], "seed") == [state]
+        times, fluxes, guards = seen[0]
+        assert times == [0.1] and fluxes == [7.0]
+        assert guards["guard"] == [3.0] and guards["free_energy_guard"] == [5.0]
+        assert namespace["saturation_traces"][0][1:3] == (times, fluxes)
+
+
 def test_ballooning_example_scans_the_ballooning_parameter():
     """The example must not optimize a bound taken at a single zeta0.
 
@@ -1486,7 +1532,7 @@ def test_vmex_mrx_comparison_example(tmp_path):
     """
     out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
     if "MRX is not installed" in out:
-        assert "pip install mrx" in out
+        assert 'pip install "git+https://github.com/ToBlick/mrx@' in out
         return
     assert "VMEX: iota axis/edge" in out
     assert "force residual" in out and "|B| difference" in out
