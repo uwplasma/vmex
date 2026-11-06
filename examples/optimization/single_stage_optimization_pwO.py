@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """Optimize a finite-beta pwO plasma and ESSOS coils together.
 
-Run ``pwO_optimization.py`` first. A finite-beta plasma stage frees the pwO
+Run ``pwO_optimization.py`` with its magnetic-well target enabled first.
+A finite-beta plasma stage frees the pwO
 map as in that example; the joint plasma and coil stage holds the map fixed.
 COILS_INPUT accepts an ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes.
 A cold free-boundary solve and NEO check the design. Requires vmex[neoclassical].
@@ -32,8 +33,8 @@ from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
 NFP = 4
-INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
-WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
+INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}_well0.04")
+WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}_well0.04.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
 MAX_MODES = [1, 2, 3]  # boundary mode ladder of the plasma stage; the joint stage uses the last
 SURFACES = np.linspace(.25, .75, 3)
@@ -78,6 +79,12 @@ if COIL_FIT_MAXITER == 0 and COILS_INPUT is None:
     raise ValueError("Skipping the prefit requires COILS_INPUT")
 
 # Seed and coil pre-fit.
+for path in (INPUT_FILE, WOUT_FILE):
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Missing {path.name}; run pwO_optimization.py with NFP = {NFP} "
+            "and MAGNETIC_WELL_TARGET = 0.04 first")
+
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(MAX_MODES[-1] + 2, 5)
 am = np.zeros(21)

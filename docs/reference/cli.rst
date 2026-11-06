@@ -45,6 +45,9 @@ Options
        a ``mout_*.nc`` file, plot horizontal straight-axis mirror diagnostics;
        with a ``boozmn_*.nc`` file, plot Boozer diagnostics; with an input
        file, solve first and plot the resulting WOUT.
+   * - ``--drift-surfaces``
+     - With ``--plot`` of a toroidal WOUT or input deck, overlay bounce-centre
+       drift surfaces on the filled second-invariant map. Off by default.
    * - ``--desc-tol X``
      - DESC boundary truncation bound, from 0 to 0.01 (default 0.01); 0 keeps
        every nonzero boundary mode.

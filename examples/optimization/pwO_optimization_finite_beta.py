@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
 
-Run ``pwO_optimization.py`` first with its commented line
-``MAGNETIC_WELL_TARGET = 0.01`` enabled (and ELONGATION_LIMIT = 6.0 at NFP 1):
+Run ``pwO_optimization.py`` first with its magnetic-well target enabled
+(and ELONGATION_LIMIT = 6.0 at NFP 1):
 from a vacuum magnetic hill this continuation does not reach a well. Pressure is calibrated at fixed toroidal flux, then the
 workflow is that of the vacuum example with beta and Mercier stability added
-to the residual vector. NEO compares the vacuum start at this pressure with
-the result. Requires vmex[neoclassical].
+to the residual vector. The optimized boundary is re-solved on a finer
+radial ladder before it is saved.
 """
 
 import os
@@ -19,14 +19,13 @@ from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 from vmex.core.restart import restart_state
 
 # Number of field periods, and the vacuum result this script continues:
 NFP = 3
 print(f"finite-beta pwO optimization, NFP = {NFP}")
-VACUUM_NAME = f"pwO_optimized_nfp{NFP}_well0.01"
+VACUUM_NAME = f"pwO_optimized_nfp{NFP}_well0.04"
 INPUT_FILE = Path(f"input.{VACUUM_NAME}")
 WOUT_FILE = Path(f"wout_{VACUUM_NAME}.nc")
 
@@ -99,6 +98,12 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
+for path in (INPUT_FILE, WOUT_FILE):
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Missing {path.name}; run pwO_optimization.py with NFP = {NFP} "
+            "and MAGNETIC_WELL_TARGET = 0.04 first")
+
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(inp.mpol, MINIMUM_MPOL)
 inp = replace(inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4),
@@ -160,7 +165,6 @@ monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
-seed_input = inp
 equilibrium = seed = opt.solve_equilibrium(inp, initial_state=calibration.solution)
 report("seed", equilibrium)
 # Stages that share a boundary resolution share ONE problem, as in
@@ -208,7 +212,7 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
 ### Check the result ##########################################################
 
 # The optimizer's grid is not the certificate: re-solve the optimized boundary
-# and the seed on a finer radial grid to a tighter tolerance and quote that.
+# on a finer radial grid to a tighter tolerance and quote that.
 final_resolution = dict(ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
 final_equilibrium = equilibrium
 for ns in FINAL_NS:
@@ -216,15 +220,6 @@ for ns in FINAL_NS:
     final_equilibrium = opt.solve_equilibrium(
         final_input, initial_state=final_equilibrium.solution,
         verbose=not ci_smoke, raise_on_max_iterations=True)
-    seed = opt.solve_equilibrium(
-        replace(seed_input, ns_array=np.array([ns]), **final_resolution),
-        initial_state=seed.solution, verbose=False, raise_on_max_iterations=True)
-
-# Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
-half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
-neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
-seed_Q = screen_transport(seed.wout, neo_surfaces)
-final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
 
 ### Print, plot and save ######################################################
 
@@ -235,7 +230,6 @@ opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOO
                           ("beta", final["beta"], 0.9 * TARGET_BETA, "min"),
                           ("beta", final["beta"], 1.1 * TARGET_BETA, "max")])
 print(f"\npwO total {final['pwO total']:.3e}")
-print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

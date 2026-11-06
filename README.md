@@ -282,9 +282,11 @@ maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
 [`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
 
-![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
+![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, alpha-particle loss and iota](docs/_static/figures/readme_pwo.webp)
 
-From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
+The NFP 3 vacuum default uses modes 1–5, no well objective and a soft mirror ceiling of 0.24. At ARIES-CS scale, 4096 common alpha-particle births give 10 ms losses of 34.72% initially and 19.93%, 9.56% and 6.98% for ceilings 0.16, 0.20 and 0.24. The last paired difference is −2.57 percentage points (pointwise 95% interval −3.34 to −1.80), with zero failures and relative energy errors below 6.1e-5. These Jacobian-weighted, finite-horizon results do not establish converged transport or long-term confinement. The figure uses separate 1024-particle native CLI traces.
+
+The selected boundary has aspect ratio 6.02, min |ι| = 0.96, sampled mirror ratio 0.195 and independent normalized physical force error 3.81%. Enable `MAGNETIC_WELL_TARGET = 0.04` before generating the [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) or [single-stage](examples/optimization/single_stage_optimization_pwO.py) seed. Commented rows add a constructed maximum-J proxy and a DKX bootstrap response to prescribed profiles, without certifying maximum-J or pressure/current consistency. The [docs](docs/explanation/confinement.rst) describe the workflow.
 
 ### Free boundary with coils
 
