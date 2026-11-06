@@ -34,7 +34,7 @@ INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed
 # Rotating-ellipse amplitude added to the seed. The exactly circular
 # torus has zero first-order iota sensitivity; this gives the optimizer a basin:
 SEED_PERTURBATION = 0.05
-SEED_COUNTER_PERTURBATION = 0.005 if NFP >= 3 else 0.0
+SEED_COUNTER_PERTURBATION = 0.005  # additional counter-helicity for NFP >= 3
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
 SURFACES = np.linspace(0.1, 0.9, 8)
@@ -122,7 +122,8 @@ if ci_smoke:
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = SEED_COUNTER_PERTURBATION, SEED_COUNTER_PERTURBATION
+if NFP >= 3:
+    rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = SEED_COUNTER_PERTURBATION, SEED_COUNTER_PERTURBATION
 inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################

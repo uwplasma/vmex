@@ -1119,9 +1119,22 @@ def test_pwo_optional_setup_keeps_dkx_lazy_and_shared_seeds_circular():
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom))
                    and "dkx" in ast.unparse(node) for node in tree.body)
     assert "screen_transport" not in source
-    for nfp in (3, 4, 5):
+    from dataclasses import replace
+
+    seed_setup = source[source.index("rbc, zbs ="):source.index("### Set up the objective")]
+    for nfp in (1, 2, 3, 4, 5):
         inp = VmecInput.from_file(DATA_DIR / f"input.minimal_seed_nfp{nfp}")
-        assert inp.nfp == nfp and inp.rbc[inp.ntor + 1, 1] == inp.zbs[inp.ntor + 1, 1] == 0
+        assert inp.nfp == nfp
+        expected_r, expected_z = inp.rbc.copy(), inp.zbs.copy()
+        expected_r[inp.ntor - 1, 1], expected_z[inp.ntor - 1, 1] = -0.05, 0.05
+        if nfp >= 3:
+            assert inp.rbc[inp.ntor + 1, 1] == inp.zbs[inp.ntor + 1, 1] == 0
+            expected_r[inp.ntor + 1, 1] = expected_z[inp.ntor + 1, 1] = 0.005
+        scope = dict(inp=inp, NFP=nfp, replace=replace,
+                     SEED_PERTURBATION=0.05, SEED_COUNTER_PERTURBATION=0.005)
+        exec(compile(seed_setup, "example seed", "exec"), scope)
+        np.testing.assert_array_equal(scope["inp"].rbc, expected_r)
+        np.testing.assert_array_equal(scope["inp"].zbs, expected_z)
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve
