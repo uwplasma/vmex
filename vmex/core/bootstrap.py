@@ -65,6 +65,7 @@ import jax.numpy as jnp
 
 from .fields import surface_currents
 from .input import VmecInput
+from .omnigenity import _ResidualTerm
 from .profiles import MU0
 from .solver import SolverRuntime, SpectralState
 from .statephysics import (
@@ -87,6 +88,7 @@ __all__ = [
     "redl_geometry_from_wout",
     "redl_geometry_from_state",
     "j_dot_B_redl",
+    "BootstrapFiniteNuResidual",
     "vmec_j_dot_B",
     "RedlBootstrapMismatch",
     "BootstrapPicardResult",
@@ -670,6 +672,67 @@ def j_dot_B_redl(
         "dTids_term": dTids_term, "jdotB": jdotB,
     }
     return jdotB, details
+
+
+def equivalent_ripple_spread(*, bmnc_b, xm_b, xn_b, iota_b, nfp, bmns_b=None,
+                             ntheta: int = 32, nphi: int = 48):
+    r"""Relative spread of the one-period ``int dl/B`` over field lines (Albert et al. 2024, eq. 85).
+
+    Albert, Beidler, Kapper, Kasilov & Kernbichler (arXiv:2407.21599, Sec. 3.3):
+    the leading ``nu_*^(-1/2)`` off-set of the bootstrap coefficient is absent only if
+    the trapping domains are equivalent, i.e. ``d I_j(vartheta_0, eta_b)/d vartheta_0 = 0``
+    with ``I_j ~ int dl/B`` between consecutive maxima (omnigeneity). In Boozer angles
+    ``dl/B ~ (G + iota I) dphi/B^2``, so with maxima on the field-period boundary (pwO,
+    QI) this is ``J(theta_0) = <B^-2>_phi`` along the line ``theta = theta_0 + iota phi``
+    over one period. Returns ``sqrt(var(J)/mean(J)^2 + 1e-16)`` per surface,
+    with a dimensionless smoothing floor of ``1e-8``: the floor for QI/pwO
+    with poloidally closed contours and aligned period-boundary maxima, ``O(eps)`` otherwise.
+    """
+    m_b, k_b = jnp.asarray(xm_b), jnp.asarray(xn_b)
+    iota = jnp.atleast_1d(jnp.asarray(iota_b))[:, None, None]
+    th0 = 2 * jnp.pi * jnp.arange(ntheta) / ntheta
+    ph = 2 * jnp.pi * jnp.arange(nphi) / (nphi * nfp)
+    theta = th0[None, :, None] + iota * ph[None, None, :]          # (nsurf, ntheta, nphi)
+    phase = (m_b * theta[..., None] - k_b * ph[None, None, :, None])
+    B = jnp.einsum("sk,stpk->stp", jnp.asarray(bmnc_b), jnp.cos(phase))
+    if bmns_b is not None:
+        B = B + jnp.einsum("sk,stpk->stp", jnp.asarray(bmns_b), jnp.sin(phase))
+    J = jnp.mean(B ** -2, axis=-1)
+    return jnp.sqrt(jnp.var(J, axis=-1) / jnp.mean(J, axis=-1) ** 2 + 1e-16)
+
+
+class BootstrapFiniteNuResidual(_ResidualTerm):
+    """Rows ``sqrt(w_j) E_j`` with ``E`` from :func:`equivalent_ripple_spread`.
+
+    Finite-collisionality bootstrap residual: ``E`` is the cross-field-line spread of the
+    one-period ``int dl/B`` that Albert et al. (2024) show controls the leading
+    ``nu_*^(-1/2)`` off-set. On 11 pwO/QI designs it ranks the DKX ``|I_bs|`` with
+    Spearman 0.88, where the collisionless ratio ranks -0.30. Valid when maxima sit on the field-period
+    boundary (pwO, QI); weights default to uniform. A diagnostic, not an objective: as a pwO
+    objective term (weights 1e3 and 1e4, NFP 3) the optimized design's DKX ``<J.B>`` keeps one
+    sign on every surface, so the net current does not fall.
+    """
+
+    name = "bootstrap_finite_nu"
+
+    def __init__(self, surfaces, *, weights=None, mboz: int = 16, nboz: int = 16,
+                 oversample: int = 2):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        weights = np.ones_like(self.surfaces) if weights is None else np.asarray(weights, float)
+        if weights.shape != self.surfaces.shape or np.any(weights < 0) or weights.sum() <= 0:
+            raise ValueError("weights must be nonnegative, one per surface, not all zero")
+        self.weights = np.sqrt(weights / weights.sum())
+        self.mboz, self.nboz, self.oversample = mboz, nboz, oversample
+
+    def compute_state(self, state, rt):
+        """Boozer spectrum, per-surface ``spread`` and the weighted rows."""
+        booz = self._boozer(state, rt)
+        spread = equivalent_ripple_spread(
+            bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"), xm_b=booz["xm_b"],
+            xn_b=booz["xn_b"], iota_b=booz["iota_b"], nfp=booz["nfp"])
+        out = dict(booz, spread=spread, residuals1d=self.weights * spread)
+        out["total"] = jnp.sum(out["residuals1d"] ** 2)
+        return out
 
 
 # ===========================================================================
