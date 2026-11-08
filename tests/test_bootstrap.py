@@ -745,7 +745,7 @@ def test_self_consistent_bootstrap_current_model_hook():
         calls.append((eq.wout.ns, np.asarray(s_eval).size))
         return 0.5 * jr
 
-    kwargs = dict(n_iter=1, degree=6, s_eval=np.linspace(0.02, 0.98, 25))
+    kwargs = dict(n_iter=2, degree=6, s_eval=np.linspace(0.02, 0.98, 25))
     inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))
     full = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, **kwargs)
     model = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, current_model=half, **kwargs)
