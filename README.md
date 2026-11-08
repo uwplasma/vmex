@@ -7,20 +7,9 @@
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
 [![Docs](https://img.shields.io/readthedocs/vmex/latest?label=docs)](https://vmex.readthedocs.io/en/latest/)
 
-VMEX is a JAX reimplementation of VMEC2000, the standard code for
-three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
-VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
-field driven by an MGRID table or coils), reproduces VMEC2000's iteration
-and writes standard `wout_*.nc` files. Because the solver is written in JAX,
-VMEX also differentiates the converged equilibrium through the implicit
-function theorem, so boundary, profile and coil parameters can be optimized
-with derivatives of the discrete equilibrium equations.
+VMEX is a JAX reimplementation of VMEC2000, the standard code for three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum field driven by an MGRID table or coils), reproduces VMEC2000's iteration and writes standard `wout_*.nc` files. Because the solver is written in JAX, VMEX also differentiates the converged equilibrium through the implicit function theorem, so boundary, profile and coil parameters can be optimized with derivatives of the discrete equilibrium equations.
 
-The goal is fast, differentiable and VMEC2000-compatible equilibria for
-stellarator optimization, including single-stage design, in which the plasma
-boundary and the coils are optimized together. VMEX also computes Boozer
-transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
-and stability diagnostics, and has a separate lane for open mirrors.
+The goal is fast, differentiable and VMEC2000-compatible equilibria for stellarator optimization, including single-stage design, in which the plasma boundary and the coils are optimized together. VMEX also computes Boozer transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity and stability diagnostics, and has a separate lane for open mirrors.
 
 - **Use existing workflows:** VMEC2000 `&INDATA` decks, VMEC++-style JSON inputs and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
@@ -307,8 +296,9 @@ The consistency error is taken on four kinetic surfaces, between which the profi
 
 From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
-
 The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
+
+![pwO with and without the bootstrap band term: |B| in Boozer coordinates and on the boundary, DKX bootstrap current and alpha losses against the seed](docs/_static/figures/readme_pwo_bootstrap.webp)
 
 ### Free boundary with coils
 
