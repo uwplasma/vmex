@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.12.0"
+version = "0.13.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,22 +51,9 @@ dependencies = [
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
   # Boozer spectra and differentiable geometry, including asymmetric fields.
-  "booz_xform_jax>=0.4.3",
-  # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
-  # (the radial preconditioner's solves) run their Thomas sweeps through the
-  # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
-  # Every other solvax API vmex calls (least-squares polishing, continuation,
-  # GMRES/GCROT, block Thomas, SpluFactorization, chunk_map) has the same
-  # signature from 0.20.0 through 0.24.0; 0.22-0.24 add only APIs vmex does
-  # not call. 0.27.0 is the floor because it is the first to declare
-  # equinox>=0.13.3: with the bare requirement of <= 0.26.0, pip kept an
-  # installed equinox 0.11.x and `import solvax` failed under jax >= 0.10
-  # (batching.NotMapped). The same holds for every uwplasma floor below: each
-  # is the first release that declares floors for what it imports, so
-  # installing into an environment with older packages upgrades them
-  # (nightly.yml "stale" lane). 0.35.0 is the first with map_independent and
-  # available_cpus, which vmex.parallel re-exports.
-  "solvax>=0.35.0",
+  "booz_xform_jax>=0.5.1",
+  # Checked tridiagonal solves support broadcast bands and preserve pivot diagnostics.
+  "solvax>=0.35.1",
 ]
 
 [project.scripts]
@@ -87,23 +74,14 @@ optimizers = [
 ]
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
-# 1.0.6 is the first release that keeps the sine Boozer spectra, so LASYM
-# equilibria get an effective ripple (NEO_JAX #7).
+# 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
-  "neo-jax>=1.0.6",
-  "dkx>=2.12.0",
+  "neo-jax>=1.1.1",
+  "dkx>=2.13.0",
 ]
-# Differentiable virtual casing on a specified boundary; this is not a NESTOR
-# equilibrium adjoint. 0.0.9 is the first release that declares its jax and
-# jaxlib floors (virtual_casing_jax #17). 0.0.8 kept the a-priori
-# (per-derivative-order) error estimate finite for targets far from the
-# surface; 0.0.7 returned NaN there, with hundreds of NumPy warnings, and the
-# eager derivative accuracy check of VmecExtender reported an error "up to
-# inf" where the field is exact. The other APIs vmex calls (ExteriorFieldConfig, VirtualCasingExteriorField,
-# VmecSurfaceFieldData, error_estimate's kst_error_estimate/
-# boundary_series_from_gamma/density_magnitude_from_surface) are unchanged.
+# Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.9",
+    "virtual-casing-jax>=0.0.12",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -177,7 +155,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.8
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.12
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is

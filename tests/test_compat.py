@@ -145,6 +145,26 @@ class _PolicyConfig:
         setattr(self, key, value)
 
 
+def test_configure_cache_disable_survives_policy_and_can_be_reenabled(clean_cache_env, tmp_path):
+    import jax
+
+    mp = clean_cache_env
+    config = _PolicyConfig()
+    mp.setattr(jax, "config", config)
+    mp.setattr(_compat, "_CONFIGURED", {})
+    mp.setattr(_compat, "_APPLIED", [None])
+    mp.setattr(_compat, "_reset_jax_cache", lambda: None)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setenv("VMEX_COMPILATION_CACHE_DIR", str(tmp_path / "managed"))
+    _compat.configure(compilation_cache=False)
+    _compat._apply_compilation_cache_policy(jax)
+    assert not config.jax_enable_compilation_cache
+    assert config.jax_compilation_cache_dir is None
+    _compat.configure(compilation_cache=True)
+    assert config.jax_enable_compilation_cache
+    assert config.jax_compilation_cache_dir is not None
+
+
 def test_policy_overrides_jax_env_cache(clean_cache_env, tmp_path):
     """JAX reads JAX_COMPILATION_CACHE_DIR itself at import; vmex must split
     that raw path per machine, switch it off when disabled, and be a no-op

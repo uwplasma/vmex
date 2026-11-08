@@ -399,6 +399,8 @@ def _default_compilation_cache_dir() -> str | None:
     - ``VMEX_COMPILATION_CACHE_DIR``, then ``JAX_COMPILATION_CACHE_DIR``,
       replace the parent directory, still split per machine.
     """
+    if _CONFIGURED.get("compilation_cache") is False:
+        return None
     flag = _env("COMPILATION_CACHE").strip().lower()
     vmex_dir = _env("COMPILATION_CACHE_DIR").strip()
     jax_dir = os.environ.get("JAX_COMPILATION_CACHE_DIR")
@@ -709,7 +711,8 @@ def configure(*, x64: bool = True, compilation_cache: bool = True,
     - ``x64``: float64 (``jax_enable_x64``).  The solver needs it, and
       :func:`require_x64` refuses to solve without it.
     - ``compilation_cache``: the machine-scoped persistent XLA cache
-      (``VMEX_COMPILATION_CACHE`` and friends).
+      (``VMEX_COMPILATION_CACHE`` and friends). ``False`` stays off on later
+      solves; a directly configured JAX cache directory remains caller-owned.
     - ``cpu_async_dispatch``: CPU dispatch mode.  The default is synchronous
       (``JAX_CPU_ENABLE_ASYNC_DISPATCH`` overrides), so memory is reclaimed
       at the host callbacks of exact-Jacobian optimizations.  It takes effect
@@ -741,8 +744,8 @@ def configure(*, x64: bool = True, compilation_cache: bool = True,
         "JAX_LOGGING_LEVEL", "ERROR")
     if level.strip().upper() not in ("", "INHERIT"):
         jax.config.update("jax_logging_level", level.strip().upper())
-    if compilation_cache:
-        _apply_compilation_cache_policy(jax)
+    _CONFIGURED["compilation_cache"] = bool(compilation_cache)
+    _apply_compilation_cache_policy(jax)
     _CONFIGURED["x64"] = bool(x64)
 
 
@@ -771,9 +774,9 @@ def require_x64() -> None:
 # Floors of the optional extras, equal to pyproject.toml (a test pins them).
 # Checked where each is first used, so that an environment left behind by
 # `git pull` over an editable install fails with the fix, not a TypeError.
-OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.9",
-                     "neo-jax": "1.0.6", "gkx": "2.6.0",
-                     "dkx": "2.12.0"}
+OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.12",
+                     "neo-jax": "1.1.1", "gkx": "2.6.0",
+                     "dkx": "2.13.0"}
 
 
 def require_optional(name: str, feature: str) -> None:

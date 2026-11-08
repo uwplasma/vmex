@@ -87,6 +87,29 @@ rbtor0 / R_axis`, which is a toroidal-component quantity (on a strongly
 helical axis the two differ by 10 % or more). The extrapolation has
 $O(h_s)$ error, so define the target at the production `ns`.
 
+### Before the first solve
+
+Use the existing {func}`vmex.core.scaling.axis_field` with a fixed-boundary
+input to estimate its field without a solve. Set `probe=True` for two converged
+coarse solves instead. Compose either with {func}`vmex.core.scaling.scale_input`:
+
+```python
+matched = vmex.scale_input(inp, b_scale=5.7 / vmex.axis_field(inp, phi=0.0, probe=True))
+```
+
+The geometric estimate is `|PHIEDGE| / A`, where `A` is the area of the boundary
+cut by the plane normal to the curve through the cross-section centroids. It
+ignores the pressure, the current and the Shafranov shift. Against the solved
+`axis_field` of 17 example decks it is within 1.4 % on 13 (vacuum and low-beta
+stellarators, a shaped tokamak, up-down asymmetric decks), 2.5 to 3 % on a
+2.5 % beta QH and a tokamak with current, and 8 to 13 % on the two decks at
+2.7 to 2.9 % beta. Using the `phi = const` cut instead of the normal plane is
+off by 3 to 25 % on a helical axis. `axis_field(inp, probe=True)` solves at `ns = 7` and
+`13` and extrapolates in `1/ns`; it is within 0.5 % of the `ns = 97` value on
+16 of 17 decks and 0.8 % on the 2.7 % beta, 6 MA QA. It takes 0.3 to 2.5 s warm
+and 10 to 35 s with compilation. Either way, solve once at the production `ns`
+and apply `match_b0` to that wout to remove the remainder exactly.
+
 ## ARIES-CS targets from an input
 
 A wout contains `volavgB`, the axis spectrum and `Aminor_p`, so its factors

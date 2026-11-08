@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Plot optimized QA/QH/QP and QI equilibria for the README.
+"""Plot optimized QA/QH/QP, QI and pwO equilibria for the README.
 
 Run the scripts in ``examples/optimization`` first, then run::
 
@@ -8,8 +8,12 @@ Run the scripts in ``examples/optimization`` first, then run::
 The QA/QH/QP inputs are read from the current directory. The QI comparison
 uses the four validated inputs bundled in ``examples/data``. Each column shows
 four equally spaced toroidal cuts over one field period, the 3-D boundary, and
-``|B|`` on the LCFS in Boozer coordinates.
+``|B|`` on the LCFS in Boozer coordinates. The pwO figure compares the
+``pwO_optimization.py`` seed and result and adds their ``epsilon_eff^(3/2)``
+and ``|iota|`` profiles; it needs ``vmex[neoclassical]``.
 """
+
+from dataclasses import replace
 
 from pathlib import Path
 import tempfile
@@ -44,7 +48,8 @@ SURFACES = np.linspace(0.1, 1.0, 8)
 PLOT_DPI = 220
 QS_INPUT_DIR = Path.cwd()
 OUT_DIR = Path.cwd()
-PLOT_ONLY = "all"  # "all", "qs", or "qi"
+PLOT_ONLY = "all"  # "all", "qs", "qi" or "pwo"
+PWO_NFP = 3                  # the pwO_optimization.py default
 
 
 def _boundary(inp, theta, phi):
@@ -103,6 +108,56 @@ def _boozer(figure, axis, wout, tag):
     axis.set_xlabel("Boozer toroidal angle (periods)", fontsize=8); axis.tick_params(labelsize=7)
 
 
+def _pwo_seed():
+    """The seed deck of pwO_optimization.py: a circular torus plus a rotating ellipse."""
+    inp = vj.VmecInput.from_file(DATA / f"input.minimal_seed_nfp{PWO_NFP}")
+    rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+    rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -0.05, 0.05
+    return replace(inp, rbc=rbc, zbs=zbs, delt=0.5, ftol_array=np.array([1e-10]), niter_array=np.array([30000]))
+
+
+def _solve(inp, ladder=(37, 45, 55, 71)):
+    """Solve on the final radial grid, restarting in small steps as the example does."""
+    equilibrium = None
+    for ns in ladder:
+        equilibrium = opt.solve_equilibrium(
+            replace(inp, ns_array=np.array([ns])), verbose=False, raise_on_max_iterations=True,
+            initial_state=None if equilibrium is None else equilibrium.solution)
+    return equilibrium
+
+
+def _draw_pwo(output):
+    from vmex.core.neoclassical import screen_transport
+
+    result = vj.VmecInput.from_file(QS_INPUT_DIR / f"input.pwO_optimized_nfp{PWO_NFP}")
+    cases = ((_pwo_seed(), "Near-circular seed", "#566a79"), (result, "pwO", "#c56627"))
+    figure = plt.figure(figsize=(8.1, 7.5), dpi=PLOT_DPI)
+    grid = figure.add_gridspec(3, 3, height_ratios=(1.0, 1.2, 1.05), hspace=0.38, wspace=0.6)
+    profile, iota = figure.add_subplot(grid[:2, 2]), figure.add_subplot(grid[2, 2])
+    for column, (inp, title, color) in enumerate(cases):
+        equilibrium = _solve(inp)
+        wout, ns = equilibrium.wout, int(equilibrium.wout.ns)
+        half = (np.arange(ns - 1) + 0.5) / (ns - 1)
+        surfaces = half[np.abs(half[:, None] - np.linspace(0.1, 0.9, 8)).argmin(axis=0)]
+        q = np.asarray(screen_transport(wout, surfaces))
+        profile.semilogy(surfaces, q, "o-", color=color, label=f"{title}, mean {q.mean():.1e}")
+        iota.plot(np.linspace(0, 1, ns), np.abs(wout.iotaf), color=color)
+        cross = figure.add_subplot(grid[0, column]); _cross_sections(cross, inp)
+        cross.set_title(f"{title}\nnfp {inp.nfp}", loc="left", fontsize=10)
+        if column == 0:
+            cross.set_ylabel("Z [m]", fontsize=8); cross.legend(fontsize=6.5, frameon=False)
+        boundary = figure.add_subplot(grid[1, column], projection="3d"); _boundary_3d(figure, boundary, wout)
+        boozer = figure.add_subplot(grid[2, column]); _boozer(figure, boozer, wout, f"pwo{column}")
+        if column == 0:
+            boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$", fontsize=8)
+    profile.set_xlabel("$s$", fontsize=8); profile.set_ylabel(r"$\epsilon_{\rm eff}^{3/2}$", fontsize=8)
+    profile.legend(fontsize=7, frameon=False, loc="upper left"); iota.set_xlabel("$s$", fontsize=8); iota.set_ylabel(r"$|\iota|$", fontsize=8)
+    for axis in (profile, iota):
+        axis.tick_params(labelsize=7); axis.spines[["top", "right"]].set_visible(False)
+    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05)
+    plt.close(figure); print(f"wrote {output}")
+
+
 def _find_qs_input(directory, tag):
     for name in (f"input.{tag}_optimized", f"input.{tag.lower()}_optimized"):
         path = directory / name
@@ -137,11 +192,13 @@ def _draw(cases, output, *, qi=False):
     plt.close(figure); print(f"wrote {output}")
 
 
-if PLOT_ONLY not in ("all", "qs", "qi"):
-    raise ValueError("PLOT_ONLY must be 'all', 'qs', or 'qi'")
+if PLOT_ONLY not in ("all", "qs", "qi", "pwo"):
+    raise ValueError("PLOT_ONLY must be 'all', 'qs', 'qi' or 'pwo'")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 if PLOT_ONLY in ("all", "qs"):
     cases = [(_find_qs_input(QS_INPUT_DIR, tag), title, m, n) for tag, title, m, n in QS_CASES]
     _draw(cases, OUT_DIR / "readme_optimization.webp")
 if PLOT_ONLY in ("all", "qi"):
     _draw(QI_CASES, OUT_DIR / "readme_qi.webp", qi=True)
+if PLOT_ONLY == "pwo":  # not part of "all": it needs the pwO_optimization.py result
+    _draw_pwo(OUT_DIR / "readme_pwo.webp")

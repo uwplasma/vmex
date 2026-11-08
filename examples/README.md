@@ -1,5 +1,10 @@
 # Examples
 
+`near_axis_initial_guess.py` uses the optional pyQSC or pyQIC VMEC writer and
+a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
+stellarator-symmetric first-order QA example; it does not constrain the
+converged equilibrium to the near-axis expansion or differentiate the generator.
+
 All runnable examples live under this single `examples/` tree. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
@@ -84,7 +89,8 @@ that research budget as one commented set of constants next to the default.
     `vj.essos_tracing_fields` (ESSOS coils, tabulated exterior field); the
     direct exterior field checks the table.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
-    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    [MRX](https://github.com/ToBlick/mrx) (install the source revision in
+    `vmex_mrx_comparison.py`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
     current, and the pressure with VMEX at ns = 65. Without MRX it exits after
     printing the install command.
@@ -104,6 +110,15 @@ that research budget as one commented set of constants next to the default.
   | QH | `QH_optimization_scalar.py` | `QH_optimization_finite_beta_scalar.py` |
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
+
+  `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
+  1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
+  aspect/iota constraints and screens proposals with NEO. Run
+  `pwO_optimization_finite_beta.py` next for pressure continuation, or
+  `single_stage_optimization_pwO.py` to optimize coils and boundary together;
+  both read the vacuum script's `input.` and `wout_` files.
+  A lower proxy does not establish confinement; particle checks remain separate.
+  See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /
@@ -184,6 +199,7 @@ that research budget as one commented set of constants next to the default.
   roughly twice its symmetric equivalent. The vacuum QI script closes with the
   NEO_JAX effective ripple of the seed and the optimized boundary, computed on
   the asymmetric Boozer spectrum.
+- `drift_surfaces.py` integrates bounce-averaged drift surfaces of a QA equilibrium from its Boozer spectrum, prints `s_max` and the conservation of J, differentiates `s_max` with `jax.grad`, and plots the orbits over the J contours.
 - `optimization/QA_maxJ_continuation.py` and `QI_maxJ_continuation.py` walk the
   constructed maximum-J target into the resolved certificate; the QA script
   states where maximum-J and quasisymmetry conflict near the axis.

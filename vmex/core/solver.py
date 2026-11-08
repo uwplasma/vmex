@@ -156,7 +156,7 @@ from .residuals import (
     m1_constrained_to_physical, m1_physical_to_constrained,
     m1_residue_rotation, m1_zero_condition, preconditioned_residuals,
     scale_m1_preconditioner_rhs, scalxc_scale_force,
-    zero_m1_z_force,
+    zero_m1_z_force, hold_m1_family,
 )
 from .setup import RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
@@ -417,6 +417,7 @@ class SolverRuntime:
     jmax: int                           # evolved radial rows (fixed: ns-1)
     lforbal: bool = False               # tomnsp_mod.f m=1,n=0 force replacement
     lmove_axis: bool = True             # funct3d.f first-force irst=4 path
+    hold_m1: bool = False               # never release the m=1 constrained Z (HOLD_M1)
 
     # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
     # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
@@ -484,7 +485,7 @@ class SolverRuntime:
 
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0",
-    "jmax", "lforbal", "lmove_axis",
+    "jmax", "lforbal", "lmove_axis", "hold_m1",
     "lfreeb", "prec2d", "trajectory_rows", "lambda_m0_floor",
 ))
 
@@ -785,6 +786,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
+        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and resolution.ntor > 0),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -1134,7 +1136,10 @@ def _force_pipeline(
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
     zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
-    released = zero_m1_z_force(rotated, zero_gate)
+    released = zero_m1_z_force(rotated, jnp.asarray(True) if rt.hold_m1 else zero_gate)
+    if rt.hold_m1 and released.force_Z_cc is not None:  # n = 0 lasym: exact gauge, released as VMEC2000
+        cc = jnp.asarray(rotated.force_Z_cc)[:, 1, 0] * (1.0 - jnp.asarray(zero_gate).astype(rotated.force_Z_cc.dtype))
+        released = replace(released, force_Z_cc=jnp.asarray(released.force_Z_cc).at[:, 1, 0].set(cc))
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
     )
@@ -2007,6 +2012,9 @@ def _initial_carry(
     loop-driver initial ``DELT`` (:func:`_loop_driver_config`) — a carry
     VALUE only, so it never keys a lane recompile.
     """
+    if rt.hold_m1:
+        state = hold_m1_family(state, _initial_state(rt.setup), rt.modes,
+                               lasym=bool(rt.resolution.lasym))
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
@@ -2336,6 +2344,12 @@ def _release_used_lane_executables() -> None:
 STOP_HOOK: contextvars.ContextVar[Callable | None] = contextvars.ContextVar(
     "vmex_stop_hook", default=None)
 
+#: Set by the implicit (differentiable) solves: runtimes built meanwhile never
+#: release the m=1 constrained Z force and start each stage with that family on
+#: the input's ``profil3d.f`` guess, so the root does not depend on the path.
+HOLD_M1: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "vmex_hold_m1", default=False)
+
 
 def _resolve_use_fft(
     use_fft: bool | None, device: Any, resolution: Resolution
@@ -2429,9 +2443,9 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     stop = STOP_HOOK.get()
     # Prefetched-executable consumption + compile attribution.  The
     # structural key selects a background-compiled standalone executable
-    # when one exists (identical lowering — bit-identical iterations); a
-    # first-time structure without one is compiled on demand by the jitted
-    # lane, and the notice makes that pause attributable on screen.
+    # when one exists (identical lowering — bit-identical iterations).
+    # Otherwise bind the cached lane once, avoiding per-block structure work.
+    # The notice makes a first-time compile attributable on screen.
     executable = None
     if not jax.config.jax_disable_jit:
         key = _lane_signature("block_fft" if use_fft else "block", carry, rt)
@@ -2440,6 +2454,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+        if executable is None:
+            try:
+                with placement_neutral((carry, rt)):
+                    executable = lane.executable(carry, rt)
+            except Exception:
+                pass
     # Committed arguments already fix placement, so keep the caller's
     # default-device context out of the lane's jit key: a construction solve
     # and trial solves run inside a device context then share one executable.
@@ -2452,6 +2472,9 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             try:
                 carry = step(executable, carry)
             except Exception:
+                if any(getattr(leaf, "is_deleted", bool)()
+                       for leaf in jax.tree.leaves(carry)):
+                    raise
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.

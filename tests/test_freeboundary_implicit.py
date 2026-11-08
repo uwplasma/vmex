@@ -12,6 +12,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+import solvax
 from jax.flatten_util import ravel_pytree
 from scipy.sparse.linalg import LinearOperator, gcrotmk
 
@@ -346,7 +347,7 @@ def test_schur_lanes_are_reusable_and_leak_nothing_per_gradient(monkeypatch, cap
     def configure(solver):
         return make_free_boundary_config(
             inp, field, ns=5, ftol=1.0e-5, max_iterations=1000,
-            adjoint_tol=1.0e-8, adjoint_maxiter=100, adjoint_solver=solver,
+            adjoint_tol=1.0e-8, adjoint_maxiter=200, adjoint_solver=solver,
             field_from_parameters=lambda current: dataclasses.replace(
                 field, extcur=current), device="cpu")
 
@@ -440,6 +441,8 @@ def test_traced_adjoint_linearizes_inside_an_outer_jit(monkeypatch):
 
     monkeypatch.setattr(fbi, "_projected_residual", lambda *_args, **_kwargs: residual)
     monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda tree: tree))
+    monkeypatch.setattr(im, "runtime_from_params", lambda p, _cfg: p)
+    monkeypatch.setattr(im, "_held", lambda state, _p: state)
     cfg = SimpleNamespace(
         implicit=SimpleNamespace(adjoint_tol=1e-12, adjoint_gcrot_m=2,
                                  adjoint_gcrot_k=1, adjoint_maxiter=10),
@@ -586,15 +589,16 @@ def test_restart_carries_only_the_reference_state():
 
 
 def test_traced_pullback_runs_the_host_schur_lane(monkeypatch):
-    """Under jit the Schur lane runs on the concrete root, like eager."""
+    """Eager and jitted pullbacks include the parameter-dependent held output."""
     def residual(z, p, field, *_args):
-        return jnp.asarray([z[0]**2 + p * z[1] + field, z[0] * z[1] + z[1]**2 - p])
+        return jnp.asarray([z[0]**2 + p * z[1] + field + p**2,
+                            z[0] * z[1] + z[1]**2 - p, 0.])
 
     def schur(cfg, z, p, field, *args, fail):
         assert not isinstance(args[-1], jax.core.Tracer) and fail == "error"
         calls.append(cfg)
         jacobian = jax.jacrev(residual)(z, p, field)
-        return jnp.linalg.solve(jacobian.T, args[-1])
+        return jnp.pad(jnp.linalg.solve(jacobian[:2, :2].T, args[-1][:2]), (0, 1))
 
     class Config:  # hashable by identity, like FreeBoundaryImplicitConfig
         implicit = SimpleNamespace(device=None)
@@ -603,14 +607,18 @@ def test_traced_pullback_runs_the_host_schur_lane(monkeypatch):
     calls, cfg = [], Config()
     monkeypatch.setattr(fbi, "_projected_residual", lambda *_a, **_k: residual)
     monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint", schur)
-    monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda tree: tree))
-    saved = (jnp.asarray(0.5), jnp.asarray(0.25), jnp.asarray([2., 3.]),
+    monkeypatch.setattr(im, "_dof_projector", lambda *_args: (lambda x: x.at[2].set(0.)))
+    monkeypatch.setattr(im, "runtime_from_params", lambda p, _cfg: p)
+    monkeypatch.setattr(im, "_held", lambda state, p: state.at[2].set(p**2))
+    saved = (jnp.asarray(0.5), jnp.asarray(0.25), jnp.asarray([2., 3., 0.25]),
              None, None, None)
-    bar = jnp.asarray([1., -2.])
+    bar = jnp.asarray([1., -2., 3.])
     eager = fbi._solve_bwd_impl(cfg, saved, bar)
     staged = jax.jit(lambda value: fbi._solve_bwd_impl(cfg, saved, value))(bar)
     assert calls == [cfg, cfg]
     np.testing.assert_allclose(staged, eager, rtol=1.0e-14, atol=0.0)
+    lam = np.linalg.solve(np.array([[4., 0.5], [3., 8.]]).T, np.asarray(bar[:2]))
+    np.testing.assert_allclose(eager, (3. - np.array([4., -1.]) @ lam, -lam[0]), rtol=1e-14)
     # A typed failure keeps its class behind the callback's runtime error.
     failure = AdjointSolveError("stalled")
     monkeypatch.setattr(fbi, "_host_boundary_schur_adjoint",
@@ -955,7 +963,7 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         *lane[:5], mask, z, bsqvac, cfg=cfg,
         probe_chunk_size=fbi._bulk_probe_chunk(cfg, mask))
     factors = fbi._anchor_factor(lower, diagonal, upper, row_scale,
-                                 column_scale)
+                                 column_scale, cfg=cfg)
     # The Schur adjoint's bulk solve applies A^-T for these raw blocks.
     blocks = np.zeros((ns, ns) + diagonal.shape[1:])
     for j in range(ns):
@@ -1059,7 +1067,7 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
                         lambda z, *_a, **_k: jnp.asarray(residual(z)))
     monkeypatch.setattr(fbi, "_anchor_linear_solve", solve)
     monkeypatch.setattr(fbi, "_frozen_bulk_blocks", factor)
-    monkeypatch.setattr(fbi, "_anchor_factor", lambda *_args: "factors")
+    monkeypatch.setattr(fbi, "_anchor_factor", lambda *_a, **_k: "factors")
     monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
 
@@ -1863,3 +1871,46 @@ def test_map_columns_matches_a_full_width_vmap(columns):
     mapped = fbi._map_columns(apply, matrix)
     assert mapped.shape == (4, 2, columns)
     assert jnp.array_equal(mapped, jax.vmap(apply, in_axes=-1, out_axes=-1)(matrix))
+
+
+@pytest.mark.parametrize("block_factor", ["thomas", "cyclic_reduction"])
+def test_anchor_factor_backends_invert_the_scaled_bulk_bands(block_factor):
+    """Both ``block_factor`` backends factor the anchor's scaled bands exactly.
+
+    Eleven surfaces make cutoff-8 cyclic reduction take a real level; the
+    solves are checked against a dense inverse, primal and transpose.
+    """
+    inp = dataclasses.replace(
+        lasym_free_input(DATA).change_resolution(
+            mpol=3, ntor=0, ntheta=10, nzeta=4),
+        ns_array=np.array([5]), ftol_array=np.array([1.0e-6]),
+        niter_array=np.array([400]))
+    field = lasym_free_field()
+    cfg = make_free_boundary_config(
+        inp, field, ns=5, ftol=1.0e-6, max_iterations=400,
+        field_from_parameters=lambda current: dataclasses.replace(
+            field, extcur=current), device="cpu")
+    if block_factor == "cyclic_reduction":
+        cfg = dataclasses.replace(cfg, implicit=dataclasses.replace(cfg.implicit, device="gpu"))
+    n, m = 11, 6
+    rng = np.random.default_rng(3)
+    lower, diagonal, upper = (jnp.asarray(rng.standard_normal((n, m, m)))
+                              for _ in range(3))
+    diagonal = diagonal + 4.0 * jnp.eye(m)
+    ones = jnp.ones((n, m))
+    factors = fbi._anchor_factor(lower, diagonal, upper, ones, ones, cfg=cfg)
+    assert hasattr(factors, "levels") == (block_factor == "cyclic_reduction")
+    dense = np.zeros((n * m, n * m))
+    for k in range(n):
+        dense[k * m:(k + 1) * m, k * m:(k + 1) * m] = diagonal[k]
+        if k:
+            dense[k * m:(k + 1) * m, (k - 1) * m:k * m] = lower[k]
+        if k < n - 1:
+            dense[k * m:(k + 1) * m, (k + 1) * m:(k + 2) * m] = upper[k]
+    rhs = rng.standard_normal((n, m))
+    for transpose, matrix in ((False, dense), (True, dense.T)):
+        got = solvax.block_thomas_solve(
+            factors, jnp.asarray(rhs)[..., None], transpose=transpose)[..., 0]
+        np.testing.assert_allclose(
+            np.asarray(got).ravel(), np.linalg.solve(matrix, rhs.ravel()),
+            rtol=1.0e-10, atol=1.0e-12)

@@ -2,7 +2,7 @@
 
 VMEC2000 counterparts: ``LIBSTELL/Sources/Modules/vmec_input.f``
 (``read_indata_namelist``: variable set and defaults) and ``readin.f``
-(post-read normalizations).  The JSON schema follows VMEC++
+(post-read normalizations).  The JSON schema follows the C++ VMEC reimplementation
 (``vmecpp.VmecInput``): identical key names, boundary coefficients as sparse
 ``{"m": int, "n": int, "value": float}`` lists, dense axis arrays, and
 ``adiabatic_index`` accepted as an alias for ``gamma``.
@@ -647,12 +647,6 @@ def _validate_indata_modes(
             "MAX_MAIN_ITERATIONS",
             "automatic continuation by additional NITER blocks is not implemented",
         )
-    if bool(first("LGIVEUP", False)):
-        raise UnsupportedInputModeError(
-            "D00I_ITERATION_CONTROL_UNSUPPORTED",
-            "LGIVEUP/FGIVEUP",
-            "VMEC2000 early termination between multigrid stages is not implemented",
-        )
 
     if bool(first("LBSUBS", False)):
         raise UnsupportedInputModeError(
@@ -687,6 +681,28 @@ def _validate_indata_modes(
         )
 
 
+# Keys of the JSON input format of the C++ VMEC reimplementation that VMEX
+# accepts at their default only (its writer emits every key).  The -1 sentinels
+# mean "use mpol/ntor".  INDATA equivalents: iteration_style=vmec_8_52 is the
+# VMEC2000 iteration; lgiveup/fgiveup, lbsubs are INDATA LGIVEUP/FGIVEUP/LBSUBS
+# (rejected at INDATA too); the rest have no INDATA control.
+_JSON_DEFAULT_ONLY: Dict[str, Any] = {
+    "vacuum_mpol": 0, "vacuum_ntor": 0, "signgs": -1,
+    "iteration_style": "vmec_8_52", "lbsubs": False,
+    "lambda_preconditioner_scale": 0.5, "always_fix_m1_gauge": False,
+}
+# Accepted at any value: VMEX always returns its final state and keeps no
+# backup of the evaluated state, so neither changes a converged solve.
+_JSON_ANY_VALUE = ("backup_evaluated_state", "return_outputs_even_if_not_converged")
+
+
+def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
+    value = data[key]
+    if isinstance(default, str):
+        return str(value).strip().lower() == default
+    return value == default
+
+
 def _validate_json_modes(data: Dict[str, Any]) -> None:
     """Apply the same no-silent-fallback policy to structured JSON controls."""
     method = str(data.get("free_boundary_method", "nestor")).strip().lower()
@@ -697,8 +713,26 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
             "VMEX JSON solves support NESTOR; only_coils/biest are different models",
         )
 
+    for key in ("mpol", "ntor"):  # geometry resolution >= mpol/ntor or < 0: same
+        geometry = data.get(key + "_geometry")
+        if geometry is not None and 0 <= int(geometry) < int(data.get(key, 6 if key == "mpol" else 0)):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key + "_geometry",
+                "a reduced R/Z resolution with full-resolution lambda is not "
+                "implemented; VMEX uses one resolution for both",
+            )
+    for key, default in _JSON_DEFAULT_ONLY.items():
+        if key in data and not _json_is_default(data, key, default):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key,
+                f"only the default ({default!r}) is implemented; the "
+                "VMEC2000 INDATA deck has no equivalent control",
+            )
+
     field_names = {field.name for field in fields(VmecInput)}
-    known = field_names | {"adiabatic_index", "free_boundary_method"}
+    known = (field_names | {"adiabatic_index", "free_boundary_method"}
+             | set(_JSON_DEFAULT_ONLY) | set(_JSON_ANY_VALUE)
+             | {"mpol_geometry", "ntor_geometry", "lambda_precondition_checkerboard_terms"})
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(
@@ -794,6 +828,9 @@ class VmecInput:
     position_target: float = 0.0     #: target axis radius [m]; <= 0 keeps the initial axis
     position_interval: int = 20      #: iterations between control updates
     position_gain: float = 4.0       #: proportional gain, in units of mu0 I / (4 pi R0^2)
+    lgiveup: bool = False        #: stop the ladder after a stage above fgiveup*ftol
+    fgiveup: float = 30.0        #: give-up factor on ftol (lgiveup)
+    lambda_m0_floor: float | None = None  #: radial m=0 lambda preconditioner floor (None: diagonal)
     position_nmax: int = 0           #: highest helical harmonic controlled (0 = uniform B_Z only)
 
     def __post_init__(self) -> None:
@@ -1293,11 +1330,13 @@ class VmecInput:
             position_interval=int(get("POSITION_INTERVAL", 20)),
             position_gain=float(get("POSITION_GAIN", 4.0)),
             position_nmax=int(get("POSITION_NMAX", 0)),
+            lgiveup=bool(get("LGIVEUP", False)),
+            fgiveup=float(get("FGIVEUP", 30.0)),
         )
 
     @classmethod
     def from_json_text(cls, text: str) -> "VmecInput":
-        """Build from structured JSON text (vmecpp.VmecInput layout).
+        """Build from structured JSON text (layout of the C++ VMEC reimplementation).
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse
@@ -1309,9 +1348,12 @@ class VmecInput:
         data = json.loads(text)
         # Reserved execution-metadata section: run controls, never physics.
         # ``vmex.core.run_options`` validates and consumes it; the physics
-        # schema stays VMEC++ compatible once it is removed.
+        # schema stays compatible once it is removed.
         data.pop("_vmex", None)
         _validate_json_modes(data)
+        floor = data.get("lambda_precondition_checkerboard_terms")
+        if floor is not None and "lambda_m0_floor" not in data:
+            data["lambda_m0_floor"] = float(floor) if float(floor) >= 0 else None
         if "adiabatic_index" in data and "gamma" not in data:
             data["gamma"] = data["adiabatic_index"]
 
@@ -1341,13 +1383,13 @@ class VmecInput:
         kwargs["mpol"] = mpol
         kwargs["ntor"] = ntor
         if "lfreeb" not in kwargs:
-            kwargs["lfreeb"] = False  # VMEC++ default (vmecpp.VmecInput)
+            kwargs["lfreeb"] = False  # default of that format
         return cls(**kwargs)
 
     # -- writers --------------------------------------------------------------
 
     def to_json(self, path: str | Path) -> Path:
-        """Write VMEC++-schema JSON that round-trips through :meth:`from_file`.
+        """Write JSON in that format that round-trips through :meth:`from_file`.
 
         Boundary coefficients are written as sparse ``{"m","n","value"}``
         lists (nonzero entries only); axis and profile arrays are dense.

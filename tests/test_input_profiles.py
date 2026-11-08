@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import json
+
 import numpy as np
 import pytest
 
@@ -274,7 +276,6 @@ def test_partial_niter_minus_one_executes_one_vmec_pass() -> None:
             "D00I_ITERATION_CONTROL_UNSUPPORTED",
         ),
         ("MAX_MAIN_ITERATIONS=2", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
-        ("LGIVEUP=T", "D00I_ITERATION_CONTROL_UNSUPPORTED"),
         ("LBSUBS=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
         ("LNYQUIST=F", "D00J_OUTPUT_MODE_UNSUPPORTED"),
         ("LBOOZ=T", "D00J_OUTPUT_MODE_UNSUPPORTED"),
@@ -342,6 +343,31 @@ def test_structured_json_modes_and_unknown_keys_are_not_ignored() -> None:
 
     with pytest.raises(ValueError, match="unknown structured JSON input key"):
         VmecInput.from_json_text('{"free_boundary_method": "nestor", "mpoll": 6}')
+
+
+_CXX_JSON = (
+    '{"mpol": 3, "ntor": 1, "nfp": 2, "mpol_geometry": 3, "ntor_geometry": -1,'
+    ' "vacuum_mpol": 0, "signgs": -1, "iteration_style": "vmec_8_52",'
+    ' "lgiveup": false, "fgiveup": 30.0, "lbsubs": false,'
+    ' "lambda_preconditioner_scale": 0.5, "backup_evaluated_state": true,'
+    ' "return_outputs_even_if_not_converged": false,'
+    ' "rbc": [{"m": 0, "n": 0, "value": 1.0}]}'
+)
+
+
+def test_cxx_vmec_json_defaults_are_accepted_and_others_raise() -> None:
+    """The reimplementation's writer emits every key; non-default ones fail."""
+    assert VmecInput.from_json_text(_CXX_JSON).nfp == 2
+    VmecInput.from_json_text(_CXX_JSON[:-1] + ', "backup_evaluated_state": false}')
+    assert VmecInput.from_json_text(
+        _CXX_JSON[:-1] + ', "lambda_precondition_checkerboard_terms": 0.001}'
+    ).lambda_m0_floor == 0.001
+    for key, bad in (("iteration_style", "parvmec"), ("vacuum_mpol", 4),
+                     ("lbsubs", True), ("mpol_geometry", 1)):
+        text = _CXX_JSON[:-1]
+        with pytest.raises(UnsupportedInputModeError, match=key) as caught:
+            VmecInput.from_json_text(text + f', "{key}": {json.dumps(bad)}}}')
+        assert caught.value.code == "D00L_JSON_KEY_UNSUPPORTED"
 
 
 def test_unknown_indata_name_is_not_ignored() -> None:
@@ -679,3 +705,49 @@ def test_every_fortran_namelist_terminator_ends_indata(ending):
     inp = VmecInput.from_indata_text(head + ending + "\n&BOOTIN\n NFP = 7\n/\n")
     assert (inp.mpol, inp.nfp, inp.mgrid_file) == (2, 3, "path/to/mgrid.nc")
     np.testing.assert_array_equal(np.asarray(inp.am)[:3], [1.0, 2.0, 0.0])
+
+
+_SOLOVEV_JSON = (
+    '{"mpol": 6, "ntor": 0, "delt": 0.9, "ncurr": 0, "nstep": 250,'
+    ' "ns_array": [5], "niter_array": [1000], "ftol_array": [1e-12],'
+    ' "am": [0.125, -0.125], "ai": [1.0], "raxis_c": [4.0], "zaxis_s": [0.0],'
+    ' "rbc": [{"n": 0, "m": 0, "value": 3.999}, {"n": 0, "m": 1, "value": 1.026},'
+    ' {"n": 0, "m": 2, "value": -0.068}],'
+    ' "zbs": [{"n": 0, "m": 0, "value": 0.0}, {"n": 0, "m": 1, "value": 1.58},'
+    ' {"n": 0, "m": 2, "value": 0.01}]}'
+)
+_SOLOVEV_INDATA = """&INDATA
+DELT = 0.9  NCURR = 0  NSTEP = 250  MPOL = 6  NTOR = 0
+NS_ARRAY = 5  NITER_ARRAY = 1000  FTOL_ARRAY = 1E-12
+AM = 0.125 -0.125  AI = 1  RAXIS_CC = 4  ZAXIS_CS = 0
+RBC(0,0) = 3.999  ZBS(0,0) = 0.000
+RBC(0,1) = 1.026  ZBS(0,1) = 1.580
+RBC(0,2) = -0.068  ZBS(0,2) = 0.010
+/
+"""
+
+
+def test_cxx_vmec_json_solves_like_the_equivalent_indata() -> None:
+    """A published example of that JSON format equals its INDATA deck."""
+    import vmex as vj
+
+    a = VmecInput.from_json_text(_SOLOVEV_JSON)
+    b = VmecInput.from_indata_text(_SOLOVEV_INDATA)
+    for name in ("rbc", "zbs", "am", "ai", "raxis_c", "zaxis_s", "ns_array"):
+        np.testing.assert_array_equal(getattr(a, name), getattr(b, name))
+    ra, rb = (vj.solve_multigrid(i, verbose=False) for i in (a, b))
+    assert ra.converged and rb.converged
+    np.testing.assert_allclose(float(ra.fsqr), float(rb.fsqr), atol=1e-14)
+    assert int(ra.iterations) == int(rb.iterations)
+
+
+def test_lgiveup_ends_the_ladder_after_a_poor_stage() -> None:
+    """VMEC2000 runvmec.f: a stage above fgiveup*ftol stops the multigrid ladder."""
+    import vmex as vj
+
+    deck = _SOLOVEV_INDATA.replace("NS_ARRAY = 5  NITER_ARRAY = 1000  FTOL_ARRAY = 1E-12",
+                                   "NS_ARRAY = 5 7  NITER_ARRAY = 3 1000  FTOL_ARRAY = 1E-12 1E-12")
+    for extra, ns in (("", 7), ("LGIVEUP = T\n", 5)):
+        inp = VmecInput.from_indata_text(deck.replace("/\n", extra + "/\n"))
+        res = vj.solve_multigrid(inp, verbose=False, raise_on_max_iterations=False)
+        assert (res.iterations <= 3) == (ns == 5)
