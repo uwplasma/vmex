@@ -1445,10 +1445,15 @@ class VmecExtender(MagneticField):
         in every mode.  The attribute may also be set after construction.
     near_surface:
         Which quadrature evaluates the plasma field. ``"auto"`` (default):
-        eager calls use the direct path wherever its error estimate meets
-        ``10**-digits`` and the graded rule at the points where it does not;
-        traced calls use the direct path, since a per-point switch under a
-        trace would pay for both.  ``"graded"``: every call, traced or not,
+        the direct path wherever its order-0 error estimate meets
+        ``10**-digits`` and the graded rule at the points where it does not,
+        for ``B`` and every derivative order, eager or traced, so the returned
+        jets and the parameter pullbacks differentiate one map.  A traced call
+        evaluates both rules and selects per point (a traced ``B`` costs
+        both), an eager call only the rule each point needs.  Node counts: the
+        direct path uses the finest schedule level at order 0 and closed-form
+        kernels over it at orders 1-3; the graded rule uses ``graded_nodes``
+        at every order.  ``"graded"``: every call, traced or not,
         uses the graded rule — for objectives or field-line traces that stay
         close to the surface.  ``"direct"``: every call uses the direct path.
         The attribute may also be set after construction.
@@ -1543,7 +1548,7 @@ class VmecExtender(MagneticField):
 
         For traced use close to the surface — field-line tracing, objectives
         on a nearby coil-clearance surface — where the per-point switch of
-        ``near_surface="auto"`` is not available.  Each target costs about the
+        ``near_surface="auto"`` would evaluate both rules.  Each target costs about the
         same as a direct call on a 128 x 512 grid; fewer ``nodes`` trade
         accuracy for speed (``(64, 256)`` keeps ``B`` to about 1e-5 down to
         0.01 minor radii).  This replaces the first-order near-surface
@@ -1670,6 +1675,10 @@ class VmecExtender(MagneticField):
         return self._kernel(("estimate",), lambda: jax.jit(
             lambda p: vc.offsurface_error_estimate(self.plasma_field, p)))(xyz)
 
+    def _near(self, xyz: Array) -> Array:
+        """Points where the direct path misses ``digits``: the one ``auto`` selector."""
+        return ~(self._direct_estimate(0, xyz) <= 10.0 ** (-int(self.plasma_field.config.digits)))
+
     def _field(self, order: int, xyz: Array) -> Array:
         """``order``-th derivative of the total field, choosing the quadrature."""
         value = self._external(order, xyz)
@@ -1687,13 +1696,15 @@ class VmecExtender(MagneticField):
                              np.ones(xyz.shape[0], bool))
             return value + plasma
         plasma = self._direct(order, xyz)
+        if mode == "auto" and traced:
+            near = self._near(xyz).reshape((-1,) + (1,) * (plasma.ndim - 1))
+            return value + jnp.where(near, self._graded(order, xyz), plasma)
         if traced or (mode == "direct" and self._accuracy_check == "off"):
             return value + plasma
         estimate = np.array(self._direct_estimate(order, xyz), dtype=float)
-        tolerance = 10.0 ** (-int(self.plasma_field.config.digits))
         graded = np.zeros(xyz.shape[0], bool)
         if mode == "auto":
-            graded = ~(estimate <= tolerance)
+            graded = np.asarray(self._near(xyz))
             if graded.any():
                 index = np.flatnonzero(graded)
                 plasma = jnp.asarray(plasma).at[index].set(self._graded(order, xyz[index]))
@@ -1775,7 +1786,7 @@ class VmecExtender(MagneticField):
         quarters of its nodes, which bounds its error from above; traceable.
         Under ``near_surface="auto"`` an eager call reports the graded
         estimate at the points the direct path would have missed; a traced
-        call reports the direct estimate, as a traced :meth:`B` uses it.
+        call does the same by selecting per point.
         """
         if self.plasma_field is None:
             raise RuntimeError("the field has no virtual-casing plasma contribution")
@@ -1784,10 +1795,12 @@ class VmecExtender(MagneticField):
         if self._near_surface == "graded":
             return self._graded_estimate(order, xyz)
         estimate = self._direct_estimate(order, xyz)
-        if self._near_surface == "direct" or isinstance(estimate, jax.core.Tracer):
+        if self._near_surface == "direct":
             return estimate
+        if isinstance(estimate, jax.core.Tracer) or isinstance(xyz, jax.core.Tracer):
+            return jnp.where(self._near(xyz), self._graded_estimate(order, xyz), estimate)
         estimate = np.array(estimate, dtype=float)
-        miss = ~(estimate <= 10.0 ** (-int(self.plasma_field.config.digits)))
+        miss = np.asarray(self._near(xyz))
         if miss.any():
             index = np.flatnonzero(miss)
             estimate[index] = np.asarray(self._graded_estimate(order, xyz[index]))
