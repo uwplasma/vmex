@@ -193,6 +193,15 @@ def test_cubic_spline_two_knots_is_secant_line():
     np.testing.assert_allclose(np.asarray(got), 1.0 + 2.0 * S, rtol=1e-13)
 
 
+def test_akima_spline_reproduces_a_quadratic_at_both_edges():
+    """The end extrapolation is exact for quadratics; the right edge used to miss by 1e-3."""
+    x = np.linspace(0.0, 1.0, 11)
+    y = 1.0 - x**2
+    s = np.linspace(0.0, 1.0, 201)
+    got = profiles.evaluate_profile("akima_spline", None, x, y, s)
+    np.testing.assert_allclose(got, 1.0 - s**2, atol=1e-13)
+
+
 def test_akima_spline_small_knot_fallback_and_smooth_data():
     # n < 4 falls back to the cubic Hermite form (linear data still exact)
     got = profiles.evaluate_profile("akima_spline", None, [0.0, 0.5, 1.0],

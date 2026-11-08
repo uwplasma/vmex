@@ -515,7 +515,9 @@ The complete runnable workflows are
 ``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
 row on the Redl ``<J.B>`` itself (target 0), and
 ``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
-kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``).  Their
+kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``);
+``QI_optimization_bootstrap_er.py`` evaluates it at the ambipolar ``E_r``
+(``ambipolar=True``).  Their
 setup has two distinct steps:
 
 1. ``KineticProfiles`` describes the density and temperature seen by the
@@ -719,6 +721,10 @@ Which objectives differentiate how
      - yes
      - yes
      - signed radial action slope with matched well identity
+   * - :class:`~vmex.core.maxj.DriftConfinementResidual`
+     - yes
+     - yes
+     - hinge on the smooth maximum radius of bounce-averaged drift orbits
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
@@ -747,6 +753,14 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable ``L_grad_B`` lane (soft-min via ``softmin_k``)
+   * - :func:`~vmex.core.optimize.l_grad_b_excess_state`
+     - yes
+     - yes
+     - one-sided pointwise rows for a minimum gradient scale length
+   * - :func:`~vmex.core.optimize.weighted_magnetic_well`
+     - yes
+     - yes
+     - volume-derivative well between two user-chosen radial regions
    * - :func:`~vmex.core.optimize.d_merc_state`,
        :func:`~vmex.core.optimize.mercier_stability_residual`
      - yes

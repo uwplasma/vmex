@@ -323,12 +323,13 @@ def trace_boozer_field_lines(
     }
 
 
-def bounce_action_from_boozer(*, pitch, max_wells=None, quadrature_order=64, **kwargs):
+def bounce_action_from_boozer(*, pitch, max_wells=None, quadrature_order=64,
+                              drift_integrands=None, **kwargs):
     """Trace Boozer field lines and evaluate :func:`bounce_action`."""
     trace = trace_boozer_field_lines(**kwargs)
     result = bounce_action(
         trace["bmag"], pitch, dl_dphi=trace["dl_dphi"],
         length=trace["length"], periodic=False, max_wells=max_wells,
-        quadrature_order=quadrature_order)
+        quadrature_order=quadrature_order, drift_integrands=drift_integrands)
     result.update(trace)
     return result

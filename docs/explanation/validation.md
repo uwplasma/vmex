@@ -207,8 +207,9 @@ axis and 3.2e3 to 23 at the edge, with projected stationarity 1.3e-10; the
 written file reproduces the native certificate. The pointwise
 `eps_F = 2|F|/(|J×B|+|grad p|+floor)` is bounded above by 2 by construction
 and cannot rank near-vacuum states, so read the dimensional force with it.
-The polish covers fixed-boundary axisymmetric decks with prescribed pressure
-and iota; a 3-D polish is future work. See the
+The certified polish covers fixed-boundary axisymmetric decks with prescribed pressure
+and iota. The experimental 3-D prescribed-current polish lowers held-out force,
+but has no stationarity certificate or qualified WOUT export. See the
 [method reference](high-order-force-balance.rst).
 
 ## Application record: finite-beta QI diagnostics
@@ -231,6 +232,9 @@ After 10 Newton steps the MRX force residual is 1.4e-8, its Poincare sections fo
 surfaces, and its iota, enclosed current and pressure match the VMEX profiles; `|B|` agrees to
 2e-3 rms for ρ ≥ 0.3. MRX starts from the VMEX field, so this checks consistency, not near-axis
 convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns = 65, 129 and 257.
+These values do not establish the continuum limit, and a matched, independently converged DESC
+reference has not been established. MRX reconstructs pressure from its relaxed field rather than
+imposing VMEX's profile, so this is not a matched-profile equilibrium benchmark.
 
 ![VMEX and MRX on the 2.5% beta QA deck](../_static/figures/readme_vmex_mrx_comparison.webp)
 
@@ -241,6 +245,18 @@ equilibria: Landreman's integer-transform and sheared families (arXiv:2609.26742
 tokamaks, and the non-stellarator-symmetric extensions of Issan et al. (arXiv:2610.07304). Every
 exact case passes force balance and divergence to round-off; the Issan closed forms reproduce the
 paper's volume, beta and transform. Each WOUT is scored by one script for every producer.
+
+The exact nonsymmetric vacuum fields of Sengupta et al. (arXiv:2610.28466) are tested in
+`tests/test_exact_vacuum.py`. Given only the exact boundary and flux at aspect ratio 5.7 (paraboloidal) and 9.5 (ellipsoidal), with
+`ns = 65`, `mpol = 7`, the transform error for `0.2 < s < 0.9` is:
+
+| Member | `ntor = 7` | `ntor = 14` | `ntor = 20` |
+|---|---|---|---|
+| Paraboloidal, `iota = 1/sqrt(5)` | 2.9e-3 | 5.8e-5 | 4.1e-5 |
+| Ellipsoidal, no stellarator symmetry, `iota0 = sqrt(2)/7` | 2.3e-4 | 5.4e-05 | 5.4e-5 |
+
+Next to the axis the error is 3e-4 to 1e-3 and does not fall with `ns`, the usual near-axis limit of
+this discretization.
 
 | Family A (`iota = 2`), VMEX from the exact geometry | ns 65 | ns 129 |
 |---|---|---|
