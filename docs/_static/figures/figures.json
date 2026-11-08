@@ -828,6 +828,23 @@
         "README.md"
       ],
       "note": "NFP 3 vacuum pwO_optimization.py defaults (modes 1-3, no magnetic well) against its near-circular seed, both re-solved at ns 71: boundary cross sections, |B| on the boundary, Boozer contours, NEO effective ripple and |iota| profiles."
+    },
+    {
+      "path": "docs/_static/figures/readme_pwo_bootstrap.webp",
+      "sha256": "2fe6f8f4d5b6516ef7a2a4c89a2a5bef43ecdad5aa9e2620415c4b28b72536ad",
+      "bytes": 128916,
+      "generator": "examples/plot_optimized_families.py",
+      "command": "python examples/plot_optimized_families.py  (set PLOT_ONLY = \"pwo_bootstrap\" after running pwO_optimization.py with BOOTSTRAP_TERM = None and \"band\", and bootstrap_bench.py --res 25,33,64,8 on each wout)",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-11-08",
+      "hardware": "arm64 macOS laptop, CPU; DKX 2.12.0 data from an x86_64 Linux workstation",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "pwO_optimization.py with BOOTSTRAP_TERM None and band: |B| in Boozer coordinates and on the boundary, DKX <j.B> on five surfaces (I_bs -135 and -5 kA), and alpha losses (1000 particles, 5 ms, s = 0.3). WebP quality 70."
     }
   ]
 }

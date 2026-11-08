@@ -42,6 +42,13 @@ MBOZ = 16
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
+# Zero bootstrap current. The mapped field alone already has zero collisionless
+# bootstrap geometry for every map; the current comes from the unmapped band where
+# B_max lives. "band" flattens B across that band (sufficient, not necessary; DKX
+# confirms it lowers the current, at higher edge eps_eff); None leaves it free:
+BOOTSTRAP_TERM = None
+BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
+
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2, 3]
@@ -176,7 +183,8 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
+                           band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
