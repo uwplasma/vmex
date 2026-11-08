@@ -13,7 +13,7 @@ four equally spaced toroidal cuts over one field period, the 3-D boundary, and
 and ``|iota|`` profiles; it needs ``vmex[neoclassical]``. The ``pwo_bootstrap`` figure
 compares ``pwO_optimization.py`` runs with ``BOOTSTRAP_TERM = None`` and ``"band"``
 (directories ``pwO`` and ``pwO_band``): ``|B|``, the DKX bootstrap current and the alpha
-losses against the seed. The DKX files ``dkx_<case>.json`` (``seed``, ``pwO``, ``pwO_band``)
+losses. The DKX files ``dkx_<case>.json`` (``pwO``, ``pwO_band``)
 come from ``bootstrap_bench.py --res 25,33,64,8`` run on each ``wout``.
 """
 
@@ -164,15 +164,14 @@ def _draw_pwo(output):
 
 
 def _draw_pwo_bootstrap(output):
-    cases = (("Near-circular seed", _pwo_seed(), "seed", "#566a79"),
-             ("pwO", QS_INPUT_DIR / "pwO" / f"input.pwO_optimized_nfp{PWO_NFP}", "pwO", "#c56627"),
+    cases = (("pwO", QS_INPUT_DIR / "pwO" / f"input.pwO_optimized_nfp{PWO_NFP}", "pwO", "#c56627"),
              ("pwO + bootstrap control", QS_INPUT_DIR / "pwO_band" / f"input.pwO_optimized_nfp{PWO_NFP}",
               "pwO_band", "#2a78d6"))
     figure = plt.figure(figsize=(8.1, 7.5), dpi=PLOT_DPI)
-    grid = figure.add_gridspec(2, 4, height_ratios=(1.2, 1.0), hspace=0.3, wspace=0.7)
-    current, loss = figure.add_subplot(grid[0, 2:]), figure.add_subplot(grid[1, 2:])
+    grid = figure.add_gridspec(2, 5, height_ratios=(1.2, 1.0), width_ratios=(1.4, 1.4, 0.3, 1, 1), hspace=0.3, wspace=0.75)
+    current, loss = figure.add_subplot(grid[0, 3:]), figure.add_subplot(grid[1, 3:])
     for index, (title, source, tag, color) in enumerate(cases):
-        equilibrium = _solve(source if tag == "seed" else vj.VmecInput.from_file(source))
+        equilibrium = _solve(vj.VmecInput.from_file(source))
         dkx = json.loads((QS_INPUT_DIR / f"dkx_{tag}.json").read_text())
         current.plot(dkx["surfaces"], 1e-6 * np.array(dkx["dkx_jdotb"]), "o-", color=color,
                      label=rf"{title}, $I_{{bs}}$ = {1e-3 * dkx['I_dkx']:.0f} kA")
@@ -180,19 +179,18 @@ def _draw_pwo_bootstrap(output):
         t, lost = np.asarray(alphas.times), np.asarray(alphas.loss_fractions)
         loss.plot(t[t > 0], 100 * lost[t > 0], color=color,
                   label=f"{title}, {100 * alphas.loss_fraction:.1f} %")
+        boozer = figure.add_subplot(grid[0, index]); _boozer(figure, boozer, equilibrium.wout, f"bs{index}")
+        boozer.set_title(title, loc="left", fontsize=9)
+        _boundary_3d(figure, figure.add_subplot(grid[1, index], projection="3d"), equilibrium.wout)
+        boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$" if index == 0 else "", fontsize=8)
         if index:
-            boozer = figure.add_subplot(grid[0, index - 1]); _boozer(figure, boozer, equilibrium.wout, f"bs{index}")
-            boozer.set_title(title, loc="left", fontsize=9)
-            surface = figure.add_subplot(grid[1, index - 1], projection="3d")
-            _boundary_3d(figure, surface, equilibrium.wout)
-            if index == 1:
-                boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$", fontsize=8)
+            boozer.set(yticklabels=[], xlabel="")
     current.set(xlabel="$s$", ylabel=r"DKX $\langle j_\parallel B\rangle$ [MA T/m$^2$]")
     loss.set(xscale="log", xlabel="time [s]", ylabel="alphas lost [%]")
-    for axis in (current, loss):
-        axis.legend(fontsize=6.5, frameon=False); axis.tick_params(labelsize=7)
+    for axis, corner in ((current, "center right"), (loss, "lower right")):
+        axis.legend(fontsize=6.5, loc=corner, framealpha=0.9, edgecolor="none"); axis.tick_params(labelsize=7)
         axis.spines[["top", "right"]].set_visible(False)
-    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05, pil_kwargs={"quality": 70})
     plt.close(figure); print(f"wrote {output}")
 
 

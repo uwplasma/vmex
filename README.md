@@ -298,7 +298,7 @@ From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum ru
 
 The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
 
-![pwO with and without the bootstrap band term: |B| in Boozer coordinates and on the boundary, DKX bootstrap current and alpha losses against the seed](docs/_static/figures/readme_pwo_bootstrap.webp)
+![pwO with and without the bootstrap band term: |B| in Boozer coordinates and on the boundary, DKX bootstrap current and alpha losses](docs/_static/figures/readme_pwo_bootstrap.webp)
 
 ### Free boundary with coils
 
