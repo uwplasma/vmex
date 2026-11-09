@@ -771,6 +771,46 @@
       "note": "RMS force over RMS pressure gradient by region on a held-out grid, before and after the prescribed-current polish of the finite-beta QA (laptop defaults: mpol 5, ntor 4, ns 51, 150 L-BFGS iterations). Lossless WebP; rerunning the command reproduces these bytes."
     },
     {
+      "path": "docs/_static/figures/readme_qi_bootstrap_er_shape.webp",
+      "sha256": "f76bf654b991d95a39a88cdae589ddad755b6e814a7218082be3f5fcbd3c21a9",
+      "bytes": 55664,
+      "generator": "docs/_static/figures/sources/make_qi_bootstrap_er_figure.py",
+      "command": "python docs/_static/figures/sources/make_qi_bootstrap_er_figure.py",
+      "inputs": [
+        "examples/optimization/QI_optimization_bootstrap_er.py",
+        "examples/data/input.QI_nfp2_initial"
+      ],
+      "record": null,
+      "generated": "2026-10-26",
+      "hardware": "x86_64 Linux workstation (36 cores shared, 8 used), CPU, JAX 0.12.0, DKX 2.12.0",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Runs examples/optimization/QI_optimization_bootstrap_er.py at its default settings (10 to 12 min on 8 cores, compilation included) and draws the outermost flux surface coloured by |B| and the Boozer |B| contours of the outermost surface, before (the seed with its DKX-consistent current) and after the optimization, on one colour scale. 900 px WebP, quality 45. Rendered twice on the recording host, in separate trees, with byte-identical output."
+    },
+    {
+      "path": "docs/_static/figures/readme_qi_bootstrap_er_current.webp",
+      "sha256": "3afb56138f0be601d72d84b02cf3a976fb46af54c90ee1d7202b5c3517ba70f7",
+      "bytes": 23202,
+      "generator": "docs/_static/figures/sources/make_qi_bootstrap_er_figure.py",
+      "command": "python docs/_static/figures/sources/make_qi_bootstrap_er_figure.py",
+      "inputs": [
+        "examples/optimization/QI_optimization_bootstrap_er.py",
+        "examples/data/input.QI_nfp2_initial"
+      ],
+      "record": null,
+      "generated": "2026-10-26",
+      "hardware": "x86_64 Linux workstation (36 cores shared, 8 used), CPU, JAX 0.12.0, DKX 2.12.0",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "Same run: the ambipolar ion-root E_r, the equilibrium, DKX and Redl <j.B> on the four kinetic surfaces before and after, and the monitor's objective history. 1300 px WebP, quality 45. Rendered twice on the recording host, in separate trees, with byte-identical output."
+    },
+    {
       "path": "docs/_static/figures/readme_pwo.webp",
       "sha256": "306cfa0e07d45720f09f9a0928db3eda86b8a94a2a73e4f798d33ff131343c24",
       "bytes": 156354,
@@ -788,6 +828,23 @@
         "README.md"
       ],
       "note": "NFP 3 vacuum modes 1-5, 15 evaluations per stage, well objective off, soft mirror ceiling 0.24. Saved seed ns35 and final ns71: boundary cuts, boundary field, Boozer contours, native CLI loss curves and iota. The independent 1024-particle, seed42, 10ms ARIES-CS traces give 35.16% and 7.91% loss, zero failures and maximum relative energy error 4.06e-4. README paired 4096-birth results use a separate tighter-tolerance, common-birth importance-weighted comparison. External run outputs are required; no transport or long-term confinement certificate."
+    },
+    {
+      "path": "docs/_static/figures/readme_pwo_bootstrap.webp",
+      "sha256": "2fe6f8f4d5b6516ef7a2a4c89a2a5bef43ecdad5aa9e2620415c4b28b72536ad",
+      "bytes": 128916,
+      "generator": "examples/plot_optimized_families.py",
+      "command": "python examples/plot_optimized_families.py  (set PLOT_ONLY = \"pwo_bootstrap\" after running pwO_optimization.py with BOOTSTRAP_TERM = None and \"band\", and bootstrap_bench.py --res 25,33,64,8 on each wout)",
+      "inputs": [],
+      "record": null,
+      "generated": "2026-11-08",
+      "hardware": "arm64 macOS laptop, CPU; DKX 2.12.0 data from an x86_64 Linux workstation",
+      "reproducible": "command",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "pwO_optimization.py with BOOTSTRAP_TERM None and band: |B| in Boozer coordinates and on the boundary, DKX <j.B> on five surfaces (I_bs -135 and -5 kA), and alpha losses (1000 particles, 5 ms, s = 0.3). WebP quality 70."
     }
   ]
 }

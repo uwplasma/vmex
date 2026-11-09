@@ -218,6 +218,33 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
+Measuring a workload
+--------------------
+
+Device choice depends on resolution, objective, hardware and software versions.
+Time the complete solve, gradient or residual Jacobian used by your optimizer,
+including host callbacks and transfers. Synchronize JAX results before stopping
+wall-clock timers, and check convergence and derivative agreement before
+comparing performance.
+
+Measure three cache states separately: a fresh process with an empty persistent
+cache, a fresh process reusing that cache, and repeated calls in one process.
+Use nearby parameter vectors for warm optimization measurements so the result
+cache cannot satisfy every call. Report VMEX and dependency versions, device,
+precision, resolution, tolerances, iterations and available CPU cores with the
+results. Compilation, cache loading and execution have different costs.
+
+Matched fixed- and free-boundary gradient checks at revision ``d8791437`` found
+lower warm GPU costs on selected workloads, with larger first-call costs.
+These results qualify the tested problems and software stack. Benchmark your
+own objective before choosing a device or CPU thread count; small solves can
+slow down when given more threads.
+
+For independent equilibria, compare process counts and threads per process
+within a fixed core and memory budget. A single equilibrium runs on one device;
+``vmex.parallel`` schedules independent cases. Cross-node scaling of one
+coupled equilibrium remains unqualified.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 

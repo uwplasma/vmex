@@ -1100,8 +1100,8 @@ def _run_neoclassical(wout_path: Path, args, outdir: Path, *, emit, quiet: bool)
 
     With ``--nc-profiles`` DKX solves with those n and T profiles instead of its
     own split of the pressure, and VMEX's Redl ``<j.B>`` on the same profiles
-    is drawn beside DKX's.  A DKX older than ``OPTIONAL_MINIMUMS['dkx']`` runs
-    without them and says so.
+    is drawn beside DKX's. If the installed DKX lacks the profile interface,
+    the command omits those arguments and prints the upgrade command.
     """
     import inspect
 

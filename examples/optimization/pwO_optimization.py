@@ -47,6 +47,13 @@ MBOZ = 16
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
+# Zero bootstrap current. The mapped field alone already has zero collisionless
+# bootstrap geometry for every map; the current comes from the unmapped band where
+# B_max lives. "band" flattens B across that band (sufficient, not necessary; DKX
+# confirms it lowers the current, at higher edge eps_eff); None leaves it free:
+BOOTSTRAP_TERM = None
+BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
+
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2, 3, 4, 5]
@@ -65,6 +72,22 @@ STAGE_FTOL = [FTOL_ARRAY]*len(MAX_MODES)
 GAMMA_C = [False]*len(MAX_MODES) #[False] * (len(MAX_MODES) - 2) + [True] * 2
 GAMMA_C_SURFACES = tuple(SURFACES[1:])
 GAMMA_C_WEIGHT = 100.0
+
+# The last DKX_FINAL_STAGES stages also drive the DKX bootstrap <J.B> on DKX_SURFACES to zero
+# (0 = off). The plasma is fixed: the Landreman-Buller-Drevlak 2.5 % profiles at ARIES-CS size.
+# The boundary is optimized at the seed's size, where the same collisionality needs the density
+# scaled by the size ratio and <J.B> scales by its square. The row is DKX's adjoint-traced
+# pitch-angle operator with momentum restoring; verify the optimum with a converged DKX run.
+# Spectral angles on 15 x 21 x 48 x 5 are within 8 % of the converged Fokker-Planck run on a
+# 2-period design; the 11 x 11 finite-difference default is not converged on pwO.
+# Residual units: MA T/m^2 at ARIES-CS size.
+DKX_FINAL_STAGES = 0
+DKX_SURFACES = (0.25, 0.55, 0.85)
+DKX_WEIGHT = 30.0
+DKX_RESOLUTION = dict(Ntheta=15, Nzeta=21, Nxi=48, NL=4, Nx=5)
+ARIES_MINOR_RADIUS = 1.7044       # metres
+ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te = Ti (1 - s) in eV
+DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
 
 # Targets:
 IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
@@ -111,7 +134,7 @@ OUTPUT_NAME = f"pwO_optimized_nfp{NFP}" + (f"_well{MAGNETIC_WELL_TARGET}" if MAG
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAX_MODES, MAX_NFEV, STAGE_FTOL, GAMMA_C = [1], [4], [1.0e-11], [False]
+    MAX_MODES, MAX_NFEV, STAGE_FTOL, GAMMA_C, DKX = [1], [4], [1.0e-11], [False], [False]
     FINAL_NS, FINAL_FTOL = [31], 1.0e-10
 
 ###############################################################################
@@ -172,6 +195,23 @@ if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
 
+if any(DKX):
+    from dkx.bootstrap import KineticBootstrapMismatch
+    from vmex.core.bootstrap import KineticProfiles
+    size = inp.rbc[inp.ntor, 0] / ASPECT_TARGET / ARIES_MINOR_RADIUS  # seed minor / ARIES-CS
+    kinetic = KineticBootstrapMismatch(
+        KineticProfiles(ARIES_DENSITY / size * np.array([1, 0, 0, 0, 0, -1.]),
+                        ARIES_TEMPERATURE * np.array([1, -1.]), ARIES_TEMPERATURE * np.array([1, -1.])),
+        DKX_SURFACES, mismatch=False, collision_model="pas+momentum_correction",
+        resolution=DKX_RESOLUTION, spectral_angles=True)
+
+    def dkx_j_dot_B(equilibrium_state, solver_context):
+        """DKX <J.B> in MA T/m^2 at ARIES-CS size."""
+        return kinetic.residuals_state(equilibrium_state, solver_context) * size**2
+
+    kinetic._setup(int(NS_ARRAY[-1]), int(inp.nfp))  # DKX builds its host-side operators eagerly, not under a trace
+    dkx_term = (dkx_j_dot_B, 0.0, DKX_WEIGHT)
+
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
@@ -188,8 +228,8 @@ for term, _, _ in objective_function_terms:
 
 # Stages that share a boundary resolution and objective share ONE problem, as in
 # QA_optimization.py: every jitted graph is compiled once for the whole group.
-group_of = {max_mode: (max(max_mode + 2, MINIMUM_MPOL), gamma_c)
-            for max_mode, gamma_c in zip(MAX_MODES, GAMMA_C)}
+group_of = {max_mode: (max(max_mode + 2, MINIMUM_MPOL), gamma_c, dkx)
+            for max_mode, gamma_c, dkx in zip(MAX_MODES, GAMMA_C, DKX)}
 group_max_mode = {
     max_mode: max(other for other in MAX_MODES if group_of[other] == group_of[max_mode])
     for max_mode in MAX_MODES}
@@ -199,14 +239,14 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     print(f"\n===== pwO stage, max_mode = {max_mode} =====")
     if group_of[max_mode] != group:
         group = group_of[max_mode]
-        mpol, gamma_c = group
+        mpol, gamma_c, dkx = group
         # The decks' iteration caps are too low for a new resolution's seed solve.
         inp = replace(inp, delt=0.5, ftol_array=stage_ftol,
                       ns_array=NS_ARRAY,
                       niter_array=NITER_ARRAY).change_resolution(
             mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
         problem = opt.VmecProblem.from_tuples(
-            inp, objective_function_terms + [gamma_c_term] * gamma_c,
+            inp, objective_function_terms + [gamma_c_term] * gamma_c + [dkx_term for _ in range(dkx)],
             max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
             ess_alpha=ESS_ALPHA, restart_from=equilibrium,
@@ -217,7 +257,8 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
+                           band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     monitor.problem = joint
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))

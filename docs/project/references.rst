@@ -271,3 +271,12 @@ Piecewise omnigenity:
 
 55. Liu et al., arXiv:2603.12139 (2026) — the squeezed coordinate map with
     parameters :math:`a, b, c` used by :class:`~vmex.core.pwo.MappedPwOResidual`.
+
+56. K. C. Shaing and J. D. Callen, “Neoclassical flows and transport in
+    nonaxisymmetric toroidal plasmas,” *Physics of Fluids* 26, 3315 (1983);
+    S. Nakajima et al., “Optimization of the bootstrap current in a large helical
+    system with L = 2,” *Nuclear Fusion* 29, 605 (1989) — the geometric factor
+    :math:`G_{\rm bs}` of the :math:`1/\nu` bootstrap current.
+
+57. P. Helander, J. Geiger, and H. Maaßberg, “On the bootstrap current in
+    stellarators and tokamaks,” *Physics of Plasmas* 18, 092505 (2011).

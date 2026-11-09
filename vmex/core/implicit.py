@@ -151,6 +151,7 @@ from jax.flatten_util import ravel_pytree
 from solvax import (
     auto_chunk_size,
     block_tridiag_matvec,
+    block_cyclic_reduction_factor,
     block_thomas_factor,
     block_thomas_solve,
     chunk_map,
@@ -2922,6 +2923,15 @@ def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk
     return lower.at[0].set(0.0), diagonal, upper.at[-1].set(0.0)
 
 
+def _block_factor(lower, diagonal, upper, cfg):
+    """Factor raw block bands using the implicit solve's placement."""
+    device = cfg.device if cfg.device is not None else jax.config.jax_default_device
+    platform = getattr(device, "platform", device) or jax.default_backend()
+    if str(platform) in ("gpu", "cuda", "rocm"):
+        return block_cyclic_reduction_factor(lower, diagonal, upper)
+    return block_thomas_factor(lower, diagonal, upper, normalized=True)
+
+
 def _raw_block_system(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -3101,7 +3111,8 @@ def _raw_block_system(
         diagonal_scaled = diagonal_r * column_scale[:, None, :]
         upper_scaled = upper_r * column_scale[jnp.minimum(
             jnp.arange(ns) + 1, ns - 1)][:, None, :]
-        factors = (block_thomas_factor(lower_scaled, diagonal_scaled, upper_scaled)
+        factors = (_block_factor(
+            lower_scaled, diagonal_scaled, upper_scaled, cfg)
                    if factor else None)
 
     def band_operator(tangent):
