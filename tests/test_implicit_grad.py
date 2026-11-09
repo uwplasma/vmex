@@ -28,6 +28,7 @@ import os
 import pickle
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -45,7 +46,9 @@ from vmex.core.errors import AdjointSolveError
 from vmex.core.input import VmecInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache.pkl"
+FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache_held_m1.pkl"
+# Host solves as the implicit path runs them: the m=1 constrained family held.
+_held_solve = im._holding_m1(solver.solve)
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +101,7 @@ def _perturb(p0: im.ImplicitParams, field: str, idx, h: float) -> im.ImplicitPar
 
 def _outputs(name: str, inp: VmecInput, cfg, params) -> dict:
     """Host solve at ``params`` -> derived scalars (identical policy always)."""
-    result = solver.solve(
+    result = _held_solve(
         im.input_with_params(inp, params), cfg.resolution,
         ftol=cfg.ftol, max_iterations=cfg.max_iterations, mode="cli",
     )
@@ -170,7 +173,7 @@ def case(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -183,7 +186,7 @@ def solovev(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -593,6 +596,67 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
     assert abs(reverse - forward) <= 1e-10 * abs(forward)
 
 
+def _cancelling_block_system(ns=5, bs=2):
+    """A block-tridiagonal raw Jacobian whose diagonal blocks nearly cancel.
+
+    Each diagonal block is ``[[1, 1], [1, 1 + 1e-9]]``, so ``J^T mu`` with
+    ``mu = (1, -1)`` is 1e-9 against the 2 that the products add up from: the
+    adjoint of an objective that is stationary at the equilibrium (``wb``).
+    Plain arrays stand in for the spectral state.
+    """
+    eye = jnp.eye(bs)
+    near = jnp.array([[1.0, 1.0], [1.0, 1.0 + 1.0e-9]])
+    diagonal = jnp.tile(near, (ns, 1, 1))
+    lower = jnp.zeros((ns, bs, bs)).at[1:].set(1.0e-12 * eye)
+    upper = jnp.zeros((ns, bs, bs)).at[:-1].set(1.0e-12 * eye)
+    ones = jnp.ones((ns, bs))
+    identity = lambda tree: tree  # noqa: E731
+    system = im._RawBlockSystem(
+        im.block_thomas_factor(lower, diagonal, upper), identity, identity, identity,
+        None, None, None, None, lower, diagonal, upper, ones, ones)
+
+    def pullback(mu):
+        return im.block_tridiag_matvec(
+            jnp.zeros_like(upper).at[1:].set(jnp.swapaxes(upper[:-1], -1, -2)),
+            jnp.swapaxes(diagonal, -1, -2),
+            jnp.zeros_like(lower).at[:-1].set(jnp.swapaxes(lower[1:], -1, -2)), mu)
+
+    return system, pullback, jnp.tile(jnp.array([1.0, -1.0]), (ns, 1))
+
+
+def test_block_adjoint_acceptance_stops_at_the_roundoff_of_the_residual():
+    """A block adjoint at round-off is accepted however small its rhs is.
+
+    ``adjoint_tol = 1e-11`` once rejected the adjoint of ``wb`` (nfp2_QA, ns 31:
+    residual 2.8e-15 against ``10 tol ||b|| = 2.8e-16``) and the GCROT fallback
+    then stalled for 30,000 iterations.  The acceptance now has a floor at
+    10 eps ``|| |J|^T |mu| ||``.  A multiplier that solves the wrong system
+    still misses it.
+    """
+    system, exact, mu_true = _cancelling_block_system()
+    b = exact(mu_true)
+
+    def pullback(mu):  # the raw VJP carries round-off of the size of its terms
+        return exact(mu) + 1.0e-16 * jnp.ones_like(mu)
+
+    cfg = SimpleNamespace(adjoint_tol=1.0e-11)
+    mu, residual, tolerance = im._block_adjoint(system, pullback, b, cfg, 1.0e-11)
+    # the rhs is 1e-9 against products of 2: the old relative test could not pass
+    assert float(residual) > im._ADJOINT_RESIDUAL_SLACK * 1.0e-11 * float(im._tree_norm(b))
+    assert float(residual) <= float(tolerance)
+    assert float(tolerance) < 1.0e-12 * float(im._tree_norm(mu))
+    # a looser tolerance is unchanged: the floor only ever raises the bound
+    _, _, loose = im._block_adjoint(system, pullback, b, cfg, 1.0e-2)
+    assert float(loose) == pytest.approx(
+        im._ADJOINT_RESIDUAL_SLACK * 1.0e-2 * float(im._tree_norm(b)))
+
+    def wrong(mu):  # a pullback of a different system than the factored one
+        return 1.01 * pullback(mu)
+
+    _, bad_residual, bad_tolerance = im._block_adjoint(system, wrong, b, cfg, 1.0e-11)
+    assert float(bad_residual) > float(bad_tolerance)
+
+
 def test_adjoint_tolerance_change_reuses_every_executable(solovev):
     """The adjoint tolerance is a traced argument: a tolerance-only config
     compares equal, compiles nothing, and still sets the acceptance bound."""
@@ -979,7 +1043,7 @@ def lasym():
     cfg = im.make_config(inp, ftol=LASYM_CASE["ftol"],
                          max_iterations=LASYM_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)
@@ -1315,7 +1379,7 @@ def lasym_3d():
     cfg = im.make_config(inp, ftol=LASYM3D_CASE["ftol"],
                          max_iterations=LASYM3D_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)
@@ -1515,3 +1579,16 @@ def test_equilibrium_wout_unconstrained_basis_matches_constrained(lasym):
     assert np.isfinite(actual.bmnc).all()
     for name in im._STATE_FIELDS:
         np.testing.assert_array_equal(np.asarray(getattr(state, name)), arrays[name])
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_traced_tvolume_rescaling_matches_run_setup(rfix):
+    inp = dataclasses.replace(VmecInput.from_file(str(DATA_DIR / "input.li383_low_res")),
+                              tvolume=4.0, lvolume_rfix=rfix)
+    cfg = im.make_config(inp, ns=7)
+    rt_ref = solver.prepare_runtime(inp, cfg.resolution, ftol=cfg.ftol,
+                                    max_iterations=cfg.max_iterations)
+    rt_p = im.runtime_from_params(im.params_from_input(inp), cfg)
+    for name in ("rcon0", "zcon0"):
+        np.testing.assert_allclose(np.asarray(getattr(rt_ref, name)),
+                                   np.asarray(getattr(rt_p, name)), rtol=0.0, atol=1e-13)

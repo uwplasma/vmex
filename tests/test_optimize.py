@@ -179,6 +179,25 @@ def test_boundary_elongation_is_traceable_and_grid_converged(solovev_eq):
     assert np.max(np.abs(gradient)) > 0.0
 
 
+
+def test_min_boundary_curvature_radius_matches_dense_geometry(solovev_eq):
+    """The smallest boundary curvature radius agrees with a dense independent curve."""
+    eq = solovev_eq
+    inp = eq.inp
+    theta = np.linspace(0.0, 2.0 * np.pi, 4096, endpoint=False)
+    m = np.arange(inp.rbc.shape[1])
+    R = np.cos(np.outer(theta, m)) @ inp.rbc[inp.ntor]
+    Z = np.sin(np.outer(theta, m)) @ inp.zbs[inp.ntor]
+    h = theta[1]
+    R1, Z1 = ((np.roll(f, -1) - np.roll(f, 1)) / (2 * h) for f in (R, Z))
+    R2, Z2 = ((np.roll(f, -1) - 2 * f + np.roll(f, 1)) / h**2 for f in (R, Z))
+    dense = np.min((R1**2 + Z1**2)**1.5 / np.abs(R1 * Z2 - Z1 * R2))
+    radius = opt.min_boundary_curvature_radius(eq.state, eq.runtime)
+    np.testing.assert_allclose(float(radius), dense, rtol=1e-3)  # sampled minimum
+    gradient = jax.grad(lambda z_sin: opt.min_boundary_curvature_radius(
+        dataclasses.replace(eq.state, Z_sin=z_sin), eq.runtime))(eq.state.Z_sin)
+    assert np.all(np.isfinite(np.asarray(gradient))) and np.max(np.abs(np.asarray(gradient))) > 0.0
+
 def test_solve_equilibrium_forwards_verbose(monkeypatch, solovev_eq):
     """The public final-solve helper exposes the VMEC iteration table flag."""
     captured = {}
@@ -268,6 +287,17 @@ def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     fd = (opt.min_abs_iota(plus, eq.runtime)
           - opt.min_abs_iota(minus, eq.runtime)) / (2.0 * h)
     np.testing.assert_allclose(float(jvp), float(fd), rtol=2e-5, atol=1e-10)
+
+
+def test_hinge_is_zero_inside_its_band_and_the_distance_outside(solovev_eq):
+    eq = solovev_eq
+    ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
+    assert ratio.shape == (3,) and np.all((ratio > 0) & (ratio <= 1))
+    inside = opt.Hinge(opt.edge_jacobian_ratio, floor=0.0, ceiling=1.0)
+    assert np.all(np.asarray(inside(eq.state, eq.runtime)) == 0.0)
+    above = opt.Hinge(opt.edge_jacobian_ratio, floor=1.5)
+    np.testing.assert_allclose(above(eq.state, eq.runtime), 1.5 - ratio, rtol=1e-12)
+    assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_scalar_targets_vs_golden(solovev_eq):
@@ -1839,3 +1869,17 @@ def test_restart_source_prefers_the_equilibrium_state():
     assert opt._restart_source(eq, inp) == "state"
     assert opt._restart_source(eq, inp.change_resolution(mpol=inp.mpol + 1, ntor=inp.ntor)) == "wout"
     assert opt._restart_source("path", inp) == "path"
+
+
+def test_l_grad_b_excess_rows_and_weighted_well(solovev_eq):
+    state, runtime = solovev_eq.state, solovev_eq.runtime
+    minimum = float(opt.l_grad_b_state(state, runtime))
+    assert not np.any(opt.l_grad_b_excess_state(state, runtime, target=.5*minimum))
+    rows = opt.l_grad_b_excess_state(state, runtime, target=2*minimum)
+    assert rows.size == 24*24 and float(rows.max()) == pytest.approx(1.0, rel=1e-12)
+    same = opt.weighted_magnetic_well(state, runtime, inner=jnp.ones_like, outer=jnp.ones_like)
+    assert float(same) == 0.0
+    vp = np.abs(np.asarray(solovev_eq.wout.vp))[1:]
+    s = (np.arange(vp.size) + .5)/vp.size
+    well = opt.weighted_magnetic_well(state, runtime, inner=lambda x: 1 - x, outer=lambda x: x)
+    assert float(well) == pytest.approx(np.sum((1 - 2*s)*vp)/np.sum(vp), rel=1e-6)

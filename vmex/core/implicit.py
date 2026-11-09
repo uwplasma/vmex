@@ -43,11 +43,14 @@ inherits the preconditioning for free.  The raw-force formulation
 (``formulation="raw"``) is kept for the informational with/without-
 preconditioner comparison in the tests.
 
-The m=1 constrained Z force is evaluated in its converged branch (zeroed —
-``residue.f90`` zeroes ``gcz(m=1)`` once ``fsqz < 1e-6``, which always holds
-at the fixed point), so the corresponding constrained combinations are *not*
-degrees of freedom: they are frozen at their converged values, exactly
-mirroring the forward solver's behavior near convergence.
+The m=1 constrained Z force is evaluated in its converged branch (zeroed, as
+``residue.f90`` does once ``fsqz < 1e-6``), so the constrained combinations
+are *not* degrees of freedom.  VMEC2000 releases them before that threshold,
+which leaves each root where its own iteration path did, and they move the
+surfaces.  Implicit host solves therefore never release them
+(:data:`vmex.core.solver.HOLD_M1`): they stay on the ``profil3d.f`` guess
+of the input, and the assembled state takes them from ``p`` (:func:`_held`),
+so the root and its derivative are functions of the input alone.
 
 Anchoring the fixed point
 -------------------------
@@ -71,9 +74,10 @@ Degrees of freedom / boundary handling
 In fixed-boundary mode the R/Z edge spectral row never evolves: the full
 state is assembled as ``x = mask*z + edge_mask*boundary(p) + frozen`` where
 ``z`` are the evolved dofs, the edge row comes (differentiably) from the
-boundary parameters, and the remaining entries (structurally zero families,
-released m=1 combinations, the lambda axis row overwritten by the ``totzsp``
-closure) are frozen constants.  The fixed-boundary dof mask is constructed
+boundary parameters, the m=1 constrained combinations come from the
+boundary's interior guess (:func:`_held`), and the remaining entries
+(structurally zero families, the lambda axis row overwritten by the
+``totzsp`` closure) are frozen constants.  The fixed-boundary dof mask is constructed
 directly from those mode-table invariants; :func:`_dof_mask` remains the
 independent structural-zero oracle and handles coupled free-boundary maps.
 
@@ -106,6 +110,16 @@ The gap does not fall monotonically as ``mpol``/``ntor``/``ns`` are refined.
 Over ``mpol`` 4-8 and ``ns`` 16-64 it spans 0.06-1.0% on ``RBC(1,1)`` and
 0.1-2.8% on ``ZBS(-1,1)``.  The finest case tested, ``mpol = 8`` and
 ``ns = 32``, gives 0.27% and 0.87%.
+
+On the ``HOLD_M1`` lane the adjoint gradient is the derivative of the fixed point of the *frozen*
+residual ``F`` — the preconditioner/``tcon``/m=1 branch/dof mask are captured
+once at the base parameters, not re-derived.
+:func:`frozen_path_directional_fd` reproduces the adjoint to solver accuracy.
+With the m=1 constrained family held on the input's guess, a cold re-solve
+FD is also the map the adjoint differentiates: on ``li383_low_res`` they agree
+to 3e-6 on mean iota and 1e-4 on an interior ``Z_sin`` objective, where the
+released family left 1-3 % and up to 140x
+(``test_li383_resolve_fd_matches_the_implicit_derivative``).
 
 Strict and optimization-safe callback lanes
 ---------------------------------------------
@@ -165,6 +179,7 @@ from jax.flatten_util import ravel_pytree
 from solvax import (
     auto_chunk_size,
     block_tridiag_matvec,
+    block_cyclic_reduction_factor,
     block_thomas_factor,
     block_thomas_solve,
     chunk_map,
@@ -184,13 +199,14 @@ from .geometry import (
 from .input import VmecInput
 from .multigrid import solve_multigrid
 from .residuals import (
-    m1_physical_to_constrained, m1_residue_rotation, scalxc_scale_force,
-    zero_m1_z_force,
+    hold_m1_family, m1_physical_to_constrained, m1_residue_rotation,
+    scalxc_scale_force, zero_m1_z_force,
 )
 from .setup import (
-    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess)
+    RadialGrids, _internal_blocks_from_input, flux_profiles, interior_guess,
+    rescale_boundary_volume)
 from .solver import (
-    STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
+    HOLD_M1, STOP_HOOK, SolveResult, SolverRuntime, SpectralState, _constraint_baselines,
     _force_to_state, _initial_state, _physical_coefficients,
     _static_tables, evaluate_forces, prepare_runtime, resolution_from_input,
     solve,
@@ -612,6 +628,23 @@ def _params_committed_device(params: ImplicitParams):
     return devices.pop() if devices else None
 
 
+def _concrete_build():
+    """Context for building a cached host table: concrete even under a trace.
+
+    The first call of a memoized builder can arrive inside an outer
+    ``jax.jit`` (``jit(value_and_grad(f))``), where its array ops would be
+    staged: tracers would be cached and a nested ``jit`` carrying
+    ``compiler_options`` is rejected.  ``ensure_compile_time_eval`` evaluates
+    them eagerly instead.  It is entered only inside a trace, because it is
+    part of the jit cache key (``eager_constant_folding``) and would make the
+    eager path compile a second copy of every lane the builder dispatches.
+    """
+    from jax._src.core import trace_state_clean
+    if trace_state_clean():
+        return contextlib.nullcontext()
+    return jax.ensure_compile_time_eval()
+
+
 @functools.lru_cache(maxsize=8)
 def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     """Reference (host-built) runtime at the config's base input.
@@ -630,7 +663,7 @@ def _template_runtime(cfg: ImplicitConfig) -> SolverRuntime:
     rows) would commit to JAX's default device and poison every runtime
     later assembled from this template on another device.
     """
-    with _device_context(cfg):
+    with _concrete_build(), _device_context(cfg):
         return _device_pin(cfg, prepare_runtime(
             cfg.inp, cfg.resolution, ftol=cfg.ftol,
             max_iterations=cfg.max_iterations, lconm1=cfg.lconm1,
@@ -750,13 +783,14 @@ def _boundary_pack_tables(cfg: ImplicitConfig):
             a[k], b[k], c[k], d[k] = 0.5, -0.5, 0.5, 0.5
             e[k], f[k], g[k], h[k] = 0.5, 0.5, 0.5, -0.5
 
-    tab = types.SimpleNamespace(
-        agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
-        keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
-        ni_k=ni_k, m_k=m_arr,
-        a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
-        e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
-    )
+    with _concrete_build():
+        tab = types.SimpleNamespace(
+            agg=jnp.asarray(agg), agg_sgn=jnp.asarray(agg_sgn),
+            keep=jnp.asarray(keep), m_pos=jnp.asarray(m_pos),
+            ni_k=ni_k, m_k=m_arr,
+            a=jnp.asarray(a), b=jnp.asarray(b), c=jnp.asarray(c), d=jnp.asarray(d),
+            e=jnp.asarray(e), f=jnp.asarray(f), g=jnp.asarray(g), h=jnp.asarray(h),
+        )
     _PACK_TABLE_CACHE[key] = tab
     return tab
 
@@ -783,11 +817,10 @@ def _boundary_from_params(params: ImplicitParams, cfg: ImplicitConfig):
     lthreed = ntor > 0
     lasym = bool(res.lasym)
 
-    rbc = jnp.asarray(params.rbc)
-    zbs = jnp.asarray(params.zbs)
+    rbc, rbs, zbc, zbs = (jnp.asarray(a) for a in
+                          (params.rbc, params.rbs, params.zbc, params.zbs))
+    rbc, rbs, zbc, zbs = rescale_boundary_volume(rbc, rbs, zbc, zbs, cfg.inp)
     if lasym:
-        rbs = jnp.asarray(params.rbs)
-        zbc = jnp.asarray(params.zbc)
         rbc, rbs, zbc, zbs = _lasym_delta_rotation_traceable(
             rbc, rbs, zbc, zbs, cfg, mpol=mpol, ntor=ntor)
 
@@ -1040,9 +1073,31 @@ def _dof_projector(cfg: ImplicitConfig, dof_mask: SpectralState) -> Callable:
     return P
 
 
+def _holding_m1(fn: Callable) -> Callable:
+    """Run ``fn`` with :data:`vmex.core.solver.HOLD_M1` set."""
+    @functools.wraps(fn)
+    def run(*args, **kwargs):
+        token = HOLD_M1.set(True)
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            HOLD_M1.reset(token)
+    return run
+
+
+def _held(x: SpectralState, rt_p: SolverRuntime) -> SpectralState:
+    """``x`` with the m=1 constrained family on ``p``'s interior guess, where
+    the held host solve leaves it, so the derivative follows the guess."""
+    res = rt_p.resolution
+    if not (bool(rt_p.setup.lconm1) and int(res.ntor) > 0):
+        return x
+    return hold_m1_family(x, _initial_state(rt_p.setup), rt_p.modes, lasym=bool(res.lasym))
+
+
 def _assemble(z: SpectralState, rt_p: SolverRuntime, frozen: SpectralState,
               P: Callable, edge_mask: SpectralState) -> SpectralState:
-    """``x = frozen + P(z - frozen) + edge_mask*(boundary(p) - frozen)``.
+    """``x = frozen + P(z - frozen) + edge_mask*(boundary(p) - frozen)``,
+    with the m=1 constrained family then set from ``p`` (:func:`_held`).
 
     At ``z = P(x*)`` and the solved parameters this reproduces ``x*``
     exactly; the edge term carries the differentiable boundary dependence
@@ -1059,7 +1114,7 @@ def _assemble(z: SpectralState, rt_p: SolverRuntime, frozen: SpectralState,
             e = getattr(edge_mask, name)
             x = x + e * (boundary[name][None, :] - getattr(frozen, name))
         out[name] = x
-    return SpectralState(**out)
+    return _held(SpectralState(**out), rt_p)
 
 
 def _raw_force_state(
@@ -1369,7 +1424,10 @@ _PERTURB_SEED: weakref.WeakKeyDictionary[ImplicitConfig, SpectralState] = \
 # ``adjoint_certificate_fallbacks`` counts the adjoints that a cheaper
 # operator failed to certify and that were finished on the exact transpose,
 # so a lane silently sliding back to the general Krylov cost is visible in
-# the record rather than only in the wall time.  These counters key on the
+# the record rather than only in the wall time.  ``block_factorizations`` counts
+# the raw block-band factorizations performed on the host, ``block_bands_reused``
+# the Jacobian requests served by the previous bands and ``block_bands_rejected``
+# those that had bands to reuse but moved past the tolerance or the parameters.  These counters key on the
 # solve, not on the adjoint lane: :func:`_canonical_config` deliberately
 # shares one config per content, and the free-boundary adjoint solver is a
 # property of the caller's configuration rather than of the solve, so a
@@ -1392,7 +1450,8 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "adjoint_krylov_iterations", "adjoint_seconds",
              "adjoint_certificate_fallbacks", "anchors", "anchor_steps",
              "anchor_krylov_iterations", "anchor_factorizations",
-             "anchor_seconds", "abandoned_rungs")
+             "anchor_seconds", "abandoned_rungs", "block_factorizations",
+             "block_bands_reused", "block_bands_rejected")
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
@@ -1471,6 +1530,7 @@ def _fsq(result) -> float:
     return total if np.isfinite(total) else np.inf
 
 
+@_holding_m1
 def _host_solve(cfg: ImplicitConfig, params: ImplicitParams) -> SolveResult:
     key = _params_key(params)
     hit = _LAST_SOLVE.get(cfg)
@@ -1624,6 +1684,58 @@ _REFINE_BLOCK_STALL = 0.1
 _REFINE_FAR_STALL = 1.0e6
 
 
+#: ``ftol`` the host solve is resumed to when the block finish cannot certify
+#: the state.  On ``nfp2_QA`` (ns 31, ``ftol`` 1e-12) the Newton steps cannot
+#: cross a flat valley of the residual: ``|F|`` 1.2e-06 goes to 8e-04 after one
+#: exact step and no iterate beats the start, so the Krylov replay spends
+#: 2,100 iterations (3.5-4.4 s) to return the host state unchanged.  Resuming
+#: the descent takes 2,000 iterations (1.4 s) to ``|F|`` 1.3e-07, which the
+#: block finish certifies at nearby points (2.9e-11) and which is ten times
+#: closer to the root where it does not.
+_REFINE_RESUME_FTOL = 1.0e-14
+
+#: The resumed solve may spend this multiple of the host solve's iterations
+#: (``nfp2_QA``: 183 and 2,034, a factor 11) before the Krylov replay takes over.
+_REFINE_RESUME_BUDGET = 20
+
+#: Floor of that budget: a hot-restarted solve takes few iterations (25 at a
+#: shift of 1e-6) but the resume still needs about 2,000, and a budget of 500
+#: made the gradient slower than the Krylov replay alone (68 s against 52 s).
+_REFINE_RESUME_MIN_ITERATIONS = 4000
+
+
+def _anchor_residual(cfg: ImplicitConfig, params: ImplicitParams,
+                     state: SpectralState, dof_mask: SpectralState) -> float:
+    """``|F(P(state))|`` with ``state`` as its own frozen state."""
+    state, params, dof_mask = commit_to_single_device((state, params, dof_mask))
+    F = residual_fn(cfg, state, dof_mask)
+    return float(_tree_norm(F(_dof_projector(cfg, dof_mask)(state), params)))
+
+
+@_holding_m1
+def _resumed_refinement(cfg: ImplicitConfig, params: ImplicitParams,
+                        state: SpectralState, dof_mask: SpectralState,
+                        iterations: int) -> SpectralState | None:
+    """Block-refine ``state`` after resuming its host solve to ``_REFINE_RESUME_FTOL``.
+
+    ``None`` when the resumed solve fails or exhausts its budget, so the caller
+    replays the Krylov refinement from ``state``.
+    """
+    try:
+        result = solve(
+            input_with_params(cfg.inp, params), cfg.resolution,
+            ftol=_REFINE_RESUME_FTOL,
+            max_iterations=min(cfg.max_iterations, max(
+                _REFINE_RESUME_MIN_ITERATIONS, _REFINE_RESUME_BUDGET * iterations)),
+            mode=cfg.mode, lconm1=cfg.lconm1, initial_state=state,
+            use_fft=False, device=AUTO)
+    except VmecError:
+        return None
+    if not bool(result.converged):
+        return None
+    return _refined_state(cfg, params, result.state, dof_mask, krylov=False)
+
+
 def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState,
                         dof_mask: SpectralState) -> SpectralState:
@@ -1633,11 +1745,29 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
     if hit is None or hit[0] != key:
         with _timed(cfg, "refinement"):
             _count(cfg, refinements=1)
+            guess = _LAST_REFINEMENT_CORRECTION.get(cfg)
+            solved = _LAST_SOLVE.get(cfg)
+            resume = (_REFINE_BLOCK_MAX_STEPS > 0 and _REFINE_RESUME_FTOL < cfg.ftol
+                      and solved is not None and solved[0] == key
+                      and bool(solved[1].converged))
+            # A converged solve whose block finish misses is resumed to a
+            # tighter ftol before the Krylov replay is paid for.
             refined = _refined_state(
-                cfg, params, state, dof_mask,
-                initial_correction=_LAST_REFINEMENT_CORRECTION.get(cfg),
-            )
+                cfg, params, state, dof_mask, initial_correction=guess,
+                krylov=not resume)
             stalled = _ANCHOR_STALLED.pop(id(cfg), False)
+            missed = (_anchor_residual(cfg, params, refined, dof_mask)
+                      if resume and not stalled else 0.0)
+            if missed > cfg.refine_tol:
+                resumed = _resumed_refinement(
+                    cfg, params, state, dof_mask, int(solved[1].iterations))
+                if resumed is not None and _anchor_residual(
+                        cfg, params, resumed, dof_mask) < missed:
+                    refined = resumed
+                else:
+                    refined = _refined_state(
+                        cfg, params, state, dof_mask, initial_correction=guess)
+                    stalled = _ANCHOR_STALLED.pop(id(cfg), False)
             correction = jax.tree.map(jnp.subtract, refined, state)
             correction_norm = float(_tree_norm(correction))
         if not stalled and np.isfinite(correction_norm) and correction_norm > 0.0:
@@ -1807,7 +1937,10 @@ def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
     hit = _LAST_BANDS.get(cfg)
     if z is None and hit is not None and hit[0] == key and (
             np.linalg.norm(zp - hit[1]) <= _BANDS_REUSE_TOL * np.linalg.norm(zp)):
+        _count(cfg, block_bands_reused=1)
         return hit[2]
+    _count(cfg, block_factorizations=1,
+           block_bands_rejected=int(z is None and hit is not None))
     bands = _refine_block_factor_core(*arguments, cfg)
     _LAST_BANDS[cfg] = (key, zp, bands)
     return bands
@@ -1830,7 +1963,7 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
                    state: SpectralState,
                    dof_mask: SpectralState,
                    *, initial_correction: SpectralState | None = None,
-                   ) -> SpectralState:
+                   krylov: bool = True) -> SpectralState:
     """Newton-refine ``state`` onto the root of the frozen residual ``F``.
 
     The implicit function theorem defines the derivative of the equilibrium
@@ -1896,6 +2029,8 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
         if _REFINE_BLOCK_MAX_STEPS > 0 and block > _REFINE_FAR_STALL * tol:
             _ANCHOR_STALLED[id(cfg)] = True
             return z, residual
+        if not krylov:
+            return (block_z, block) if block < residual else (z, residual)
         # The block finish missed: replay the Krylov refinement from the same
         # start and keep whichever lands lower.
         best_z, best = z, residual
@@ -2161,6 +2296,29 @@ def _callback_sharding(cfg: ImplicitConfig):
     return jax.sharding.SingleDeviceSharding(cfg.device)
 
 
+def _host_call(cfg: ImplicitConfig, host: Callable, result_shape, *args):
+    """``pure_callback`` that does not occupy an accelerator with a host solve.
+
+    Compiling for a GPU from a callback that a GPU computation is waiting on
+    deadlocks, so a concrete call with an accelerator ``cfg.device`` dispatches
+    the callback on the CPU and moves its results back.  Under ``jax.jit`` the
+    enclosing GPU computation owns the placement, so that case raises unless an
+    earlier concrete solve of this config (the optimizer's seed) already compiled.
+    """
+    on_accelerator = getattr(cfg.device, "platform", "cpu") != "cpu"
+    traced = any(isinstance(leaf, jax.core.Tracer) for leaf in jax.tree.leaves(args))
+    if (traced and on_accelerator and jax.default_backend() == cfg.device.platform
+            and _LAST_SOLVE.get(cfg) is None):
+        raise ValueError(
+            "jax.jit over an implicit solve with an explicit GPU device can deadlock when the "
+            "host solve compiles; solve once outside jit first, or use device='cpu' or 'auto'.")
+    if traced or not on_accelerator:
+        return jax.pure_callback(host, result_shape, *args, sharding=_callback_sharding(cfg))
+    cpu = jax.devices("cpu")[0]
+    with jax.default_device(cpu):
+        return _device_pin(cfg, jax.pure_callback(host, result_shape, *jax.device_put(args, cpu)))
+
+
 def _on_host(fn: Callable, cfg: Any, *args):
     """Run a ``pure_callback`` host body in the main thread's trace context.
 
@@ -2188,10 +2346,12 @@ def _forward_trace_context():
     """
     from jax._src import config as jax_config, mesh as jax_mesh
 
-    # jax >= 0.10 moved the state from ``config`` to ``mesh``.
+    # jax >= 0.10 moved the state from ``config`` to ``mesh`` (and with it
+    # ``config_ext``, still in ``config`` on the jax 0.6 that Python 3.10 gets).
     state = getattr(jax_mesh, "abstract_mesh_context_manager", None) or \
         jax_config.abstract_mesh_context_manager
-    previous = state.swap_local(jax_mesh.config_ext.unset)
+    config_ext = getattr(jax_mesh, "config_ext", None) or jax_config.config_ext
+    previous = state.swap_local(config_ext.unset)
     try:
         yield
     finally:
@@ -2227,11 +2387,8 @@ def _callback_solve(params: ImplicitParams, cfg: ImplicitConfig):
     instead — see the module docstring.
     """
     try:
-        return jax.pure_callback(
-            _host_callable(_host_solve_and_mask, cfg),
-            (_state_struct(cfg), _state_struct(cfg)), params,
-            sharding=_callback_sharding(cfg),
-        )
+        return _host_call(cfg, _host_callable(_host_solve_and_mask, cfg),
+                          (_state_struct(cfg), _state_struct(cfg)), params)
     except Exception:
         if _HOST_ERROR:
             raise _HOST_ERROR.pop() from None
@@ -2242,12 +2399,10 @@ def _callback_solve_status(params: ImplicitParams, cfg: ImplicitConfig):
     """Return state, mask, status, FSQ, and FSQ/ftol without exceptions."""
     status_struct = jax.ShapeDtypeStruct((), jnp.int32)
     scalar_struct = jax.ShapeDtypeStruct((), jnp.float64)
-    return jax.pure_callback(
-        _host_callable(_host_solve_and_mask_status, cfg),
+    return _host_call(
+        cfg, _host_callable(_host_solve_and_mask_status, cfg),
         (_state_struct(cfg), _state_struct(cfg), status_struct, scalar_struct, scalar_struct),
-        params,
-        sharding=_callback_sharding(cfg),
-    )
+        params)
 
 
 def _state_struct(cfg: ImplicitConfig) -> SpectralState:
@@ -2807,6 +2962,15 @@ def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk
     return lower.at[0].set(0.0), diagonal, upper.at[-1].set(0.0)
 
 
+def _block_factor(lower, diagonal, upper, cfg):
+    """Factor raw block bands using the implicit solve's placement."""
+    device = cfg.device if cfg.device is not None else jax.config.jax_default_device
+    platform = getattr(device, "platform", device) or jax.default_backend()
+    if str(platform) in ("gpu", "cuda", "rocm"):
+        return block_cyclic_reduction_factor(lower, diagonal, upper)
+    return block_thomas_factor(lower, diagonal, upper, normalized=True)
+
+
 def _raw_block_system(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -2986,7 +3150,8 @@ def _raw_block_system(
         diagonal_scaled = diagonal_r * column_scale[:, None, :]
         upper_scaled = upper_r * column_scale[jnp.minimum(
             jnp.arange(ns) + 1, ns - 1)][:, None, :]
-        factors = (block_thomas_factor(lower_scaled, diagonal_scaled, upper_scaled)
+        factors = (_block_factor(
+            lower_scaled, diagonal_scaled, upper_scaled, cfg)
                    if factor else None)
 
     def band_operator(tangent):
@@ -3221,20 +3386,45 @@ class _AdjointStats(NamedTuple):
     tolerance: Array
 
 
+def _residual_roundoff(system: _RawBlockSystem, mu: SpectralState):
+    """Round-off level of the residual of ``J_raw^T mu``: ``|| |J|^T |mu| || * eps``.
+
+    A residual this small certifies ``mu`` as the exact answer for a raw
+    Jacobian perturbed at machine precision, which is all double precision
+    can deliver; it is measured from the stored bands, so it costs one
+    banded product.
+    """
+    def transpose(band):
+        return jnp.swapaxes(jnp.abs(band), -1, -2)
+
+    lower = jnp.zeros_like(system.upper).at[1:].set(transpose(system.upper[:-1]))
+    upper = jnp.zeros_like(system.lower).at[:-1].set(transpose(system.lower[1:]))
+    scale = block_tridiag_matvec(
+        lower, transpose(system.diagonal), upper, jnp.abs(system.pack(mu)))
+    return (_ADJOINT_RESIDUAL_SLACK * jnp.finfo(scale.dtype).eps
+            * jnp.linalg.norm(scale))
+
+
 def _block_adjoint(system: _RawBlockSystem, pullback: Callable,
                    b: SpectralState, cfg: ImplicitConfig, tol):
     """Raw multiplier ``J_raw^-T b`` from the transposed block factors.
 
     One refinement pass solves again for the residual measured with
     ``pullback``, the independent raw VJP.  Returns ``(mu, residual_norm,
-    tolerance)`` with the tolerance of :func:`_adjoint_acceptance`.
+    tolerance)``: the tolerance of :func:`_adjoint_acceptance`, but never
+    below the round-off level of the residual (:func:`_residual_roundoff`).
+    A residual relative to ``||b||`` cannot reach ``adjoint_tol = 1e-11`` when
+    ``b`` is small against ``J^-T b`` (an objective that is stationary at the
+    equilibrium, such as ``wb``): the residual stops at round-off and the
+    solve used to fall through to a GCROT run that stalls.
     """
     def defect(mu):
         return jax.tree.map(jnp.subtract, b, system.project(pullback(mu)))
 
     mu = _raw_block_apply(system, b, transpose=True)
     mu = jax.tree.map(jnp.add, mu, _raw_block_apply(system, defect(mu), transpose=True))
-    return mu, _tree_norm(defect(mu)), _adjoint_acceptance(cfg, _tree_norm(b), tol)
+    return mu, _tree_norm(defect(mu)), jnp.maximum(
+        _adjoint_acceptance(cfg, _tree_norm(b), tol), _residual_roundoff(system, mu))
 
 
 @functools.partial(jax.jit, static_argnames=("cfg",))
@@ -3931,26 +4121,16 @@ def frozen_path_directional_fd(
     integral (``wb``, ``aspect``, for which a naive re-solve FD is already
     exact and :func:`jax.grad` matches it to ``rtol <= 1e-6``).
 
-    A naive full re-solve at ``params +/- h*tangent`` lets the solver's internal
-    convergence logic -- the ``bcovar`` preconditioner, the ``tcon`` constraint
-    scaling, the m=1 ``gcz`` zeroing branch (``residue.f90``), the dof mask, the
-    multigrid schedule, and exactly where the ``ftol`` crossing lands -- re-form
-    slightly differently at each perturbed point.  For a solver-sensitive metric
-    that path variation is an O(1) contribution that can inflate or even
-    sign-flip the finite difference (measured on ``li383_low_res``:
-    ``d(iota_edge)/d(RBC(-1,1)) = -0.773`` from the adjoint, but the naive
-    central FD reads ``+0.045`` -- wrong sign).
-
-    The implicit adjoint deliberately does *not* differentiate through that
-    logic: it linearizes the fixed point of the **frozen** residual ``F`` (the
-    preconditioner / mask / branch captured once at ``params``; see the module
-    docstring), which is the stable, physical gradient.  This helper reproduces
-    exactly that path -- it captures ``F`` once at ``params`` and Newton-solves
-    ``F(z, params +/- h*tangent) = 0`` (matrix-free, the same linearization the
-    adjoint uses) from the converged ``z*`` before central-differencing
-    ``metric_fn``.  The result therefore equals :func:`jax.grad` of the metric
-    contracted with ``tangent`` to solver accuracy -- the gradient check a naive
-    re-solve FD cannot provide for these metrics.
+    The implicit adjoint linearizes the fixed point of the **frozen** residual
+    ``F`` (preconditioner / mask / branch captured once at ``params``; see the
+    module docstring).  This helper captures ``F`` once at ``params`` and
+    Newton-solves ``F(z, params +/- h*tangent) = 0`` from the converged ``z*``
+    before central-differencing ``metric_fn``, so it equals :func:`jax.grad` of
+    the metric contracted with ``tangent`` to solver accuracy, independent of
+    where each re-solve's ``ftol`` crossing lands.  A naive re-solve once
+    sign-flipped ``d(iota_edge)/d(RBC(-1,1))`` on ``li383_low_res`` (+0.045
+    against -0.773) because the released m=1 family moved with the path;
+    implicit solves now hold that family (module docstring).
 
     The Newton steps go through the recycling GCROT solve rather than plain
     restarted GMRES: from a warm start already at the root the step's RHS

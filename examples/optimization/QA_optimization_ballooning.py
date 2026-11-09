@@ -105,6 +105,9 @@ if ci_smoke:
 inp = replace(vj.VmecInput.from_file(INPUT_FILE),
               ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
               niter_array=np.array([STAGE_NITER]))
+# Hold the seed's plasma volume at fixed major radius (TVOLUME with
+# LVOLUME_RFIX), so the optimizer cannot change the plasma size:
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)
 
 ### Set up the objective ######################################################
 

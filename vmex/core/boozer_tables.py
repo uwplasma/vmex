@@ -355,6 +355,7 @@ def high_order_boozer_input_tables(
 
     phip = state.radial_basis.evaluate(jnp.asarray(state.phipf), s)
     chip = state.radial_basis.evaluate(jnp.asarray(state.chipf), s)
+    iota = chip / phip
     zero_mode = int(np.flatnonzero((xm_nyq == 0) & (n_nyq == 0))[0])
     return {
         "xm": mode_m,
@@ -373,7 +374,7 @@ def high_order_boozer_input_tables(
         "bsubumns": bsubumns,
         "bsubvmnc": bsubvmnc,
         "bsubvmns": bsubvmns,
-        "iota": float(state.nfp) * chip / phip,
+        "iota": iota,
         "G": bsubvmnc[zero_mode],
         "I": bsubumnc[zero_mode],
     }

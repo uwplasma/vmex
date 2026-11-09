@@ -17,6 +17,35 @@ import jax.numpy as jnp
 from vmex.core import qi
 from vmex.core import implicit as im
 from vmex.core.input import VmecInput
+
+
+def test_constructed_qi_first_wall_is_exact_with_a_shifted_phi_origin():
+    from vmex.core.optimize import quasi_isodynamic_residual
+
+    spectrum = dict(xm_b=np.array([0, 0, 1, 2]), xn_b=np.array([0, 4, -4, 0]),
+        bmns_b=np.array([[0., .02, .03, .01]]), iota_b=np.array([.37]), nfp=4)
+    cosine = jnp.array([[2., .15, .08, -.04]])
+
+    def wall(values):
+        result = quasi_isodynamic_residual(**spectrum, bmnc_b=values,
+            phimin=10., nphi=17, nalpha=7, n_bounce=9)
+        return result["constructed_bmag"][:, 0, :], jnp.max(result["bmag"], axis=(1, 2))
+
+    # At phi=phimin the interpolation coordinate is its first node, -lend,
+    # whose prescribed target is the well wall (normalized B=1). Subtracting
+    # a shifted phi origin must not move it along nearly coincident nodes.
+    for evaluate in (wall, jax.jit(wall)):
+        first, maximum = evaluate(cosine)
+        np.testing.assert_allclose(first, np.broadcast_to(np.asarray(maximum)[:, None], first.shape),
+                                   rtol=0., atol=2.e-14)
+    direction = jnp.array([[.1, -.03, .02, .01]])
+    _, (first_tangent, maximum_tangent) = jax.jit(
+        lambda x: jax.jvp(wall, (x,), (direction,)))(cosine)
+    np.testing.assert_allclose(first_tangent,
+        np.broadcast_to(np.asarray(maximum_tangent)[:, None], first_tangent.shape),
+        rtol=0., atol=2.e-13)
+
+
 def _boozer(perturbation=0.0):
     return {
         "bmnc_b": jnp.array([[1.0, 0.2, perturbation]]),

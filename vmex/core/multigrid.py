@@ -438,6 +438,8 @@ def solve_multigrid(
     time_step0, nstep_cadence = _loop_driver_config(
         inp, time_step=time_step, nstep=nstep
     )
+    if lambda_m0_floor is None:
+        lambda_m0_floor = inp.lambda_m0_floor
     for igrid in range(n_stages):
         nsval = int(ns_arr[igrid])
         resolution = resolution_from_input(inp, ns=nsval)
@@ -575,10 +577,18 @@ def solve_multigrid(
                 lambda_m0_floor=lambda_m0_floor,
             )
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
+        # runvmec.f (lgiveup): end the ladder, and so report non-convergence,
+        # when a stage leaves any residual above fgiveup * ftol.
+        gave_up = bool(inp.lgiveup) and not last_stage and max(
+            float(carry.fsqr), float(carry.fsqz), float(carry.fsql)
+        ) > float(ftol_arr[igrid]) * float(inp.fgiveup)
+        last_stage = last_stage or gave_up
         if ier not in (SUCCESSFUL_TERM_FLAG, MORE_ITER_FLAG) or (
                 last_stage and ier != SUCCESSFUL_TERM_FLAG
                 and not (ier == MORE_ITER_FLAG and not raise_on_max_iterations)):
             _finalize(carry, rt)  # raises the typed error for this stage
+        if gave_up:
+            break
         # allocate_ns.f saves old xc and copies it into the newly allocated
         # xstore before initialize_radial.f scales/interpolates that array.
         state = carry.state
