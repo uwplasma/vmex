@@ -719,8 +719,8 @@ def _akima_coefficients(x_knots, y_knots):
 
     cl = (m[3] - m[2]) / (xloc[4] - xloc[2])
     bl = m[2] - cl * (xloc[3] - xloc[2])
-    cr = (m[n - 1] - m[n]) / (xloc[n + 1] - xloc[n - 1])
-    br = m[n - 1] - cr * (xloc[n] - xloc[n - 1])
+    cr = (m[n] - m[n - 1]) / (xloc[n + 1] - xloc[n - 1])
+    br = m[n] - cr * (xloc[n] - xloc[n + 1])
     yloc = yloc.at[1].set(yloc[2] + bl * (xloc[1] - xloc[2]) + cl * (xloc[1] - xloc[2]) ** 2)
     yloc = yloc.at[0].set(yloc[2] + bl * (xloc[0] - xloc[2]) + cl * (xloc[0] - xloc[2]) ** 2)
     yloc = yloc.at[n + 2].set(
