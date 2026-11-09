@@ -1858,6 +1858,11 @@ class VmecExtender(MagneticField):
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             branch="internal",
+            # the direct tier is the plain schedule (newer virtual-casing-jax
+            # routes B_plasma_xyz near the surface, which would make the
+            # tiers overlap and B inconsistent with its derivatives)
+            **({"near_surface": False}
+               if "near_surface" in vc.ExteriorFieldConfig.__dataclass_fields__ else {}),
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
         return cls(external_field, plasma_field, accuracy_check=accuracy_check,
