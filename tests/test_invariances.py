@@ -10,7 +10,8 @@ with the untransformed run to solver round-off:
   and ``curtor -> L curtor`` (B unchanged): ``V ~ L**3``, ``wb ~ L**3``;
 - field reversal ``phiedge, curtor -> -phiedge, -curtor`` (``signgs`` unchanged),
   alone and combined with the mirror image, on the deck's nonzero current profile;
-- free-boundary coil-current rescaling (see the last test);
+- free-boundary coil-current rescaling;
+- mirror image at finite beta: Mercier and ballooning on the mapped field line;
 - coarse-to-fine continuation vs the direct solve at the same final ``ns``.
 """
 
@@ -129,3 +130,24 @@ def test_free_boundary_coil_current_rescaling():
     np.testing.assert_allclose(b.rmnc[-1], a.rmnc[-1], rtol=1e-8, atol=1e-10)
     np.testing.assert_allclose(b.zmns[-1], a.zmns[-1], rtol=1e-8, atol=1e-10)
     assert b.wb == pytest.approx(c**2 * a.wb, rel=1e-8)
+
+
+def test_mirror_image_keeps_stability_on_the_mapped_field_line():
+    """Z -> -Z maps theta to pi - theta, so field line alpha goes to pi - alpha."""
+    from vmex import optimize as opt
+    from vmex.core.stability import ballooning_lambda
+
+    inp = vj.VmecInput.from_file(DATA / "input.minimal_seed_nfp2")
+    rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+    rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -.03, .03
+    inp = replace(inp, rbc=rbc, zbs=zbs, am=np.array([1., -1.]), pres_scale=2000.)
+    a = opt.solve_equilibrium(inp, verbose=False)
+    b = opt.solve_equilibrium(replace(inp, zbs=-zbs, zaxis_s=-inp.zaxis_s), verbose=False)
+    assert float(a.wout.iotaf[10]) == pytest.approx(-float(b.wout.iotaf[10]), rel=1e-7)
+    np.testing.assert_allclose(b.wout.DMerc[1:-1], a.wout.DMerc[1:-1],
+                               atol=1e-6*np.abs(a.wout.DMerc[1:-1]).max())
+    options = dict(surfaces=[.5], zeta0s=[0., .3])
+    alphas = np.array([0., .4])
+    np.testing.assert_allclose(
+        ballooning_lambda(b.state, b.runtime, alphas=np.pi - alphas, **options),
+        ballooning_lambda(a.state, a.runtime, alphas=alphas, **options), rtol=1e-6)

@@ -658,10 +658,9 @@ def test_ladder_gives_up_with_more_iter_status_not_silently() -> None:
     """An exhausted last stage raises ier=2 (or reports unconverged); no silent success.
 
     Non-final exhausted rungs hand their xc to the next rung (VMEC2000); the
-    early-exit switches LGIVEUP/FGIVEUP are refused at parse time.
+    LGIVEUP/FGIVEUP end the ladder after the first poor rung.
     """
     from vmex.core.errors import MORE_ITER_FLAG, VmecConvergenceError
-    from vmex.core.input import UnsupportedInputModeError
 
     inp = _load_input("cth_like_fixed_bdy")
     kw = dict(ns_array=[5, 9], ftol_array=[1e-8, 1e-10], niter_array=[5, 5])
@@ -670,5 +669,4 @@ def test_ladder_gives_up_with_more_iter_status_not_silently() -> None:
     assert exc.value.ier_flag == MORE_ITER_FLAG and exc.value.iteration == 5
     soft = multigrid.solve_multigrid(inp, raise_on_max_iterations=False, **kw)
     assert not soft.converged and soft.iterations == 5
-    with pytest.raises(UnsupportedInputModeError):
-        VmecInput.from_indata_text("&INDATA\nLGIVEUP = T\nFGIVEUP = 3.0\n/\n")
+    assert VmecInput.from_indata_text("&INDATA\nLGIVEUP = T\nFGIVEUP = 3.0\n/\n").fgiveup == 3.0

@@ -110,10 +110,10 @@ def test_summary_panel_inventory(summary_figure):
 
 
 def test_summary_contours_and_colormaps(summary_figure):
-    """The J disk is filled; Boozer |B| contours are unfilled and jet-mapped."""
+    """J and Boozer |B| contours are unfilled; |B| is jet-mapped."""
     _, meta = summary_figure
     j_sets = _contour_sets(meta["axes"]["j_invariant"])
-    assert any(cs.filled for cs in j_sets)
+    assert j_sets and not any(cs.filled for cs in j_sets)
     for name in ("boozer_mid", "boozer_lcfs"):
         sets = _contour_sets(meta["axes"][name])
         assert sets, f"panel {name!r} has no contour set"
@@ -144,8 +144,8 @@ def test_summary_field_line_and_j_map_present(summary_figure):
     assert np.isfinite(j_map).any()
     assert j_map.shape[0] >= 5  # radial spread of Boozer surfaces
     j_axis = meta["axes"]["j_invariant"]
-    assert j_axis.get_xlabel() == r"$s\cos\alpha$"
-    assert j_axis.get_ylabel() == r"$s\sin\alpha$"
+    assert j_axis.get_xlabel() == r"$s\,\cos\alpha$"
+    assert j_axis.get_ylabel() == r"$s\,\sin\alpha$"
     assert j_axis.get_aspect() == 1.0
 
 
@@ -772,6 +772,8 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     def _fake_bounce(*, alpha, pitch, **_kwargs):
         shape = (1, len(alpha), 1, 1)
         return {"action": jax.numpy.broadcast_to(pitch, shape),
+                "bounce_time": jax.numpy.ones(shape),
+                "well_left": jax.numpy.zeros(shape),
                 "usable_mask": jax.numpy.ones(shape, dtype=bool)}
 
     monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
@@ -796,6 +798,26 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     assert np.all(np.isnan(result["j_map"][1]))
     with pytest.raises(ValueError, match="not trapped"):
         plotting._j_invariant_map(booz, pitch=0.5, nalpha=4)
+
+
+def test_j_map_panel_separates_lost_from_confined_drift_surfaces():
+    """An orbit that reaches the LCFS is drawn dashed and counted as lost."""
+    import matplotlib.pyplot as plt
+
+    alpha = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+    s_b = np.linspace(0.2, 0.9, 5)
+    t = np.linspace(0.0, 2.0 * np.pi, 40)
+    orbits = {"s": np.stack([0.5 + 0.1 * np.cos(t), 0.9 + 0.2 * (1.0 - np.cos(t))]),
+              "alpha": np.stack([t, t])}
+    info = {"alpha": alpha, "s_b": s_b, "j_map": s_b[:, None] * (1.0 + 0.1 * np.cos(alpha)),
+            "orbits": orbits, "b_min": np.array([0.9, 1.0]), "pitch_inverse": 1.2}
+    fig, ax = plt.subplots()
+    plotting._j_map_panel(ax, fig, info, 1.0)
+    labels = [text.get_text() for text in ax.get_legend().get_texts()]
+    assert "drift surface, confined (1)" in labels and "drift surface, reaches the LCFS (1)" in labels
+    styles = sorted(line.get_linestyle() for line in ax.lines if len(line.get_xdata()) > 1)
+    assert styles == ["-", "--"]
+    plt.close(fig)
 
 
 def test_volume_second_derivative_of_linear_vprime():

@@ -100,7 +100,7 @@ if ci_smoke:
 
 # ESSOS shards the alphas over the JAX devices: one CPU device per core, as
 # ``vmex --trace`` does. This must run before JAX starts its backend.
-jax.config.update("jax_num_cpu_devices", os.cpu_count() or 1)
+jax.config.update("jax_num_cpu_devices", vj.parallel.available_cpus())
 
 ### Set up the equilibrium ####################################################
 

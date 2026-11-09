@@ -1020,3 +1020,73 @@ def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, mo
     assert rc == 0
     assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
     assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()
+
+
+@pytest.mark.parametrize("angle_grid", [None, 6, 9])
+def test_angular_table_control_is_forwarded_and_saved(monkeypatch, angle_grid, tmp_path):
+    """Acquisition metadata records the requested representation, including direct sums."""
+    from types import SimpleNamespace
+    from vmex.core import tracing
+    import essos.boozer
+    import booz_xform_jax
+
+    calls = {}
+    bx = SimpleNamespace(asym=False, xm_b=np.array([0]), xn_b=np.array([0]),
+                         nfp=1, s_b=np.array([0.25]), iota=np.array([0.6]),
+                         rmnc_b=np.ones((1, 1)), zmns_b=np.ones((1, 1)), numns_b=np.ones((1, 1)))
+    class Transform:
+        def __new__(cls, **kwargs):
+            return bx
+    bx.read_wout_data = lambda *args, **kwargs: None
+    bx.run = lambda: None
+    monkeypatch.setattr(booz_xform_jax, "Booz_xform", Transform)
+    def construct(booz, psi0, mode_tolerance, *, angle_grid):
+        calls["angle_grid"] = angle_grid
+        return SimpleNamespace(xm=np.array([0]), table=None if angle_grid is None else np.zeros(1))
+    monkeypatch.setattr(essos.boozer.BoozerField, "from_booz_xform", construct)
+    def trace(field, *args, **kwargs):
+        return SimpleNamespace(states=np.zeros((2, 2, 5)), energy_error=np.zeros(2),
+                               loss_times=np.full(2, -1), thermalized_times=np.full(2, -1),
+                               failed=np.zeros(2, dtype=bool))
+    monkeypatch.setattr(essos.boozer, "trace_boozer", trace)
+    monkeypatch.setattr(tracing, "sample_births", lambda *args, **kwargs: np.zeros((2, 4)))
+    monkeypatch.setattr(tracing, "spectral_truncation", lambda wout: 0.0)
+    wout = SimpleNamespace(rmnc=np.ones(1), lasym=False, phi=np.array([0, 1]), Aminor_p=1.7, volavgB=5.7)
+    result = tracing.trace_alphas(wout, scale=None, nparticles=2, angle_grid=angle_grid, times_to_trace=2)
+    assert calls["angle_grid"] == angle_grid
+    assert result.metadata["angle_grid"] == angle_grid
+    assert result.metadata["angle_table"] is (angle_grid is not None)
+    summary, _ = result.save(tmp_path / "representation")
+    import json
+    assert json.loads(summary.read_text())["angle_grid"] == angle_grid
+
+
+@pytest.mark.parametrize("angle_grid", [0, -1, True, 1.5, np.nan, (32, 32)])
+def test_invalid_angular_table_control_rejected_before_io(angle_grid):
+    with pytest.raises(ValueError, match="angle_grid"):
+        trace_alphas("missing_wout.nc", angle_grid=angle_grid)
+
+
+def test_cli_direct_spectrum_control_requires_trace():
+    parser = cli.build_parser()
+    assert parser.parse_args([str(SOLOVEV_DECK)]).trace_angle_grid is None
+    assert parser.parse_args([str(SOLOVEV_DECK), "--trace-angle-grid", "0"]).trace_angle_grid == 0
+    with pytest.raises(SystemExit):
+        cli.main([str(SOLOVEV_DECK), "--trace-angle-grid", "0", "--quiet"])
+
+
+@pytest.mark.parametrize("flag,expected", [(None, 6), ("0", None), ("9", 9)])
+def test_cli_angular_table_control_forwarded(monkeypatch, tmp_path, flag, expected):
+    from types import SimpleNamespace
+    from vmex.core import plotting, tracing
+
+    seen = {}
+    def trace(*args, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(metadata={"spectral_truncation": 0}, save=lambda path: (path, path))
+    monkeypatch.setattr(tracing, "trace_alphas", trace)
+    monkeypatch.setattr(plotting, "plot_tracing", lambda *args, **kwargs: {})
+    args = cli.build_parser().parse_args(["wout_fake.nc", "--trace"] +
+                                         ([] if flag is None else ["--trace-angle-grid", flag]))
+    cli._run_trace(Path("wout_fake.nc"), args, tmp_path, emit=lambda message: None, quiet=True)
+    assert seen["angle_grid"] == expected

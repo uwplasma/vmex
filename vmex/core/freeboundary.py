@@ -7,8 +7,7 @@ fixed-boundary iteration of :mod:`vmex.core.solver`:
   with ``iter2 > 1`` and ``fsqr + fsqz <= 1e-3``; the first vacuum call
   promotes ``ivac`` 0 -> 1 (``vacuum.f``), prints the ``In VACUUM`` block,
   and triggers the soft-start restart (``restart_iter`` with ``irst = 2``:
-  state <- best stored state, zero velocity, ``delt *= 0.9``,
-  ``iter1 = iter2``, ``ijacob += 1``); ``eqsolve.f`` then prints the
+  state <- best stored state, zero velocity, ``iter1 = iter2``, ``ijacob += 1``); ``eqsolve.f`` then prints the
   ``VACUUM PRESSURE TURNED ON`` banner and sets ``ivac = 2``.
 - **Cadence**: ``ivacskip = mod(iter2 - iter1, nvacskip)`` (forced 0 while
   ``ivac <= 2``); on full steps (``ivacskip == 0``) the Green-function
@@ -854,11 +853,15 @@ def _vacuum_executables(resolution, *, mf: int, nf: int, signgs: int, wint,
         lasym=bool(resolution.lasym), wint=wint,
     )
     solver_vac = make_vacuum_solver(basis, signgs=int(signgs))
-    fused = replace(_make_fused_vacuum(
+    fused = _make_fused_vacuum(
         basis, modes=modes, signgs=int(signgs), solver_vac=solver_vac,
         axis_r0=axis_r0, axis_z0=axis_z0, solve_device=solve_device,
         output_device=plasma_device if solve_device is not None else None,
-    ), cache_key=key)
+    )
+    # The key determines every closed-over table, so the full update reloads
+    # across processes like the vacuum lane built on it.
+    fused = replace(fused, cache_key=key,
+                    full=AotLane(fused.full.__wrapped__, identity=repr(key)))
     lane = _make_vacuum_lane(fused, use_fft=use_fft)
     _VACUUM_EXECUTABLE_CACHE[key] = (basis, fused, lane)
     return basis, fused, lane
@@ -2015,7 +2018,8 @@ def _solve_free_boundary_stage(
                 )
                 if fb.ivac >= 1 and not fb.turned_on:
                     # funct3d.f soft start (restart_iter, irst = 2) applied on
-                    # the host: best state restored, velocity zeroed, delt*0.9,
+                    # the host: best state restored, velocity zeroed (delt is NOT
+                    # reduced: funct3d.f passes a local copy ``delt0`` to restart_iter),
                     # iter1 = iter2, ijacob += 1.  funct3d.f has already computed
                     # geometry at the pre-restart state, so preserve it for this
                     # pass's force evaluation (the momentum base remains xstore).
@@ -2026,7 +2030,6 @@ def _solve_free_boundary_stage(
                         carry,
                         state=carry.xstore,
                         xcdot=jax.tree.map(jnp.zeros_like, carry.xcdot),
-                        time_step=carry.time_step * 0.9,
                         ijacob=carry.ijacob + 1,
                         iter1=carry.iteration,
                         # The preconditioner cache changes shape with jmax = ns;
