@@ -16,7 +16,6 @@ import json
 import os
 from pathlib import Path
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -91,7 +90,6 @@ FIGURE_DIR = OUTPUT_DIR if ci_smoke else REPO_ROOT / "docs" / "_static" / "figur
 # End of input parameters.
 ###############################################################################
 
-jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ### Set up the grids ##########################################################

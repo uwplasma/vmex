@@ -7,7 +7,7 @@ is the case a ballooning objective is for: the interchange criteria see nothing
 to fix.
 
 The objective follows DESC's ``BallooningStability`` (Gaur et al., J. Plasma
-Phys. 89 (2023), doi:10.1017/S0022377823000107): every sampled field line whose growth rate
+Phys. 89 (2023), doi:10.1017/S0022377823000995): every sampled field line whose growth rate
 exceeds a threshold contributes its excess, and a stable line contributes
 nothing, so the optimizer spends its steps on the lines that are unstable
 instead of on the mean. Pressure, current and toroidal flux are held as in
@@ -105,6 +105,9 @@ if ci_smoke:
 inp = replace(vj.VmecInput.from_file(INPUT_FILE),
               ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
               niter_array=np.array([STAGE_NITER]))
+# Hold the seed's plasma volume at fixed major radius (TVOLUME with
+# LVOLUME_RFIX), so the optimizer cannot change the plasma size:
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)
 
 ### Set up the objective ######################################################
 

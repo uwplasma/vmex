@@ -380,3 +380,128 @@ def test_maximum_j_implicit_boundary_gradient_matches_reconverged_fd():
     relative = abs(implicit - finite_difference) / max(
         abs(implicit), abs(finite_difference))
     assert relative < 3.0e-3
+
+
+def _synthetic_drift(eps=0.1, nalpha=32, ns=8):
+    s = jnp.linspace(0.2, 0.9, ns)
+    alpha = jnp.arange(nalpha) * (2.0 * jnp.pi / nalpha)
+    action = s[:, None] * (1.0 + eps * jnp.cos(alpha))[None, :]
+    return s, alpha, action, jnp.ones_like(action)
+
+
+def test_drift_orbits_follow_analytic_j_contour_and_sign_convention():
+    eps, s0 = 0.1, 0.5
+    s, alpha, action, tau = _synthetic_drift(eps)
+    orb = maxj.drift_orbits(action, tau, s, alpha, s0, 0.0, nsteps=128)
+    j0 = s0 * (1.0 + eps)
+    assert float(jnp.max(jnp.abs(orb["action"] / j0 - 1.0))) < 1.0e-6
+    expected = j0 / (1.0 + eps * jnp.cos(orb["alpha"][0]))
+    np.testing.assert_allclose(orb["s"][0], expected, rtol=1.0e-6)
+    assert float(orb["s_max"][0]) == pytest.approx(j0 / (1.0 - eps), rel=1.0e-4)
+    # ds/dt = dJ/dalpha / tau = -eps s sin(alpha): negative at alpha = pi/2.
+    down = maxj.drift_orbits(action, tau, s, alpha, s0, jnp.pi / 2, nsteps=8)
+    assert float(down["s"][0, 1] - down["s"][0, 0]) < 0.0
+
+
+def test_drift_orbits_alpha_independent_action_is_a_flux_surface():
+    s, alpha, _, tau = _synthetic_drift()
+    action = jnp.broadcast_to((2.0 * s)[:, None], tau.shape)
+    orb = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.3, t_final=1.5, nsteps=32)
+    assert float(jnp.max(jnp.abs(orb["s"] - 0.5))) < 1.0e-10
+    assert float(orb["s_max"][0]) == pytest.approx(0.5, abs=1.0e-10)
+    assert float(orb["alpha"][0, -1]) == pytest.approx(0.3 - 2.0 * 1.5, abs=1.0e-8)
+    stationary = maxj.drift_orbits(jnp.zeros_like(action), tau, s, alpha, 0.5, 0.3, length=2.0)
+    np.testing.assert_array_equal(stationary["s"], 0.5)
+    np.testing.assert_array_equal(stationary["alpha"], 0.3)
+    arc = maxj.drift_orbits(action, tau, s, alpha, 0.5, 0.3, length=2.0)
+    varied = maxj.drift_orbits(action, tau * (1 + .5 * jnp.cos(alpha)), s, alpha, 0.5, 0.3, length=2.0)
+    np.testing.assert_allclose(arc["alpha"], varied["alpha"], atol=1e-12)
+
+
+@pytest.mark.parametrize("length", [None, 2.0])
+def test_drift_orbits_gradient_and_nan_rows(length):
+    s, alpha, action, tau = _synthetic_drift()
+
+    def s_max(a):
+        return maxj.drift_orbits(a, tau, s, alpha, 0.5, 0.0, nsteps=64, length=length)["s_max"][0]
+
+    grad = jax.grad(s_max)(action)
+    assert bool(jnp.all(jnp.isfinite(grad)))
+    h = 1.0e-6
+    direction = (jnp.zeros_like(action).at[3, 5].set(1.) if length is None
+                 else s[:, None] * jnp.cos(alpha))
+    fd = (s_max(action + h * direction) - s_max(action - h * direction)) / (2.0 * h)
+    assert float(jnp.sum(grad * direction)) == pytest.approx(float(fd), rel=1.0e-4, abs=1.0e-8)
+    clean = s_max(action)
+    dirty = s_max(action.at[4].set(jnp.nan))
+    assert bool(jnp.isfinite(dirty)) and float(dirty) == pytest.approx(float(clean), rel=1.0e-4)
+
+
+def test_drift_confinement_residual_reach_rows(monkeypatch):
+    booz = _boozer(1.02)
+    monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    eq = SimpleNamespace(state=object(), runtime=object())
+    options = dict(mboz=2, nboz=2, nalpha=8, points_per_period=32, num_periods=2,
+                   max_wells=4, nsteps=16, t_final=0.1)
+    term = maxj.DriftConfinementResidual([0.25, 0.75], [1.0 / 1.1], [0.5], launch_alpha=4,
+                                         excursion_weight=1.0, **options)
+    out = term.compute_state(eq.state, eq.runtime)
+    rows = out["residuals1d"]
+    assert rows.shape == (4 + 2 * 8,) and bool(jnp.all(jnp.isfinite(rows)))
+    assert bool(jnp.all((out["reach"] >= 0.0) & (out["reach"] < 1.0)))
+    assert float(out["gamma_w"]) == pytest.approx(float(jnp.mean(out["reach"])))
+
+
+def _stub_drift_surfaces(j_of_alpha):
+    """Replacement for ``drift_surfaces_from_boozer`` with a synthetic action."""
+    def stub(*, s_b, s0, alpha0, **_kwargs):
+        s = jnp.linspace(0.1, 0.95, 8)
+        alpha = jnp.arange(16) * (2.0 * jnp.pi / 16)
+        action = s[:, None] * j_of_alpha(alpha)[None, :]
+        orbit = maxj.drift_orbits(action, jnp.ones_like(action), s, alpha, s0, alpha0,
+                                  t_final=2.0, nsteps=32)
+        return {**orbit, "j_map": action, "tau_map": jnp.ones_like(action)}
+    return stub
+
+
+def test_drift_confinement_reach_vanishes_on_flux_surfaces(monkeypatch):
+    booz = _boozer()
+    monkeypatch.setattr(maxj, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    monkeypatch.setattr(omnigenity, "boozer_spectrum_state", lambda *args, **kwargs: booz)
+    term = maxj.DriftConfinementResidual([0.25, 0.75], [0.9], [0.5], launch_alpha=4)
+    eq = SimpleNamespace(state=object(), runtime=object())
+    gamma = {}
+    for name, j_of_alpha in (("flat", lambda a: jnp.ones_like(a)),
+                             ("rippled", lambda a: 1.0 + 0.3 * jnp.cos(a))):
+        monkeypatch.setattr(maxj, "drift_surfaces_from_boozer", _stub_drift_surfaces(j_of_alpha))
+        out = term.compute_state(eq.state, eq.runtime)
+        gamma[name] = float(out["gamma_w"])
+    assert gamma["flat"] == pytest.approx(0.0, abs=1.0e-12)
+    assert gamma["rippled"] > 0.01
+
+
+def test_drift_surfaces_use_the_deepest_well_within_one_field_period(monkeypatch):
+    nfp, nalpha = 2, 3
+    period = 2.0 * np.pi / nfp
+    #: wells of one line: shallow first well, deeper neighbour, deepest but a period later
+    action = jnp.broadcast_to(jnp.array([1.0, 3.0, 9.0]), (2, nalpha, 1, 3))
+    left = jnp.broadcast_to(jnp.array([0.0, 0.5 * period, 1.5 * period]), action.shape)
+    usable = jnp.ones(action.shape, dtype=bool)
+
+    def stub(**_kwargs):
+        return {"action": action, "bounce_time": 2.0 * action, "well_left": left,
+                "usable_mask": usable}
+
+    monkeypatch.setattr(maxj, "bounce_action_from_boozer", stub)
+    booz = _boozer()
+    kwargs = dict(bmnc_b=booz["bmnc_b"], xm_b=booz["xm_b"], xn_b=booz["xn_b"],
+                  iota_b=booz["iota_b"], G_b=booz["G_b"], I_b=booz["I_b"], nfp=nfp,
+                  s_b=booz["s_b"], pitch=0.9, s0=0.5, nalpha=nalpha, nsteps=4, degree=1,
+                  t_final=0.1)
+    out = maxj.drift_surfaces_from_boozer(**kwargs)
+    np.testing.assert_allclose(out["j_map"], 3.0)
+    np.testing.assert_allclose(out["tau_map"], 6.0)
+    usable = usable.at[:, 1, :, :].set(False)       # no usable well on one line
+    out = maxj.drift_surfaces_from_boozer(**kwargs)
+    assert bool(jnp.all(jnp.isnan(out["j_map"][:, 1]))) and bool(jnp.all(jnp.isfinite(out["j_map"][:, 0])))

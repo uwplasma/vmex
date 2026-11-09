@@ -14,8 +14,7 @@ axis makes the four-legged racetrack stellarator symmetric.  This example builds
 that QI-mirror hybrid and compares the two ways of representing the spliced axis.
 
   * Fourier (VMEC-native) is a *global* basis: a truncated series rings at the
-    straight->curved seam (a Gibbs-type feature) and its error decays only
-    ~1/N, everywhere at once.
+    straight->curved seam; its convergence is limited by junction smoothness.
   * B-splines (the ``vmex.mirror`` closed-spline lane) are *local*: the straight
     mirror legs are reproduced to machine precision on their interior, with
     error confined to a fixed number of knot-spacings around the junction.
@@ -28,10 +27,11 @@ Fourier solve of ``input.nfp2_QI``.
 Honesty.  The B-spline mirror equilibrium is a scalar-pressure spline model, not
 a VMEC re-solve; its transform comes from a weak axial current, so it is *not* a
 reproduction of the QI transform -- it demonstrates the geometry and the
-exactly-straight mirror cell.  A literal VMEC re-solve of a straight-axis device
-is degenerate in cylindrical ``(R, phi, Z)`` coordinates (a straight axis
-segment cannot be parameterised by the cylindrical angle), which is precisely
-why the closed-axis B-spline lane exists.  See ``docs/explanation/mirror-geometry.rst``.
+exactly-straight mirror cell. A VMEC re-solve of the spliced device is not
+attempted. Straight segments can use cylindrical angle where dphi/du is
+nonzero; a full VMEC boundary also needs single-valued R(phi), Z(phi). The
+local B-spline basis preserves exactly collinear spans without a global
+Fourier approximation. See ``docs/explanation/mirror-geometry.rst``.
 """
 
 import dataclasses
@@ -39,7 +39,6 @@ import json
 import os
 from pathlib import Path
 
-import jax
 import matplotlib
 import numpy as np
 
@@ -111,7 +110,6 @@ if ci_smoke:
 # End of input parameters.
 ###############################################################################
 
-jax.config.update("jax_enable_x64", True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ### Helpers ###################################################################
