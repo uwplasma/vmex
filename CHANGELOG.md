@@ -187,17 +187,12 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
 `VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
-(#449). On clusters, a shared cache path was read by nodes with different CPU
-features; XLA rejected the other node's executables ("Target machine feature
-... is not supported on the host machine") and recompiled on every run.
+(#449): nodes with different CPU features no longer recompile on every run.
 
 ## 0.11.1 - 2026-09-23
 
 Free-boundary trials are anchored on the coupled root their gradients
-differentiate (#432), the exterior field is accurate next to the plasma
-surface, optimization results are the states the objective scored (#427), and
-the optimization examples were re-tuned against a five-minute budget. Full
-notes in the GitHub release.
+differentiate (#432); results are the states the objective scored (#427).
 
 ## 0.11.0 and earlier
 
