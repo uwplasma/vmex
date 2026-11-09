@@ -155,11 +155,11 @@ def finite_difference_jacobian(
             plus[j] += step[j]
             points.extend((minus, plus))
 
+    if not points:
+        points.append(x.copy())
     values = [np.asarray(value, dtype=float).ravel() for value in (
         pool.map(points) if pool else map_ensemble(fun, points, workers=workers)
     )]
-    if not values:
-        return np.empty((0, 0), dtype=float)
     size = values[0].size
     if any(value.size != size for value in values):
         raise ValueError("fun output size changed between finite-difference probes")

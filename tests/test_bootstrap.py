@@ -707,15 +707,25 @@ TOKAMAK_PROFILES = bs.KineticProfiles(
     Ti_coeffs=2.0e3 * np.array([1, -1.0]))
 
 
-def test_self_consistent_bootstrap_picard_converges():
+@pytest.mark.parametrize("n_iter", [0, 1, 10])
+def test_self_consistent_bootstrap_picard_converges(n_iter):
     """V6 (small): Picard loop on the ncurr=1 tokamak converges (delta below
     tol) in <= 10 iterations and drives f_boot down ~two orders of magnitude.
     relax=0.5 because iota here is entirely bootstrap-driven (the undamped
     <J.B> ~ 1/iota ~ 1/I map is marginally stable)."""
     inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))  # flat I' guess
+    if n_iter == 0:
+        with pytest.raises(ValueError, match="n_iter"):
+            bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, n_iter=n_iter)
+        return
     res = bs.self_consistent_bootstrap(
-        inp, TOKAMAK_PROFILES, 0, n_iter=10, tol=1e-3, relax=0.5, degree=6,
+        inp, TOKAMAK_PROFILES, 0, n_iter=n_iter, tol=1e-3, relax=0.5, degree=6,
         s_eval=np.linspace(0.02, 0.98, 25))
+    assert res.input.curtor == res.equilibrium.inp.curtor == res.history[-1]["curtor"]
+    np.testing.assert_array_equal(res.input.ac, res.equilibrium.inp.ac)
+    if n_iter == 1:
+        assert not res.converged and res.iterations == 1
+        return
     assert res.converged and res.iterations <= 10
     assert res.input.ncurr == 1 and res.input.pcurr_type == "power_series"
     # fixed point: ~0.38 MA of bootstrap current, sign preserved
@@ -724,6 +734,23 @@ def test_self_consistent_bootstrap_picard_converges():
     f_last = res.history[-1]["f_boot"]
     assert f_last < 0.02 and f_last < 0.05 * f_first
     assert res.history[-1]["delta"] <= 1e-3
+
+
+def test_self_consistent_bootstrap_current_model_hook():
+    """``current_model`` replaces the Redl <J.B> the loop inverts: the model sees
+    the solved equilibrium and a smaller target gives a smaller applied current."""
+    calls = []
+
+    def half(eq, s_eval, jr):
+        calls.append((eq.wout.ns, np.asarray(s_eval).size))
+        return 0.5 * jr
+
+    kwargs = dict(n_iter=2, degree=6, s_eval=np.linspace(0.02, 0.98, 25))
+    inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))
+    full = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, **kwargs)
+    model = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, current_model=half, **kwargs)
+    assert calls and calls[0][1] == 25
+    assert abs(model.input.curtor) < 0.75 * abs(full.input.curtor)
 
 
 def test_current_dof_packing_and_validation():
