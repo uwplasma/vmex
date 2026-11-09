@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.13.0"
+version = "0.14.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -77,7 +77,7 @@ optimizers = [
 # 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
   "neo-jax>=1.1.1",
-  "dkx>=2.13.0",
+  "dkx>=2.14.0",
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [

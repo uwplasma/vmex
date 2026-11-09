@@ -4,7 +4,13 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
+- **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
+
+## 0.14.0 - 2026-11-09
+
+- **pwO bootstrap control.** `pwO_optimization.py` gains `BOOTSTRAP_TERM = "band"`, which flattens |B| across the unmapped B_max band (DKX current -135 to -5 kA at NFP 3), and optional DKX stages at the end; `BootstrapFiniteNuResidual` reports the equivalent-ripple spread as a diagnostic.
+- **Solver speed.** Block factorizations are reused across solves, with cyclic reduction for GPU block factors; cached executables are shared across solver blocks and invalidated after dependency updates.
+- Fixes: native Boozer iota for multiple field periods, bounce-drift derivatives and arc-length weights, the interior lambda axis lift, held m=1 family in implicit solves and derivatives, `near_surface="auto"` eager versus traced.
 
 ## 0.13.0 - 2026-11-03
 
@@ -189,11 +195,6 @@ A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
 `VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
 (#449): nodes with different CPU features no longer recompile on every run.
 
-## 0.11.1 - 2026-09-23
-
-Free-boundary trials are anchored on the coupled root their gradients
-differentiate (#432); results are the states the objective scored (#427).
-
-## 0.11.0 and earlier
+## 0.11.1 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).
