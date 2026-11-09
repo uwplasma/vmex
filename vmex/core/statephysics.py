@@ -382,7 +382,9 @@ def min_boundary_curvature_radius(state: SpectralState, rt: SolverRuntime) -> Ar
     """
     _, _, _, dR, dZ, d2R, d2Z = _boundary_sections(
         state, rt, max(16 * int(rt.resolution.mpol), 96), max(4 * int(rt.resolution.ntor) + 1, 24))
-    return jnp.min((dR**2 + dZ**2) ** 1.5 / jnp.abs(dR * d2Z - dZ * d2R))
+    cross = jnp.abs(dR * d2Z - dZ * d2R)
+    flat = cross == 0.0  # an inflection or straight segment: infinite radius, zero gradient
+    return jnp.min(jnp.where(flat, jnp.inf, (dR**2 + dZ**2) ** 1.5 / jnp.where(flat, 1.0, cross)))
 
 
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:

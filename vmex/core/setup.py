@@ -310,6 +310,8 @@ def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
         return rbc, rbs, zbc, zbs
     rbc, rbs, zbc, zbs = (jnp.asarray(x, dtype=float) for x in (rbc, rbs, zbc, zbs))
     a, b = _volume_cubic(rbc, rbs, zbc, zbs, inp)
+    if not isinstance(a + b, jax.core.Tracer) and float(a + b) == 0.0:
+        raise ValueError("TVOLUME: the boundary encloses zero volume, so it cannot be scaled")
     target = float(inp.tvolume) * jnp.sign(a + b)
     if not inp.lvolume_rfix:
         scale = jnp.cbrt(target / (a + b))
@@ -317,6 +319,12 @@ def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
     c = jnp.sqrt(target / (a + b))
     for _ in range(10):
         c = c - (a * c**2 + b * c**3 - target) / (2.0 * a * c + 3.0 * b * c**2)
+    if not isinstance(c, jax.core.Tracer) and not (
+            np.isfinite(float(c)) and float(c) > 0.0
+            and abs(float(a * c**2 + b * c**3 - target)) <= 1e-9 * abs(float(target))):
+        raise ValueError(
+            "LVOLUME_RFIX: no positive scale of the m > 0 harmonics encloses TVOLUME "
+            f"= {float(inp.tvolume)} m^3 (the Newton iteration did not converge)")
     scale = jnp.where(np.arange(int(inp.mpol)) > 0, c, 1.0)
     return rbc * scale, rbs * scale, zbc * scale, zbs * scale
 
