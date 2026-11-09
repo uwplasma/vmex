@@ -63,7 +63,7 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 757 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures
+BUDGET_TOTAL = 797 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures, plus the two QI bootstrap figures (#629, 79 KB)
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
@@ -78,6 +78,7 @@ GRANDFATHERED_FILES = {
     "figures/mirror_free_boundary_beta_scan.webp",
     "figures/pr20_wout_parity_summary.json",
     "figures/readme_pwo.webp",
+    "figures/readme_pwo_bootstrap.webp",
     "figures/qi_mirror_hybrid.webp",
     "figures/readme_convergence.webp",
     "figures/readme_diagnostics_summary.webp",
