@@ -109,6 +109,7 @@ def scalars(state, runtime):
 
 
 # Seed: its physical values are the targets
+assert ci_smoke or (N_THETA >= 2 * MPOL + 16 and N_ZETA >= 2 * NTOR + 14), "too few angular nodes"
 mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
 seed_input = with_ladder(replace(vj.VmecInput.from_file(INPUT_FILE), **INPUT_OVERRIDES), NS_ARRAY, FTOL_ARRAY,
                          NITER_ARRAY).change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
