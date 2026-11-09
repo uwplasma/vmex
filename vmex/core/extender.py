@@ -10,6 +10,7 @@ explicit-point methods remain JAX-transformable.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 import warnings
 from pathlib import Path
@@ -22,7 +23,6 @@ import numpy as np
 from .errors import VmecNumericalError
 from .mgrid import MgridField, read_mgrid
 from .profiles import MU0
-from .virtual_casing import GRADED_NODES as _GRADED_NODES
 
 Array = Any
 PlasmaMode = Literal["auto", "include", "vacuum"]
@@ -1379,19 +1379,6 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
     return int(min(power, _MAX_SOURCE_NPHI))
 
 
-def _concrete(function: Callable[..., Any], *args: Any) -> Any:
-    """Evaluate ``function(*args)`` to concrete arrays, even while tracing.
-
-    Cached quadrature data built inside a caller's ``jit`` would otherwise be
-    that trace's tracers and leak into every later call.  Compiling ahead of
-    time and calling the executable runs it outside any trace; the arguments
-    are concrete, so it is the same computation.  (``ensure_compile_time_eval``
-    would also work, but dispatches every primitive eagerly: 26 s against
-    0.5 s for the source densities.)
-    """
-    return jax.jit(lambda: function(*args)).lower().compile()()
-
-
 class VmecExtender(MagneticField):
     """Total field outside the last closed VMEC flux surface.
 
@@ -1410,13 +1397,13 @@ class VmecExtender(MagneticField):
     source grid; its error decays as ``exp(-2 pi d / h)`` with ``d`` the
     distance to the surface and ``h`` the node spacing, so it is exact to
     rounding a minor radius out and useless within a few spacings.  Near the
-    surface the target-graded rule of
-    :func:`~vmex.core.virtual_casing.graded_plasma_field` takes over: every
-    target gets nodes clustered about its nearest surface point, which keeps
-    ``B`` to about 1e-12 and ``grad B`` to about 1e-10 down to 0.01 minor
-    radii at about 16 ms per target.  Spatial derivatives of the direct path
-    come from the closed-form layer kernels, all orders in one pass over the
-    finest schedule level.
+    surface the target-graded rule of ``virtual_casing_jax``
+    (``VirtualCasingExteriorField.B_and_derivatives_accurate_xyz``) takes
+    over: every target gets nodes clustered about its nearest surface point,
+    which keeps ``B`` to 1e-12 and ``grad B`` to 1e-10 or better from one
+    minor radius to the surface itself, on either side, at a few ms per
+    target.  Spatial derivatives of the direct path come from the closed-form
+    layer kernels, all orders in one pass over the finest schedule level.
 
     Parameters
     ----------
@@ -1448,23 +1435,13 @@ class VmecExtender(MagneticField):
         the direct path wherever its order-0 error estimate meets
         ``10**-digits`` and the graded rule at the points where it does not,
         for ``B`` and every derivative order, eager or traced, so the returned
-        jets and the parameter pullbacks differentiate one map.  A traced call
-        evaluates both rules and selects per point (a traced ``B`` costs
-        both), an eager call only the rule each point needs.  Node counts: the
-        direct path uses the finest schedule level at order 0 and closed-form
-        kernels over it at orders 1-3; the graded rule uses ``graded_nodes``
-        at every order.  ``"graded"``: every call, traced or not,
-        uses the graded rule — for objectives or field-line traces that stay
-        close to the surface.  ``"direct"``: every call uses the direct path.
-        The attribute may also be set after construction.
+        jets and the parameter pullbacks differentiate one map.  ``"graded"``:
+        every call uses the graded rule, for objectives or field-line traces
+        that stay close to the surface.  ``"direct"``: every call uses the
+        direct path.  The attribute may also be set after construction.
     graded_nodes:
         ``(poloidal, toroidal)`` node counts of the graded rule over the full
-        torus, default :data:`~vmex.core.virtual_casing.GRADED_NODES`.
-    graded_target_batch_size:
-        Optional positive integer bounding simultaneous graded target rules.
-        ``None`` keeps the serial default. Larger batches can improve throughput
-        at higher memory cost; direct-path chunk settings do not affect this
-        rule. The attribute may also be set after construction.
+        torus; ``None`` takes the finest schedule level.
     """
 
     def __init__(
@@ -1472,7 +1449,6 @@ class VmecExtender(MagneticField):
         accuracy_check: AccuracyCheck = "warn",
         near_surface: NearSurface = "auto",
         graded_nodes: tuple[int, int] | None = None,
-        graded_target_batch_size: int | None = None,
     ) -> None:
         if external_field is None and plasma_field is None:
             raise ValueError("at least one external or plasma field is required")
@@ -1480,7 +1456,7 @@ class VmecExtender(MagneticField):
         self.plasma_field = plasma_field
         self.accuracy_check = accuracy_check
         self._kernels: dict[tuple[Any, ...], Any] = {}
-        self._graded_nodes = (_GRADED_NODES if graded_nodes is None
+        self._graded_nodes = (None if graded_nodes is None
                               else (int(graded_nodes[0]), int(graded_nodes[1])))
         self.near_surface = near_surface
 
@@ -1488,7 +1464,6 @@ class VmecExtender(MagneticField):
             return self._field(0, points)
 
         super().__init__(B_fn)
-        self.graded_target_batch_size = graded_target_batch_size
 
     # -- configuration -----------------------------------------------------
 
@@ -1519,24 +1494,9 @@ class VmecExtender(MagneticField):
         self._data_pullbacks = {}
 
     @property
-    def graded_nodes(self) -> tuple[int, int]:
-        """``(poloidal, toroidal)`` node counts of the graded rule."""
+    def graded_nodes(self) -> tuple[int, int] | None:
+        """``(poloidal, toroidal)`` node counts of the graded rule; ``None``: the default."""
         return self._graded_nodes
-
-    @property
-    def graded_target_batch_size(self) -> int | None:
-        """Simultaneous graded targets; None uses the serial map."""
-        return self._graded_target_batch_size
-
-    @graded_target_batch_size.setter
-    def graded_target_batch_size(self, size: int | None) -> None:
-        """Set a static target batch and discard configuration-dependent caches."""
-        from . import virtual_casing as vc
-
-        self._graded_target_batch_size = vc._graded_target_batch_size(size)
-        self._kernels.clear()
-        self._spatial_fns.clear()
-        self._data_pullbacks.clear()
 
     @property
     def uses_virtual_casing(self) -> bool:
@@ -1547,13 +1507,8 @@ class VmecExtender(MagneticField):
         """A copy that evaluates the plasma field by the graded rule everywhere.
 
         For traced use close to the surface — field-line tracing, objectives
-        on a nearby coil-clearance surface — where the per-point switch of
-        ``near_surface="auto"`` would evaluate both rules.  Each target costs about the
-        same as a direct call on a 128 x 512 grid; fewer ``nodes`` trade
-        accuracy for speed (``(64, 256)`` keeps ``B`` to about 1e-5 down to
-        0.01 minor radii).  This replaces the first-order near-surface
-        continuation, which carried a 1.6-2.4 % error floor next to the
-        surface and took minutes and tens of GB to prepare.
+        on a nearby coil-clearance surface.  Fewer ``nodes`` trade accuracy
+        for speed.
         """
         if self.plasma_field is None:
             raise RuntimeError("graded quadrature requires a virtual-casing plasma field")
@@ -1598,25 +1553,6 @@ class VmecExtender(MagneticField):
 
         return self._kernel(("external", order), build)(xyz)
 
-    def _direct_sources(self):
-        """Nodes and weighted densities of the finest schedule level, compiled once.
-
-        ``level_sources`` builds them eagerly, primitive by primitive, which
-        took 17 s on the first call; compiled, 0.6 s.  A traced ``B_total``
-        (the parameter-derivative path) is built inside the trace instead.
-        """
-        field = self.plasma_field
-
-        def sources(B_total):
-            view = copy.copy(field)
-            view.B_total = B_total
-            view._level_source_cache = {}
-            return view.level_sources()
-
-        if isinstance(field.B_total, jax.core.Tracer):
-            return sources(field.B_total)
-        return self._kernel(("sources",), lambda: _concrete(sources, field.B_total))
-
     def _direct(self, order: int, xyz: Array) -> Array:
         """The direct path: the schedule for ``B``, closed-form kernels beyond."""
         if not self._quadrature_capable():
@@ -1626,46 +1562,30 @@ class VmecExtender(MagneticField):
             return jax.vmap(function)(xyz) if order else self.plasma_field.B_plasma_xyz(xyz)
         if order == 0:
             return self._kernel(("B",), lambda: jax.jit(self.plasma_field.B_plasma_xyz))(xyz)
-        from virtual_casing_jax.derivative_kernels import layer_derivatives
+        return self.plasma_field.B_and_derivatives_xyz(xyz, order=int(order))[order]
 
-        return layer_derivatives(xyz, *self._direct_sources(), order=int(order))[order]
+    def _routed(self, order: int, xyz: Array) -> tuple[Array, Array]:
+        """The plasma jets and the relative error estimate of ``B``, from ``virtual_casing_jax``.
 
-    def _series(self):
-        from . import virtual_casing as vc
-
-        surface = self.plasma_field.surface_data
-        if isinstance(jnp.asarray(surface.B_total), jax.core.Tracer):
-            return vc._graded_series(surface)
-        return self._kernel(("series",), lambda: _concrete(vc._graded_series, surface))
-
-    def _graded(self, order: int, xyz: Array, nodes: tuple[int, int] | None = None) -> Array:
-        from . import virtual_casing as vc
-
-        nodes = self._graded_nodes if nodes is None else nodes
-        batch_size = self._graded_target_batch_size
-        series = self._series()
-        if isinstance(series["coefficients"], jax.core.Tracer) or isinstance(
-                xyz, jax.core.Tracer):
-            return vc._graded_field(series, xyz, order, nodes,
-                                    target_batch_size=batch_size)[order]
-        function = self._kernel(("graded", order, nodes, batch_size), lambda: jax.jit(
-            lambda s, p: vc._graded_field(s, p, order, nodes,
-                                         target_batch_size=batch_size)[order]))
-        return function(series, xyz)
-
-    def _graded_estimate(self, order: int, xyz: Array) -> Array:
-        """``|graded(N) - graded(3N/4)|`` over the RMS surface ``|B|``, per point.
-
-        The rule converges geometrically in its node count, so the coarser
-        evaluation's error dominates the difference and it bounds the finer
-        one's from above.
+        ``"auto"`` sends the targets the direct path misses to the graded rule,
+        ``"graded"`` all of them; one map for ``B`` and every derivative order,
+        eager or traced.
         """
-        n_theta, n_phi = self._graded_nodes
-        coarse = (max(8, (3 * n_theta) // 4), max(8, (3 * n_phi) // 4))
-        difference = self._graded(order, xyz) - self._graded(order, xyz, coarse)
-        surface = self.plasma_field.surface_data
-        scale = jnp.sqrt(jnp.mean(jnp.sum(jnp.asarray(surface.B_total) ** 2, axis=0)))
-        return jnp.max(jnp.abs(difference.reshape(xyz.shape[0], -1)), axis=1) / scale
+        field = self.plasma_field
+        if self._graded_nodes is not None:
+            field = copy.copy(field)
+            field.config = dataclasses.replace(field.config, graded_nodes=self._graded_nodes)
+        tol = -1.0 if self._near_surface == "graded" else 10.0 ** (-int(field.config.digits))
+
+        def routed(points):
+            # routed by B alone: nested derivatives of B and the jets are one map
+            values, estimate = field.B_and_derivatives_accurate_xyz(
+                points, order=order, tol=tol, route_order=0)
+            return values[order], estimate
+
+        if isinstance(xyz, jax.core.Tracer) or isinstance(jnp.asarray(field.B_total), jax.core.Tracer):
+            return routed(xyz)
+        return self._kernel(("routed", order, tol, self._graded_nodes), lambda: jax.jit(routed))(xyz)
 
     def _direct_estimate(self, order: int, xyz: Array) -> Array:
         from . import virtual_casing as vc
@@ -1675,10 +1595,6 @@ class VmecExtender(MagneticField):
         return self._kernel(("estimate",), lambda: jax.jit(
             lambda p: vc.offsurface_error_estimate(self.plasma_field, p)))(xyz)
 
-    def _near(self, xyz: Array) -> Array:
-        """Points where the direct path misses ``digits``: the one ``auto`` selector."""
-        return ~(self._direct_estimate(0, xyz) <= 10.0 ** (-int(self.plasma_field.config.digits)))
-
     def _field(self, order: int, xyz: Array) -> Array:
         """``order``-th derivative of the total field, choosing the quadrature."""
         value = self._external(order, xyz)
@@ -1686,45 +1602,28 @@ class VmecExtender(MagneticField):
             return value
         if not self._quadrature_capable():
             return value + self._direct(order, xyz)
-        mode = self._near_surface
         traced = isinstance(xyz, jax.core.Tracer) or isinstance(
             jnp.asarray(self.plasma_field.B_total), jax.core.Tracer)
-        if mode == "graded":
-            plasma = self._graded(order, xyz)
-            if not traced and self._accuracy_check != "off":
-                self._report(order, np.asarray(self._graded_estimate(order, xyz)),
-                             np.ones(xyz.shape[0], bool))
-            return value + plasma
-        plasma = self._direct(order, xyz)
-        if mode == "auto" and traced:
-            near = self._near(xyz).reshape((-1,) + (1,) * (plasma.ndim - 1))
-            return value + jnp.where(near, self._graded(order, xyz), plasma)
-        if traced or (mode == "direct" and self._accuracy_check == "off"):
-            return value + plasma
-        estimate = np.array(self._direct_estimate(order, xyz), dtype=float)
-        graded = np.zeros(xyz.shape[0], bool)
-        if mode == "auto":
-            graded = np.asarray(self._near(xyz))
-            if graded.any():
-                index = np.flatnonzero(graded)
-                plasma = jnp.asarray(plasma).at[index].set(self._graded(order, xyz[index]))
-                if self._accuracy_check != "off":
-                    estimate[index] = np.asarray(self._graded_estimate(order, xyz[index]))
-        if self._accuracy_check != "off":
-            self._report(order, estimate, graded)
+        check = not traced and self._accuracy_check != "off"
+        if self._near_surface == "direct":
+            if check:
+                self._report(order, np.array(self._direct_estimate(order, xyz), dtype=float))
+            return value + self._direct(order, xyz)
+        plasma, estimate = self._routed(order, xyz)
+        if check:
+            self._report(order, np.asarray(estimate))
         return value + plasma
 
-    def _report(self, order: int, estimate: np.ndarray, graded: np.ndarray) -> None:
+    def _report(self, order: int, estimate: np.ndarray) -> None:
         digits = int(self.plasma_field.config.digits)
         missed = ~(estimate <= 10.0 ** (-digits))
         if not np.any(missed):
             return
         worst = float(np.max(np.where(np.isfinite(estimate), estimate, np.inf)))
         quantity = "field" if not order else f"order-{order} derivative"
-        if np.any(missed & graded):
-            advice = ("the graded near-surface rule at "
-                      f"{self._graded_nodes[0]} x {self._graded_nodes[1]} nodes missed "
-                      "too; raise graded_nodes, or move the points off the surface")
+        if self._near_surface != "direct":
+            advice = ("the graded near-surface rule missed too; raise nphi/ntheta (the "
+                      "surface data) or graded_nodes, or move the points off the surface")
         else:
             nt, npol = self.plasma_field.schedule_levels[-1]
             advice = (f"the direct quadrature on the finest source grid ({nt} toroidal x "
@@ -1782,30 +1681,18 @@ class VmecExtender(MagneticField):
         below the true error of orders 1 to 3 and above it by 3 to 6 times at
         first order and up to 14 times at third.
 
-        For the graded rule: the difference from the same rule at three
-        quarters of its nodes, which bounds its error from above; traceable.
-        Under ``near_surface="auto"`` an eager call reports the graded
-        estimate at the points the direct path would have missed; a traced
-        call does the same by selecting per point.
+        For the graded rule: the larger of the change from every second node, the
+        last Taylor term next to the surface and the field data's own spectrum
+        at the edge of what the samples resolve (``virtual_casing_jax``); it is
+        an estimate of ``B`` whatever ``order`` is, and traceable.
         """
         if self.plasma_field is None:
             raise RuntimeError("the field has no virtual-casing plasma contribution")
         xyz = self._require_points() if points is None else _check_points(points)
         order = int(order)
-        if self._near_surface == "graded":
-            return self._graded_estimate(order, xyz)
-        estimate = self._direct_estimate(order, xyz)
         if self._near_surface == "direct":
-            return estimate
-        if isinstance(estimate, jax.core.Tracer) or isinstance(xyz, jax.core.Tracer):
-            return jnp.where(self._near(xyz), self._graded_estimate(order, xyz), estimate)
-        estimate = np.array(estimate, dtype=float)
-        miss = np.asarray(self._near(xyz))
-        if miss.any():
-            index = np.flatnonzero(miss)
-            estimate[index] = np.asarray(self._graded_estimate(order, xyz[index]))
-        return jnp.asarray(estimate)
-
+            return self._direct_estimate(order, xyz)
+        return self._routed(0, xyz)[1]
 
     @classmethod
     def from_surface_data(
@@ -1820,7 +1707,6 @@ class VmecExtender(MagneticField):
         accuracy_check: AccuracyCheck = "warn",
         near_surface: NearSurface = "auto",
         graded_nodes: tuple[int, int] | None = None,
-        graded_target_batch_size: int | None = None,
     ) -> "VmecExtender":
         """Construct the finite-beta path from traceable VMEX surface data.
 
@@ -1836,8 +1722,7 @@ class VmecExtender(MagneticField):
         of 64 over the whole torus -- 13 per period.
 
         ``near_surface`` and ``graded_nodes`` choose the quadrature near the
-        surface. ``graded_target_batch_size`` controls its target scheduling;
-        see the class documentation.
+        surface; see the class documentation.
         """
         from . import virtual_casing as vc
 
@@ -1858,16 +1743,14 @@ class VmecExtender(MagneticField):
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
             branch="internal",
-            # the direct tier is the plain schedule (newer virtual-casing-jax
-            # routes B_plasma_xyz near the surface, which would make the
-            # tiers overlap and B inconsistent with its derivatives)
-            **({"near_surface": False}
-               if "near_surface" in vc.ExteriorFieldConfig.__dataclass_fields__ else {}),
+            # the direct tier is the plain schedule: virtual-casing-jax routes
+            # B_plasma_xyz near the surface by default, which would make the
+            # tiers overlap and B inconsistent with its derivatives
+            near_surface=False,
         )
         plasma_field = vc.VirtualCasingExteriorField(surface_data, config)
         return cls(external_field, plasma_field, accuracy_check=accuracy_check,
-                   near_surface=near_surface, graded_nodes=graded_nodes,
-                   graded_target_batch_size=graded_target_batch_size)
+                   near_surface=near_surface, graded_nodes=graded_nodes)
 
     @classmethod
     def from_parameterized_surface_data(
@@ -1887,7 +1770,6 @@ class VmecExtender(MagneticField):
         accuracy_check: AccuracyCheck = "warn",
         near_surface: NearSurface = "auto",
         graded_nodes: tuple[int, int] | None = None,
-        graded_target_batch_size: int | None = None,
     ) -> "VmecExtender":
         """Construct a virtual-casing field with VJPs in ``parameters``.
 
@@ -1952,8 +1834,7 @@ class VmecExtender(MagneticField):
                 levels=levels, chunk_size=chunk_size,
                 target_chunk_size=target_chunk_size,
                 near_surface=owner.near_surface,
-                graded_nodes=owner.graded_nodes,
-                graded_target_batch_size=owner.graded_target_batch_size).B(points)
+                graded_nodes=owner.graded_nodes).B(points)
 
         def pullback_field(owner):
             # A copied facade owns its quadrature settings too: binding the
@@ -1964,8 +1845,7 @@ class VmecExtender(MagneticField):
             initial_surface_data, external_field=initial_external_field,
             digits=digits, levels=levels, chunk_size=chunk_size,
             target_chunk_size=target_chunk_size, accuracy_check=accuracy_check,
-            near_surface=near_surface, graded_nodes=graded_nodes,
-            graded_target_batch_size=graded_target_batch_size)
+            near_surface=near_surface, graded_nodes=graded_nodes)
         field._parameters = all_parameters
         field._parameter_data_fn = differentiable_surface_data
         field._B_from_data_factory = pullback_field
