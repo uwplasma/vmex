@@ -431,10 +431,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--prefetch-compile",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help=(
-            "Overlap compilation of the next multigrid rung (default: off "
-            "to bound peak memory)."
+            "Overlap compilation of the next multigrid rung (default: on; "
+            "--no-prefetch-compile lowers peak memory)."
         ),
     )
     p.add_argument(
@@ -927,7 +927,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
-            # Opt-in cold-run overlap; the library default is also False.
+            # Cold-run overlap; the library default stays False.
             prefetch_compile=bool(args.prefetch_compile),
             jacobian_retries=int(args.jacobian_retries),
             **freeb_plan.solver_kwargs,

@@ -280,6 +280,7 @@ inp = replace(inp, phiedge=-toroidal_flux)
 # solve at PRES_SCALE = 1 gives the scale.
 beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
 inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)  # hold the seed plasma volume
 print(f"[flux] PHIEDGE = {inp.phiedge:.6f} Wb from the fitted coils; "
       f"PRES_SCALE = {inp.pres_scale:.1f} Pa for beta {100 * TARGET_BETA:.2f}%")
 

@@ -152,9 +152,10 @@ Options
        ``RESTART_WOUT`` deck entry. See
        :doc:`/howto/restart-from-previous-run`.
    * - ``--prefetch-compile`` / ``--no-prefetch-compile``
-     - Opt in to or out of overlapping the next multigrid rung's compilation.
-       Sequential compilation is the default and uses less peak memory;
-       numerical results are identical.
+     - Overlap the next multigrid rung's compilation with the current rung's
+       iteration (default: on). ``--no-prefetch-compile`` compiles
+       sequentially and uses less peak memory (about 25% less on
+       ``cth_like_free_bdy``); results are bit-identical.
    * - ``--jacobian-retries N``
      - Retry a stage from its best finite checkpoint after the VMEC2000
        75-Jacobian-reset condition, using a reduced ``DELT`` (default 2).
