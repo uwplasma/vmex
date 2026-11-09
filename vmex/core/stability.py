@@ -80,6 +80,7 @@ from .transforms import physical_to_internal_scale
 __all__ = [
     "d_merc_state",
     "mercier_stability_residual",
+    "mercier_stability_softmax",
     "jdotb_state",
     "jdotb_residual",
     "mercier_shear_state",
@@ -580,6 +581,22 @@ def trial_pressure_glasser_stability_residual(
         shear_epsilon=shear_epsilon)[2:-1]
     scale = jnp.asarray(smoothing, dtype=profile.dtype)
     return scale * jax.nn.softplus((profile + jnp.asarray(margin)) / scale)
+
+
+def mercier_stability_softmax(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    margin: float = 0.0,
+    smoothing: float = 1.0e-6,
+    temperature: float = 1.0e-3,
+) -> Array:
+    """Softmax-weighted interior Mercier-instability residual for NEOPAX."""
+    if temperature <= 0.0:
+        raise ValueError(f"temperature must be positive, got {temperature}")
+    residual = mercier_stability_residual(state, rt, margin=margin, smoothing=smoothing)
+    weights = jax.nn.softmax(residual / jnp.asarray(temperature, dtype=residual.dtype))
+    return jnp.sum(weights * residual)
 
 
 def mercier_stability_residual(

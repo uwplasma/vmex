@@ -1,6 +1,6 @@
 # Changelog
 
-Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
+Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision. **Unreleased:** add opt-in NEOPAX raw-block response compatibility views, the established constructed-well J surrogate, and a Mercier softmax aggregate; existing solver and physical-J objective defaults are unchanged.
 
 ## 0.13.0 - 2026-11-03
 
