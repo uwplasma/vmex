@@ -188,6 +188,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_bootstrap_er.py",
+    "examples/optimization/QI_optimization_electron_root.py",
     "examples/optimization/QI_optimization_jaxopt.py",
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
@@ -1238,6 +1239,19 @@ def test_low_bootstrap_optimization_examples(script_name, output, dependency, tm
     if script_name == "QI_optimization_bootstrap_er.py":
         # the example asserts its own consistency limit; the report line is the evidence
         assert re.search(r"<j\.B> inconsistency \(rms, VMEX vs DKX\): [0-9.]+", out)
+
+
+@pytest.mark.full  # nightly: the electron-root objective through NTX, one smoke stage
+def test_qi_electron_root_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    pytest.importorskip("ntx.ambipolar")
+    out = _run_example(EXAMPLES / "optimization" / "QI_optimization_electron_root.py",
+                       tmp_path, timeout=1800)
+    costs = re.search(r"cost: initial ([0-9.eE+-]+) -> final ([0-9.eE+-]+)", out)
+    assert costs is not None and float(costs.group(2)) < float(costs.group(1)), out[-2000:]
+    assert "[seed] rho = 0.60: roots" in out and "[final] rho = 0.60: roots" in out
+    assert (tmp_path / "wout_QI_electron_root_optimized.nc").exists()
+    assert (tmp_path / "QI_electron_root_optimized_roots.png").exists()
 
 
 @pytest.mark.full  # nightly: optional optimizer interoperability, cold JAX compilation

@@ -161,6 +161,12 @@ that research budget as one commented set of constants next to the default.
   Redl Picard seed, and prints Redl and DKX `<j.B>` side by side.
   `QI_optimization_bootstrap_er.py` (`pip install "dkx>=2.12.0"`) evaluates the
   DKX row at each surface's ambipolar `E_r`, found inside the objective.
+  `QI_optimization_electron_root.py` (needs NTX with `ntx.ambipolar`) asks for a
+  positive ambipolar `E_r` (an electron root) at mid-radius in a hot-electron,
+  cold-ion plasma. NTX convolves its monoenergetic `D11` tables, computed from
+  the Boozer spectrum of each trial equilibrium, with Maxwellians; the
+  objective is a hinge that is zero once a root above a target exists, and
+  every root with its stability is reported and plotted before and after.
   `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
   casing and coil derivatives. The free-boundary single-stage previews leave
   the LCFS implicit and vary only the coil shapes, through the coupled NESTOR
