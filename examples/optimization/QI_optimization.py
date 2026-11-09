@@ -137,29 +137,34 @@ monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
+# Every stage shares one resolution, so one problem built at the largest
+# max_mode serves them all: problem.subproblem() frees only the stage's
+# harmonics and every jitted residual and Jacobian is compiled once. A fresh
+# stage still restarts SciPy's trust-region model. A RuntimeWarning about
+# uncertified Jacobian columns is expected once the optimizer leaves the seed
+# and needs no action; see examples/README.md.
+mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
+inp = replace(inp, delt=0.5).change_resolution(
+    mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+problem = opt.VmecProblem.from_tuples(
+    inp, qi_terms, max_mode=max(MAX_MODES), use_ess=True,
+    progress=not ci_smoke, evaluation_progress=not ci_smoke,
+    ess_alpha=ESS_ALPHA, vary_major_radius=VARY_MAJOR_RADIUS)
+monitor.problem = problem
+if not ci_smoke:
+    problem.compile_residual_and_jacobian()
+x = problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QI stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    # A fresh problem restarts SciPy's trust-region model; equal-shape JAX
-    # executables are reused.  A RuntimeWarning about uncertified Jacobian
-    # columns is expected once the optimizer leaves the seed and needs no
-    # action; see examples/README.md.
-    problem = opt.VmecProblem.from_tuples(
-        inp, qi_terms, max_mode=max_mode, use_ess=True, progress=not ci_smoke,
-        evaluation_progress=not ci_smoke,
-        ess_alpha=ESS_ALPHA, vary_major_radius=VARY_MAJOR_RADIUS)
-    print(f"dof_names = {problem.dof_names}")
-    monitor.problem = problem
-    if not ci_smoke:
-        problem.compile_residual_and_jacobian()
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage.dof_names}")
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac,
-        x_scale=problem.scales, max_nfev=max_nfev,
+        stage.residual, stage.x0, jac=stage.residual_jac,
+        x_scale=stage.scales, max_nfev=max_nfev,
         ftol=1.0e-6, xtol=1.0e-10, verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"QI mode {max_mode}", equilibrium)
 
 ### Check the result ##########################################################
@@ -179,8 +184,8 @@ qi_final = report("final", final_equilibrium)["constructed QI"]
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
 qi_validation = ConstructedQIResidual(SURFACES, **VALIDATION_OPTIONS)
-print(f"\nQI total {qi_final:.3e}; independent fine-grid validation "
-      f"{float(qi_validation.total(final_equilibrium)):.3e}")
+qi_validation_total = float(qi_validation.total(final_equilibrium))
+print(f"\nQI total {qi_final:.3e}; independent fine-grid validation {qi_validation_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

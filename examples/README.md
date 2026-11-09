@@ -1,5 +1,10 @@
 # Examples
 
+`near_axis_initial_guess.py` uses the optional pyQSC or pyQIC VMEC writer and
+a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
+stellarator-symmetric first-order QA example; it does not constrain the
+converged equilibrium to the near-axis expansion or differentiate the generator.
+
 All runnable examples live under this single `examples/` tree. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
@@ -7,6 +12,12 @@ or `pip install "vmex[all]"` for everything the examples use.
 `free_boundary_mgrid.py` and `free_boundary_beta_scan.py` also need
 `data/mgrid_cth_like.nc`, a release asset rather than a tracked file; install it
 once from the repository root with `python tools/fetch_assets.py --bundle reference-nc`.
+
+With its default settings every script finishes in under five minutes on a
+14-core laptop with a cold JAX cache, and prints progress the whole time
+(optimizer monitors, solver iterations, and `progress=True` elapsed-time lines
+around long compilations and solves). Where a longer run gives a better answer, the script keeps
+that research budget as one commented set of constants next to the default.
 
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
@@ -41,6 +52,14 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   - `free_boundary_essos_coils.py` — free-boundary beta scan directly from
     ESSOS coils (tabulated to a temporary mgrid); `PRES_SCALE` is calibrated per point so the
     *actual* wout `betatotal` hits 0/1/2/3 %.
+  - `free_boundary_relax_constraint.py` — relax a free-boundary equilibrium in
+    the ESSOS coils with the spectral constraint off; prints `|B|` against
+    Biot-Savart before and after.
+  - `free_boundary_position_control.py` — a DIII-D-like free-boundary tokamak
+    with a mis-set vertical field, solved with and without
+    `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
+    for a field deficit) while the controlled one is held and reports the
+    missing `B_Z`.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.
@@ -70,7 +89,8 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
     `vj.essos_tracing_fields` (ESSOS coils, tabulated exterior field); the
     direct exterior field checks the table.
   - `vmex_mrx_comparison.py` — relax the 2.5 % beta QA equilibrium with
-    [MRX](https://github.com/ToBlick/mrx) (`pip install mrx`), which does not
+    [MRX](https://github.com/ToBlick/mrx) (install the source revision in
+    `vmex_mrx_comparison.py`), which does not
     assume nested surfaces, and compare Poincare sections, iota, the toroidal
     current, and the pressure with VMEX at ns = 65. Without MRX it exits after
     printing the install command.
@@ -91,6 +111,15 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
+  `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
+  1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
+  aspect/iota constraints and screens proposals with NEO. Run
+  `pwO_optimization_finite_beta.py` next for pressure continuation, or
+  `single_stage_optimization_pwO.py` to optimize coils and boundary together;
+  both read the vacuum script's `input.` and `wout_` files.
+  A lower proxy does not establish confinement; particle checks remain separate.
+  See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
+
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
   through the toroidal flux: at zero net current beta depends on PRES_SCALE /
   PHIEDGE^2 alone, so `PHIEDGE = pi a^2 sqrt(mu0 PRES_SCALE / TARGET_BETA)` with
@@ -104,7 +133,7 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.
   The scalar lane trades objective progress per evaluation (measured: QA
-  final QS 2.7x above least squares with 40 mode-2 iterations, QI 17x) for a cheaper cold start and
+  final QS 2.7x above least squares with 40 mode-2 iterations; QI on an equal seed, weights and solve count ends 0.7x the least-squares value) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
@@ -127,9 +156,12 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   and QH ratios and Boozer `|B|` before and after, to ask whether a
   low-current optimum drifts toward QI; at its default budget it leaves
   quasisymmetry (QA and QH ratios up fivefold) without becoming QI.
-  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.8.0"`) is the QI
+  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.12.0"`) is the QI
   bootstrap example with DKX's kinetic mismatch row in place of Redl's after a
-  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side. `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
+  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side.
+  `QI_optimization_bootstrap_er.py` (`pip install "dkx>=2.12.0"`) evaluates the
+  DKX row at each surface's ambipolar `E_r`, found inside the objective.
+  `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
   casing and coil derivatives. The free-boundary single-stage previews leave
   the LCFS implicit and vary only the coil shapes, through the coupled NESTOR
   adjoint. Each single-stage script runs in 2.1-4.6 min end to end on a laptop,
@@ -173,12 +205,13 @@ once from the repository root with `python tools/fetch_assets.py --bundle refere
   roughly twice its symmetric equivalent. The vacuum QI script closes with the
   NEO_JAX effective ripple of the seed and the optimized boundary, computed on
   the asymmetric Boozer spectrum.
+- `drift_surfaces.py` integrates bounce-averaged drift surfaces of a QA equilibrium from its Boozer spectrum, prints `s_max` and the conservation of J, differentiates `s_max` with `jax.grad`, and plots the orbits over the J contours.
 - `optimization/QA_maxJ_continuation.py` and `QI_maxJ_continuation.py` walk the
   constructed maximum-J target into the resolved certificate; the QA script
   states where maximum-J and quasisymmetry conflict near the axis.
 - `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
   with one seed-normalized scalar objective — quasisymmetry ratio (effective
-  ripple proxy), the derivative-safe `GammaCSmooth` surrogate, and the
+  ripple proxy), the smooth `GammaCSmooth` surrogate, and the
   outer-volume maximum-J residual — then reports hard `Gamma_c` and NEO_JAX
   `epsilon_eff^(3/2)` before and after.
 - `epsilon_effective.py` computes the NEO_JAX effective ripple from a solved

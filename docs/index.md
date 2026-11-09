@@ -176,6 +176,7 @@ explanation/index
 :caption: Project
 
 project/contributing
+project/ecosystem
 project/references
 project/repo-size
 ```

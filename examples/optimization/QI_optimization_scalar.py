@@ -7,11 +7,12 @@ are summed into one scalar before implicit differentiation, so SciPy L-BFGS-B
 receives a value and a gradient from one reverse equilibrium adjoint instead of
 a residual vector and its full Jacobian.
 
-The aspect row carries weight 1 here, not the 0.01 of QI_optimization.py:
-Gauss-Newton sees that row's own Jacobian and holds the target at 0.01, while
-the summed scalar lets QI drown it (aspect 12.6 at 0.01; 8.15 at 1, target 8).
-The QI residual stays far behind least squares: 5.1e-2 against 3.0e-3, 17x,
-so use QI_optimization.py when the QI value matters.
+Seed, weights, radial grid and number of equilibrium solves are those of
+QI_optimization.py. On that equal footing (laptop, 2026-10-15) this run ends
+at constructed QI 2.0e-3 (fine-grid 1.97e-3) against 3.0e-3 (2.76e-3) for
+least squares; the earlier 17x gap came from a different seed and weights.
+The summed scalar holds the aspect row more loosely: 9.7 against 8.8 (target
+8).
 """
 
 import os
@@ -26,20 +27,18 @@ import vmex as vj
 from vmex import optimize as opt
 from vmex.core.qi import ConstructedQIResidual
 
-NFP = 2
 SURFACES = np.linspace(0.1, 1.0, 6)
 MAX_MODES = [1, 3]
-MAXITER = [10, 8]
+MAXITER = [10, 15]          # residual evaluations (maxfun) per stage
 ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
 PARAMETER_STEP = 0.02
-MAX_PARAMETER_CHANGE = 5.0
+MAX_PARAMETER_CHANGE = 1.0e3
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 MINIMUM_MPOL = 5
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
-SEED_PERTURBATION = 0.05
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 71
@@ -48,7 +47,10 @@ FINAL_NITER = 8000
 
 # Every output file name contains this:
 OUTPUT_NAME = "QI_scalar_optimized"
-QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
+# Set to 1e-2 to use the softmin, which replaces the grid argmin with a smooth minimum; slower, lower objective.
+ARGMIN_SOFTNESS = 0.0
+QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21,
+                  argmin_softness=ARGMIN_SOFTNESS)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
@@ -65,11 +67,9 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
-inp = vj.VmecInput.from_file(INPUT_FILE)
-rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-inp = replace(inp, rbc=rbc, zbs=zbs)
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
+inp = replace(vj.VmecInput.from_file(INPUT_FILE), ns_array=np.array([31]),
+              ftol_array=np.array([1e-12]), niter_array=np.array([5500]))
 
 
 def iota_floor(state, runtime):
@@ -77,7 +77,7 @@ def iota_floor(state, runtime):
 
 
 def mirror_excess(state, runtime):
-    return jnp.maximum(opt.mirror_ratio(state, runtime) - MIRROR_LIMIT, 0.0)
+    return jnp.maximum(opt.mirror_ratio(state, runtime) - 0.99 * MIRROR_LIMIT, 0.0)
 
 
 def elongation_excess(state, runtime):
@@ -89,8 +89,8 @@ def elongation_excess(state, runtime):
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_terms = [
-    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
+    (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
+    (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 1000.0),
     (elongation_excess, 0.0, 10.0)]
 
 
@@ -144,7 +144,7 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
         value_and_gradient, np.zeros_like(x0), jac=True, method="L-BFGS-B",
         bounds=[(-MAX_PARAMETER_CHANGE, MAX_PARAMETER_CHANGE)] * x0.size,
         callback=record,
-        options={"maxiter": maxiter, "gtol": 1e-6, "ftol": 1e-12,
+        options={"maxiter": 10 * maxiter, "maxfun": maxiter, "gtol": 1e-6, "ftol": 1e-12,
                  "maxls": 20, "maxcor": 20})
     print(f"scalar cost: {initial_value:.12e} -> {float(result.fun):.12e}")
     x = x0 + step * result.x

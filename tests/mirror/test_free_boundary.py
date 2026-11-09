@@ -37,14 +37,6 @@ from vmex.mirror.output import (  # noqa: E402
 )
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _enable_solver_jit():
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
-
-
 def _restart_fixture(config, elements, radius, mass_scale):
     discretization = SplineMirrorDiscretization.build_cgl(config, elements=elements)
     shape = (discretization.grid.ntheta, discretization.coefficient_count)

@@ -34,7 +34,9 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_NFEV = [8, 10]
+# Research budget (over the 5-minute laptop default):
+#   MAX_MODES, MAX_NFEV = [1, 2], [10, 15]
 
 # Boozer resolution the constructed-QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)

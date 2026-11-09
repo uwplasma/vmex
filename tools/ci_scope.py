@@ -61,7 +61,7 @@ def classify(paths: Iterable[str], *, force_all: bool = False) -> tuple[bool, bo
 
 ROOT = Path(__file__).resolve().parents[1]
 NARROWABLE_PREFIXES = ("tests/", "benchmarks/", "examples/", "docs/")
-_IMPORTS = re.compile(r"^\s*(?:from|import)\s+(benchmarks|examples)\b", re.MULTILINE)
+_IMPORTS = re.compile(r"^\s*(?:from|import)\s+(examples)\b", re.MULTILINE)
 
 
 def _is_narrowable(path: str) -> bool:
@@ -97,8 +97,8 @@ def _owning_lanes(modules: Iterable[str], manifest: dict) -> set[str]:
 def _tests_referencing(paths: Iterable[str], root: Path) -> set[str]:
     """Test modules that import or name any of ``paths``.
 
-    Tests reach benchmark and example code both ways: ``from benchmarks...``
-    for helpers, and a literal path for scripts they execute. Missing either
+    Tests reach example code both ways: an import for helpers, and a
+    literal path for scripts they execute. Missing either
     would silently drop a lane, so both are matched.
     """
     targets = list(paths)
@@ -132,7 +132,7 @@ def needed_lanes(paths: Iterable[str], *, manifest=None, root=None) -> set[str] 
 
     modules = {path for path in changed if path.startswith("tests/") and path.endswith(".py")}
     scripts = [path for path in changed
-               if path.startswith(("benchmarks/", "examples/")) and path.endswith(".py")]
+               if path.startswith("examples/") and path.endswith(".py")]
     documents = [path for path in changed
                  if any(path.lower().endswith(suffix) for suffix in DOCUMENTATION_SUFFIXES)]
     modules |= _tests_referencing(scripts + documents, root)

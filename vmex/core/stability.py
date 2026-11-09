@@ -39,8 +39,9 @@ point-evaluation functions, so the whole pipeline is jit/grad-transparent.
 The discretized problem is the symmetric tridiagonal generalized
 eigenproblem of the central-difference stencil (the same discretization as
 COBRA/DESC), reduced to standard form with the diagonal ``f^{-1/2}``
-similarity transform and solved with a batched ``jnp.linalg.eigvalsh`` over
-all requested (surface, α, ζ0) field lines.
+similarity transform.  Only the bands are kept: bisection selects the
+largest root of every requested (surface, α, ζ0) field line, and its first
+derivative is Hellmann--Feynman with an inverse-iteration eigenvector.
 
 Scope notes
 -----------
@@ -71,6 +72,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
+from solvax import tridiagonal_solve
 from .solver import SolverRuntime, SpectralState, _physical_coefficients
 from .statephysics import _field_chain, _iotas_half_from_fields
 from .transforms import physical_to_internal_scale
@@ -88,6 +90,7 @@ __all__ = [
     "trial_pressure_mercier_stability_residual",
     "trial_pressure_glasser_stability_residual",
     "ballooning_lambda",
+    "ballooning_residual",
     "ballooning_growth_rate",
 ]
 
@@ -719,38 +722,46 @@ def _ballooning_context(state: SpectralState, rt: SolverRuntime) -> dict:
     )
 
 
-def _parabola(table: Array, j: int, hs: Array) -> Array:
-    """Local radial parabola of a full-mesh coefficient table at surface j.
+def _local_taylor(table: Array, nodes: np.ndarray, s: float, order: int) -> Array:
+    """``(f, f', f''/2)`` at ``s`` from the degree-``order`` local polynomial.
 
-    Returns ``(3, mnmax)`` stacked ``(value, d/ds, d²/ds²/2)`` at ``s[j]``
-    from the three neighbouring surfaces — the same second-order radial
-    accuracy as VMEC's own finite differences.
+    The polynomial interpolates ``table`` (rows at the radial ``nodes``) on the
+    ``order + 1`` nodes nearest ``s``, centred where the grid allows and
+    shifted one-sided at its ends.  ``order = 2`` at a full-mesh node is the
+    three-point central difference VMEC itself uses; ``order = 4`` makes the
+    first and second radial derivatives O(hs^4) and O(hs^3).
     """
-    c0 = table[j]
-    c1 = (table[j + 1] - table[j - 1]) / (2.0 * hs)
-    c2 = (table[j + 1] - 2.0 * table[j] + table[j - 1]) / (2.0 * hs * hs)
-    return jnp.stack([c0, c1, c2])
+    k = int(order) + 1
+    centre = int(np.argmin(np.abs(nodes - s)))
+    start = min(max(centre - k // 2, 0), nodes.size - k)
+    idx = np.arange(start, start + k)
+    weights = np.linalg.inv(np.vander(nodes[idx] - s, k, increasing=True))[:3]
+    return jnp.tensordot(jnp.asarray(weights), table[idx], axes=1)
 
 
-def _surface_tables(ctx: dict, j: int) -> dict:
-    """Radial parabola tables of the geometry spectra at full-mesh surface ``j``.
+def _surface_tables(ctx: dict, j: int | None, *, s: float | None = None,
+                    order: int = 2) -> dict:
+    """Local radial Taylor tables of the geometry spectra.
 
-    Cosine-parity ``R``/``Z``/``λ`` always; their sine-parity partners as
-    ``rtab_sin``/``ztab_cos``/``ltab_cos`` when the state is asymmetric.
-    Consumed by :func:`_surface_closures` and by the PEST angle inversion, so
-    that ``lasym`` enters the field-line geometry in exactly one place.
+    By default at full-mesh surface ``j`` with the three-point stencil (the
+    turbulence and Gamma_c lanes); with ``s`` and ``order`` at any normalized
+    flux (the ballooning lane).  Cosine-parity ``R``/``Z``/``λ`` always; their
+    sine-parity partners as ``rtab_sin``/``ztab_cos``/``ltab_cos`` when the
+    state is asymmetric.  Consumed by :func:`_surface_closures` and by the
+    PEST angle inversion, so that ``lasym`` enters the field-line geometry in
+    exactly one place.
     """
-    hs = ctx["hs"]
-    tabs = {
-        "rtab": _parabola(ctx["rmnc"], j, hs),
-        "ztab": _parabola(ctx["zmns"], j, hs),
-        "ltab": _parabola(ctx["lmns"], j, hs),
-    }
+    names = [("rtab", "rmnc"), ("ztab", "zmns"), ("ltab", "lmns")]
     if ctx["lasym"]:
-        tabs["rtab_sin"] = _parabola(ctx["rmns"], j, hs)
-        tabs["ztab_cos"] = _parabola(ctx["zmnc"], j, hs)
-        tabs["ltab_cos"] = _parabola(ctx["lmnc"], j, hs)
-    return tabs
+        names += [("rtab_sin", "rmns"), ("ztab_cos", "zmnc"), ("ltab_cos", "lmnc")]
+    if s is None:   # row-sliced contexts (Gamma_c) carry only hs, not ns
+        hs = ctx["hs"]
+        return {key: jnp.stack([
+            ctx[name][j], (ctx[name][j + 1] - ctx[name][j - 1]) / (2.0 * hs),
+            (ctx[name][j + 1] - 2.0 * ctx[name][j] + ctx[name][j - 1]) / (2.0 * hs * hs)])
+            for key, name in names}
+    nodes = np.linspace(0.0, 1.0, int(ctx["ns"]))
+    return {key: _local_taylor(ctx[name], nodes, float(s), order) for key, name in names}
 
 
 def _pest_lambda(tabs: dict) -> tuple[Array, Array | None]:
@@ -889,41 +900,141 @@ def _make_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
 # ---------------------------------------------------------------------------
 
 
+@jax.custom_jvp
+def _first_order_coefficients(values):
+    """Keep coefficients live for the first derivative; reject nested AD."""
+    return values
+
+
+@_first_order_coefficients.defjvp
+def _reject_second_order(primals, tangents):
+    raise NotImplementedError("ballooning eigenvalues support first derivatives only")
+
+
+def _scaled(d, e):
+    scale = jnp.maximum(jnp.max(jnp.abs(d)), jnp.max(jnp.abs(e)))
+    return jnp.where(scale > 0, scale, 1.0)
+
+
+def _top_eigenvalue(d, e, index=-1):
+    """Eigenvalue ``index`` (from the top) of the symmetric tridiagonal ``(d, e)``."""
+    n = d.shape[0]
+    return jax.scipy.linalg.eigh_tridiagonal(
+        d, e, eigvals_only=True, select="i", select_range=(n + index, n + index))[0]
+
+
+@jax.custom_jvp
+def _selected_tridiagonal_value(d, e):
+    """Largest root of the real symmetric tridiagonal ``(d, e)``, ``n >= 2``."""
+    scale = _scaled(d, e)
+    return scale * _top_eigenvalue(d / scale, e / scale)
+
+
+@_selected_tridiagonal_value.defjvp
+def _selected_tridiagonal_jvp(primals, tangents):
+    """Hellmann--Feynman ``d lambda = u^T dA u`` with ``u`` from inverse iteration.
+
+    The derivative is NaN when the top eigenvalue is not numerically isolated
+    (gap below ``256 eps``, a non-positive shifted LDL pivot) or when the
+    eigenvector misses its Rayleigh-residual/gap bound of ``sqrt(eps)/8``
+    after 32 iterations.  These are floating-point checks, not interval
+    enclosures.
+    """
+    d, e = _first_order_coefficients(primals)
+    dd, de = tangents
+    n = d.shape[0]
+    value = _selected_tridiagonal_value(d, e)
+    scale = _scaled(d, e)
+    d, e, root = d / scale, e / scale, value / scale
+    epsilon = jnp.finfo(d.dtype).eps
+    # Bisection brackets the root to a few eps; 64 eps above it the shifted
+    # matrix is positive definite iff every LDL pivot is positive.
+    shift = root + 64 * epsilon
+    signs = jnp.concatenate([jnp.ones(1, d.dtype), jnp.cumprod(jnp.where(e < 0, -1., 1.))])
+    positive = jnp.abs(e)
+
+    def pivot(previous, pair):
+        current = pair[0] - pair[1] ** 2 / previous
+        return current, current
+    _, pivots = jax.lax.scan(pivot, shift - d[0], (shift - d[1:], positive))
+    gap = root - _top_eigenvalue(d, e, -2)
+    resolved = (shift - d[0] > 0) & jnp.all(pivots > 0) & (gap > 256 * epsilon)
+    angle_tolerance = jnp.sqrt(epsilon) / 8
+
+    def rayleigh_residual(u):
+        # Subtract the root first (no cancellation against a large diagonal)
+        # and remove the Rayleigh shift, so root error is not read as
+        # eigenvector error.
+        r = (d - root) * u + jnp.pad(positive * u[1:], (0, 1)) + jnp.pad(positive * u[:-1], (1, 0))
+        return r - u * jnp.dot(u, r)
+
+    def angle(u):
+        return jnp.linalg.norm(rayleigh_residual(u)) / jnp.maximum(gap, epsilon)
+
+    def step(carry):
+        iteration, u = carry
+        # (sub, diag, super) of shift - |A|; the sign pattern is restored below.
+        u = tridiagonal_solve(jnp.pad(-positive, (1, 0)), shift - d, jnp.pad(-positive, (0, 1)),
+                              u[:, None])[:, 0]
+        return iteration + 1, u / jnp.linalg.norm(u)
+    _, unsigned = jax.lax.while_loop(
+        lambda c: resolved & (c[0] < 32) & (angle(c[1]) > angle_tolerance), step,
+        (0, jnp.ones_like(d) / jnp.sqrt(n)))
+    u = signs * unsigned
+    residual = (d - root) * u + jnp.pad(e * u[1:], (0, 1)) + jnp.pad(e * u[:-1], (1, 0))
+    good = (resolved & (angle(unsigned) <= angle_tolerance)
+            & (jnp.linalg.norm(residual) < 1024 * epsilon))
+    weights_d = jnp.where(good, u * u, jnp.nan)
+    weights_e = jnp.where(good, 2 * u[:-1] * u[1:], jnp.nan)
+    return value, jnp.sum(weights_d * dd) + jnp.sum(weights_e * de)
+
+
 def _max_eigenvalue_tridiag(g: Array, c: Array, f: Array, h: Array) -> Array:
     """Most-unstable eigenvalue of ``d/dη(g X')' + cX = λ fX``, ``X(±η_b)=0``.
 
     Central-difference stencil on the uniform η grid (COBRA/DESC/Gaur
     discretization), symmetrized to standard form with the ``f^{-1/2}``
-    similarity transform (``f > 0``), then a batched dense
-    ``jnp.linalg.eigvalsh``.  Leading axes of ``g/c/f`` are batch axes.
+    similarity transform (``f > 0``).  Leading axes of ``g/c/f`` are batch
+    axes.
     """
     g_half = 0.5 * (g[..., 1:] + g[..., :-1]) / (h * h)
     f_in = f[..., 1:-1]
     diag = (c[..., 1:-1] - g_half[..., 1:] - g_half[..., :-1]) / f_in
     off = g_half[..., 1:-1] / jnp.sqrt(f_in[..., :-1] * f_in[..., 1:])
     n = diag.shape[-1]
-    pad = jnp.concatenate([off, jnp.zeros_like(off[..., :1])], axis=-1)
-    matrix = (jnp.eye(n) * diag[..., :, None]
-              + jnp.eye(n, k=1) * pad[..., :, None]
-              + jnp.eye(n, k=-1) * pad[..., None, :])
-    return jnp.linalg.eigvalsh(matrix)[..., -1]
+    values = jax.vmap(_selected_tridiagonal_value)(diag.reshape(-1, n), off.reshape(-1, n - 1))
+    return values.reshape(diag.shape[:-1])
 
 
-def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
-                    npoints: int, nturns: float) -> Array:
-    """Ballooning eigenvalues on full-mesh surface ``j`` -> ``(nalpha, nzeta0)``."""
-    hs = ctx["hs"]
-    s_j = ctx["s"][j]
-    sqrt_s = jnp.sqrt(s_j)
-    # Half-mesh neighbours of full surface j are half indices j (below) and
-    # j+1 (above): centered profile values/derivatives at s[j].
-    iotas, pres = ctx["iotas"], ctx["pres"]
-    iota = 0.5 * (iotas[j] + iotas[j + 1])
-    diota = (iotas[j + 1] - iotas[j]) / hs
-    dpres = (pres[j + 1] - pres[j]) / hs           # internal units: mu0 dp/ds
+def _richardson_eigenvalue(g: Array, c: Array, f: Array, h: Array) -> Array:
+    """Eigenvalue extrapolated to ``h -> 0`` from the grid and its every-other-point subgrid.
 
-    tabs = _surface_tables(ctx, j)
-    point = _make_point_fn(ctx["m"], ctx["xn"], tabs, iota, diota, ctx["phipf"][j])
+    The stencil's eigenvalue error is ``a h² + O(h⁴)``, so
+    ``(4 λ_h - λ_2h) / 3`` is fourth-order, as in COBRA's extrapolation
+    (Sanchez et al. 2000).  The subgrid reuses the same coefficient samples,
+    so the extrapolation costs one eigen-solve of half the size.
+    """
+    fine = _max_eigenvalue_tridiag(g, c, f, h)
+    coarse = _max_eigenvalue_tridiag(g[..., ::2], c[..., ::2], f[..., ::2], 2.0 * h)
+    return (4.0 * fine - coarse) / 3.0
+
+
+def _surface_lambda(ctx: dict, s: float, alphas: Array, zeta0s: Array,
+                    npoints: int, nturns: float, radial_order: int,
+                    richardson: bool) -> Array:
+    """Ballooning eigenvalues on the surface at normalized flux ``s`` -> ``(nalpha, nzeta0)``."""
+    ns = int(ctx["ns"])
+    nodes = np.linspace(0.0, 1.0, ns)
+    half = nodes[1:] - 0.5 / (ns - 1)
+    sqrt_s = jnp.sqrt(jnp.asarray(s, dtype=ctx["s"].dtype))
+    # iota and the pressure live on the half mesh; their local polynomials
+    # give the value and radial derivative at s (internal units: mu0 dp/ds).
+    iota, diota = _local_taylor(ctx["iotas"][1:], half, s, radial_order)[:2]
+    dpres = _local_taylor(ctx["pres"][1:], half, s, radial_order)[1]
+    phipf_s = _local_taylor(ctx["phipf"], nodes, s, radial_order)[0]
+
+    tabs = _surface_tables(ctx, None, s=s, order=radial_order)
+    point = _make_point_fn(ctx["m"], ctx["xn"], tabs, iota, diota, phipf_s)
 
     theta_b = jnp.pi * float(nturns)
     x = jnp.linspace(-theta_b, theta_b, int(npoints))
@@ -941,7 +1052,7 @@ def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
     L_ref, B_ref, sign_psi = ctx["L_ref"], ctx["B_ref"], ctx["sign_psi"]
     bmag = modB / B_ref
     gradpar = jnp.abs(L_ref * iota * b_sup_phi / modB)      # L_ref |b·∇θ*|
-    gds2 = gaa * (L_ref * L_ref) * s_j                      # |∇α|² L² ρ²
+    gds2 = gaa * (L_ref * L_ref) * s                        # |∇α|² L² ρ²
     gbdrift = (-2.0 * B_ref * L_ref * L_ref * sqrt_s * sign_psi
                * b_cross_gradb_dot_grad_alpha / (modB ** 3))
     cvdrift = gbdrift - (2.0 * B_ref * L_ref * L_ref * sqrt_s * dpres
@@ -951,7 +1062,8 @@ def _surface_lambda(ctx: dict, j: int, alphas: Array, zeta0s: Array,
     g = gradpar * gds2 / bmag
     c = -dp_drho * cvdrift / (gradpar * bmag)
     f = gds2 / (bmag ** 3 * gradpar)
-    return _max_eigenvalue_tridiag(g, c, f, h).reshape(alphas.shape[0], zeta0s.shape[0])
+    solve = _richardson_eigenvalue if richardson else _max_eigenvalue_tridiag
+    return solve(g, c, f, h).reshape(alphas.shape[0], zeta0s.shape[0])
 
 
 # ---------------------------------------------------------------------------
@@ -970,42 +1082,55 @@ def _validate_surface_index(s_index, ns: int) -> int:
     return j
 
 
-def _resolve_surfaces(s_indices, ns: int) -> tuple[int, ...]:
-    if s_indices is None:
-        fractions = (0.35, 0.6, 0.85)
-        s_indices = sorted({min(max(int(round(f * (ns - 1))), 2), ns - 2) for f in fractions})
-    return tuple(_validate_surface_index(j, ns) for j in s_indices)
+def _resolve_surfaces(surfaces, s_indices, ns: int) -> tuple[float, ...]:
+    """Normalized flux of every requested surface."""
+    if s_indices is not None:
+        if surfaces is not None:
+            raise ValueError("pass surfaces or s_indices, not both")
+        return tuple(_validate_surface_index(j, ns) / (ns - 1) for j in s_indices)
+    values = tuple(float(v) for v in np.atleast_1d(
+        (0.35, 0.6, 0.85) if surfaces is None else surfaces))
+    if not all(0.0 < v < 1.0 for v in values):
+        raise ValueError(f"surfaces must lie in (0, 1), got {values}")
+    return values
 
 
 def ballooning_lambda(
     state: SpectralState,
     rt: SolverRuntime,
     *,
+    surfaces: Sequence[float] | None = None,
     s_indices: Sequence[int] | None = None,
     alphas: Sequence[float] | None = None,
     zeta0s: Sequence[float] = (0.0,),
-    npoints: int = 121,
-    nturns: float = 3.0,
+    npoints: int = 321,
+    nturns: float = 5.0,
+    richardson: bool = True,
+    radial_order: int = 4,
 ) -> jnp.ndarray:
     """Most-unstable ideal-ballooning eigenvalue per field line (traceable).
 
     Solves the infinite-n ideal-ballooning eigenproblem (module docstring) on
-    the requested full-mesh surfaces and field lines of a converged core
-    state and returns the largest eigenvalue ``λ`` of each line, shaped
-    ``(len(s_indices), len(alphas), len(zeta0s))``.  ``λ > 0`` means
+    the requested flux surfaces and field lines of a converged core state and
+    returns the largest eigenvalue ``λ`` of each line, shaped
+    ``(n_surfaces, len(alphas), len(zeta0s))``.  ``λ > 0`` means
     ballooning-unstable with normalized squared growth rate
-    ``λ = (γ a_N/v_A)²``; ``λ < 0`` is the stable (oscillating) side.
+    ``λ = (γ a_N/v_A)²``; ``λ < 0`` is the stable side.
 
     Parameters
     ----------
+    surfaces:
+        Normalized toroidal flux ``s`` of each surface, any value in
+        ``(0, 1)``: the geometry and profiles are read from local radial
+        polynomials, so the same ``s`` is evaluated on every radial grid.
+        Default ``(0.35, 0.6, 0.85)``.
     s_indices:
-        Full-mesh surface indices, each in ``[2, ns - 2]``.  Default: three
-        surfaces at ~35/60/85 % of the radius.
+        Alternatively, full-mesh surface indices in ``[2, ns - 2]``.
     alphas:
-        Field-line labels ``α = θ* - ι (φ - ζ0)``.  Default: four lines
-        uniform in ``[0, π]``, since stellarator symmetry maps ``α -> -α``.
-        An asymmetric state has no such parity, so the default there spans
-        the full ``[0, 2π)`` instead.
+        Field-line labels ``α = θ* - ι (φ - ζ0)``.  Default: eight lines
+        uniform in ``[0, π]``, since stellarator symmetry maps ``α -> -α``;
+        an asymmetric state has no such parity, so the default there spans
+        ``[0, 2π)``.
     zeta0s:
         Ballooning parameters (the toroidal angle where the secular radial
         wavenumber vanishes).  Default ``(0,)``.  ``λ`` is least stable at a
@@ -1013,58 +1138,84 @@ def ballooning_lambda(
         single value under-reports ``max λ`` on three-dimensional states; scan
         it, and over both signs when the state is asymmetric.
     npoints, nturns:
-        Field-line grid: ``npoints`` points over ``θ* ∈ α ± nturns·π``
-        (COBRA-style domain; Gaur et al. use ``5π``, 3 turns is adequate for
-        optimization-grade accuracy at these resolutions).
+        Field-line grid: ``npoints`` (odd) points over ``θ* ∈ α ± nturns·π``.
+        The coefficients oscillate with the toroidal harmonics,
+        ``nfp·ntor/ι`` times per poloidal turn, so the grid must resolve
+        them: keep at least ~64 points per turn (the default).  An unstable
+        mode is localized and converged in domain by about three turns;
+        stable lines tend to ``λ -> 0⁻`` as the domain grows, which is why a
+        threshold should not sit below zero by less than that drift.
+    richardson:
+        Extrapolate the eigenvalue to ``h -> 0`` from the grid and its
+        every-other-point subgrid (:func:`_richardson_eigenvalue`).
+    radial_order:
+        Degree of the local radial polynomials: 4 (default) or 2, which at a
+        full-mesh surface is the three-point central difference.
     """
     ctx = _ballooning_context(state, rt)
-    js = _resolve_surfaces(s_indices, ctx["ns"])
+    ns = int(ctx["ns"])
+    values = _resolve_surfaces(surfaces, s_indices, ns)
+    if ns < int(radial_order) + 2:
+        raise ValueError(f"radial_order {radial_order} needs ns >= {int(radial_order) + 2}")
     dtype = ctx["s"].dtype
     if alphas is None:
         # Stellarator symmetry maps α -> -α, so [0, π] covers the family; an
         # asymmetric state has no such parity, exactly as COBRAVMEC disables
         # its half-domain shortcut for lasym (get_ballooning_grate.f:180).
-        default = (np.linspace(0.0, 2.0 * np.pi, 4, endpoint=False)
-                   if ctx["lasym"] else np.linspace(0.0, np.pi, 4))
+        default = (np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
+                   if ctx["lasym"] else np.linspace(0.0, np.pi, 8))
         alphas_arr = jnp.asarray(default, dtype=dtype)
     else:
         alphas_arr = jnp.atleast_1d(jnp.asarray(alphas, dtype=dtype))
     zeta0_arr = jnp.atleast_1d(jnp.asarray(zeta0s, dtype=dtype))
-    if int(npoints) < 7:
-        raise ValueError("npoints must be >= 7")
+    if int(npoints) < 7 or int(npoints) % 2 == 0:
+        raise ValueError("npoints must be odd and >= 7")
     return jnp.stack([
-        _surface_lambda(ctx, j, alphas_arr, zeta0_arr, int(npoints), float(nturns))
-        for j in js
+        _surface_lambda(ctx, s, alphas_arr, zeta0_arr, int(npoints), float(nturns),
+                        int(radial_order), bool(richardson))
+        for s in values
     ])
+
+
+def ballooning_residual(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    threshold: float = 0.0,
+    **lines,
+) -> Array:
+    """One least-squares row per field line: ``max(λ - threshold, 0)``.
+
+    The objective of Gaur et al. (2025) and DESC's ``BallooningStability``:
+    stable lines contribute nothing, unstable ones their excess, so the
+    optimizer works on every unstable line rather than on one smoothed
+    maximum.  The squared hinge is continuously differentiable.  ``lines``
+    are the keywords of :func:`ballooning_lambda`.  A negative ``threshold``
+    asks for a margin, but stable lines approach ``λ = 0⁻`` as ``nturns``
+    grows, so keep it well below that drift or at zero.
+    """
+    return jnp.maximum(ballooning_lambda(state, rt, **lines) - threshold, 0.0).ravel()
 
 
 def ballooning_growth_rate(
     state: SpectralState,
     rt: SolverRuntime,
     *,
-    s_indices: Sequence[int] | None = None,
-    alphas: Sequence[float] | None = None,
-    zeta0s: Sequence[float] = (0.0,),
-    npoints: int = 121,
-    nturns: float = 3.0,
-    reduction: str = "softmax",
-    temperature: float = 0.05,
+    reduction: str = "max",
+    temperature: float = 1.0e-4,
+    **lines,
 ) -> Array:
-    """Scalar ballooning objective: (smooth) max of λ over all field lines.
+    """Scalar ballooning objective: the largest λ over all sampled lines.
 
-    Reduces :func:`ballooning_lambda` over surfaces × field lines:
-    ``reduction="softmax"`` (default) uses the smooth upper bound
-    ``T · logsumexp(λ/T)`` (within ``T·log(N)`` of the hard max, fully
-    AD-friendly for the implicit-gradient lane); ``"max"`` returns the hard
-    maximum.  Drive it negative (e.g. target ``-0.01`` in
-    :func:`vmex.core.optimize.least_squares`) for stable-by-construction
-    campaigns; the signature is a two-positional ``(state, runtime)``
-    callable, so it works with both ``jac=None`` and ``jac="implicit"``.
+    ``reduction="max"`` (default) returns the hard maximum, differentiable
+    wherever one line dominates.  ``"softmax"`` returns
+    ``T · logsumexp(λ/T)``, an upper bound within ``T·log(N)`` of the
+    maximum over ``N`` lines; with ``λ ~ 1e-3`` the temperature must be far
+    below that, so it defaults to ``1e-4``.  For optimization prefer
+    :func:`ballooning_residual`.  ``lines`` are the keywords of
+    :func:`ballooning_lambda`.
     """
-    lam = ballooning_lambda(
-        state, rt, s_indices=s_indices, alphas=alphas, zeta0s=zeta0s,
-        npoints=npoints, nturns=nturns,
-    ).ravel()
+    lam = ballooning_lambda(state, rt, **lines).ravel()
     if reduction == "max":
         return jnp.max(lam)
     if reduction != "softmax":

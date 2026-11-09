@@ -18,7 +18,7 @@ from typing import Any, Protocol
 import jax.numpy as jnp
 import numpy as np
 
-from vmex.core.radial_basis import CubicBSplineBasis as CubicBSplineBasis
+from vmex.core.radial_basis import CubicBSplineBasis as CubicBSplineBasis, _apply_matrix
 
 Array = Any
 
@@ -163,26 +163,17 @@ class ChebyshevBasis:
     def differentiate(self, values: Array, *, axis: int = -1) -> Array:
         """Differentiate nodal values along ``axis`` with JAX operations."""
 
-        values = jnp.asarray(values)
-        moved = jnp.moveaxis(values, axis, 0)
-        result = jnp.tensordot(jnp.asarray(self.derivative_matrix), moved, axes=((1,), (0,)))
-        return jnp.moveaxis(result, 0, axis)
+        return _apply_matrix(jnp.asarray(self.derivative_matrix), values, axis)
 
     def differentiate_transpose(self, values: Array, *, axis: int = -1) -> Array:
         """Apply the transpose first-derivative matrix along ``axis``."""
 
-        values = jnp.asarray(values)
-        moved = jnp.moveaxis(values, axis, 0)
-        result = jnp.tensordot(jnp.asarray(self.derivative_matrix).T, moved, axes=((1,), (0,)))
-        return jnp.moveaxis(result, 0, axis)
+        return _apply_matrix(jnp.asarray(self.derivative_matrix).T, values, axis)
 
     def differentiate_twice(self, values: Array, *, axis: int = -1) -> Array:
         """Apply the CGL second-derivative matrix."""
 
-        values = jnp.asarray(values)
-        moved = jnp.moveaxis(values, axis, 0)
-        result = jnp.tensordot(jnp.asarray(self.second_derivative_matrix), moved, axes=((1,), (0,)))
-        return jnp.moveaxis(result, 0, axis)
+        return _apply_matrix(jnp.asarray(self.second_derivative_matrix), values, axis)
 
     def integrate(self, values: Array, *, axis: int = -1) -> Array:
         """Integrate nodal values over ``xi in [-1,1]``."""
@@ -200,10 +191,8 @@ class ChebyshevBasis:
         """Interpolate CGL values to arbitrary target nodes."""
 
         values = jnp.asarray(values)
-        matrix = jnp.asarray(self.interpolation_matrix(target_nodes), dtype=values.dtype)
-        moved = jnp.moveaxis(values, axis, 0)
-        result = jnp.tensordot(matrix, moved, axes=((1,), (0,)))
-        return jnp.moveaxis(result, 0, axis)
+        return _apply_matrix(jnp.asarray(self.interpolation_matrix(target_nodes), dtype=values.dtype),
+                             values, axis)
 
 
 @dataclass(frozen=True, eq=False)

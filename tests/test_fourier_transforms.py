@@ -3,7 +3,7 @@
 Covers the transform algebra that the (deleted) legacy A/B suite proved
 during the port:
 
-- ``real_to_fourier(fourier_to_real(x)) == x`` on band-limited data,
+- separable synthesis equals the direct mode sum,
 - ``tomnsps`` is the exact inverse of the ``totzsps``-style synthesis
   (fixaray.f dnorm normalization, including the lasym lane),
 - ``symforce_split`` recovers pure reflection parities exactly.
@@ -26,9 +26,8 @@ from vmex.core.nyquist import (
     wrout_sin_coeffs,
 )
 from vmex.core.transforms import (
-    _fourier_to_real_fft,
+    _PARITY_PLANES,
     fourier_to_real,
-    real_to_fourier,
     symforce_split,
     tomnsps,
 )
@@ -55,50 +54,6 @@ def _resolution(case) -> Resolution:
 
 def _seed(case) -> int:
     return sum((i + 1) * int(value) for i, value in enumerate(case))
-
-
-@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
-def test_synthesis_analysis_roundtrip(case):
-    """real_to_fourier(fourier_to_real(x)) == x on band-limited data.
-
-    On the reduced symmetric theta grid the cos and sin families are each
-    internally orthogonal (but not mutually), so the round trip is exact per
-    parity block; on the full lasym grid it is exact for both blocks jointly.
-    """
-    mpol, ntor, *_ = case
-    lasym = case[5]
-    res = _resolution(case)
-    trig = trig_tables(res)
-    modes = mode_table(mpol, ntor)
-
-    rng = np.random.default_rng(_seed(case) + 3)
-    coeff_cos = rng.standard_normal((NS, modes.mnmax))
-    coeff_sin = rng.standard_normal((NS, modes.mnmax))
-    # sin(m*theta - n*zeta) is identically zero for (m, n) = (0, 0).
-    coeff_sin[:, (modes.m == 0) & (modes.n == 0)] = 0.0
-
-    if lasym:
-        (field,) = fourier_to_real(
-            coeff_cos, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field, modes=modes, trig=trig, parity="both")
-        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
-        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
-    else:
-        zero = np.zeros_like(coeff_cos)
-        (field_cos,) = fourier_to_real(
-            coeff_cos, zero, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field_cos, modes=modes, trig=trig, parity="cos")
-        np.testing.assert_allclose(np.asarray(back_cos), coeff_cos, rtol=RTOL, atol=1e-12)
-        assert not np.any(np.asarray(back_sin))
-
-        (field_sin,) = fourier_to_real(
-            zero, coeff_sin, modes=modes, trig=trig, derivatives=("value",)
-        )
-        back_cos, back_sin = real_to_fourier(field_sin, modes=modes, trig=trig, parity="sin")
-        np.testing.assert_allclose(np.asarray(back_sin), coeff_sin, rtol=RTOL, atol=1e-12)
-        assert not np.any(np.asarray(back_cos))
 
 
 def test_lasym_nestor_surface_analysis_preserves_mode_signs():
@@ -145,6 +100,34 @@ def test_lasym_nestor_surface_analysis_preserves_mode_signs():
     )
 
 
+@pytest.mark.parametrize("case", CASES, ids=CASE_IDS)
+def test_separable_synthesis_matches_mode_sum_and_parity_planes(case):
+    """Separable synthesis equals the direct mode sum (``totzsps``) and its
+    poloidal parity planes partition it, for both toroidal stages."""
+    resolution = _resolution(case)
+    modes = mode_table(resolution.mpol, resolution.ntor)
+    trig = trig_tables(resolution)
+    rng = np.random.default_rng(_seed(case))
+    coeff = rng.standard_normal((2, 2, NS, modes.mnmax))
+    theta = 2 * np.pi * np.arange(trig.ntheta3) / trig.ntheta1
+    zeta = 2 * np.pi * np.arange(trig.cosnv.shape[0]) / (trig.cosnv.shape[0] * trig.nfp)
+    arg = (modes.m[:, None, None] * theta[None, :, None]
+           - modes.n[:, None, None] * trig.nfp * zeta[None, None, :])
+    c, s = np.cos(arg), np.sin(arg)
+    m, n = modes.m[:, None, None], (modes.n * trig.nfp)[:, None, None]
+    basis = {"value": (c, s), "dtheta": (-m * s, m * c), "dzeta": (n * s, -n * c)}
+    for use_fft in (False, True):
+        fields = fourier_to_real(*coeff, modes=modes, trig=trig, use_fft=use_fft)
+        planes = fourier_to_real(*coeff, modes=modes, trig=trig, use_fft=use_fft,
+                                 m_slices=_PARITY_PLANES)
+        for derivative, field, plane in zip(("value", "dtheta", "dzeta"), fields, planes):
+            bc, bs = basis[derivative]
+            expected = (np.einsum("...k,kij->...ij", coeff[0], bc)
+                        + np.einsum("...k,kij->...ij", coeff[1], bs))
+            np.testing.assert_allclose(field, expected, rtol=RTOL, atol=1e-11)
+            np.testing.assert_allclose(plane.sum(0), field, rtol=RTOL, atol=1e-11)
+
+
 def test_synthesis_accepts_nyquist_extended_trig_tables():
     """WOUT evaluates main-mode coefficients on Nyquist-extended grids."""
     base = Resolution(
@@ -158,8 +141,9 @@ def test_synthesis_accepts_nyquist_extended_trig_tables():
     coefficient_cos = rng.standard_normal((NS, modes.mnmax))
     coefficient_sin = rng.standard_normal((NS, modes.mnmax))
     kwargs = dict(modes=modes, derivatives=("value", "dtheta", "dzeta"))
-    actual = _fourier_to_real_fft(
-        coefficient_cos, coefficient_sin, trig=trig_tables(extended), **kwargs
+    actual = fourier_to_real(
+        coefficient_cos, coefficient_sin, trig=trig_tables(extended),
+        use_fft=True, **kwargs
     )
     expected = fourier_to_real(
         coefficient_cos, coefficient_sin, trig=trig_tables(base), **kwargs
@@ -168,8 +152,8 @@ def test_synthesis_accepts_nyquist_extended_trig_tables():
         np.testing.assert_allclose(left, right, rtol=RTOL, atol=1e-12)
 
 
-def test_fft_and_dense_synthesis_match_through_ad():
-    """The fast primal and lower-memory implicit path have matching AD."""
+def test_fft_and_matmul_synthesis_match_through_ad():
+    """The FFT and matmul toroidal stages have matching AD."""
     resolution = Resolution(
         mpol=4, ntor=2, ntheta=16, nzeta=12, nfp=3, lasym=True, ns=NS
     )
@@ -181,13 +165,12 @@ def test_fft_and_dense_synthesis_match_through_ad():
     tangents = tuple(jnp.asarray(rng.standard_normal(shape)) for _ in range(2))
 
     def synthesize(c, s, *, use_fft):
-        transform = _fourier_to_real_fft if use_fft else fourier_to_real
-        return transform(c, s, modes=modes, trig=trig)
+        return fourier_to_real(c, s, modes=modes, trig=trig, use_fft=use_fft)
 
     fast = lambda c, s: synthesize(c, s, use_fft=True)  # noqa: E731
-    dense = lambda c, s: synthesize(c, s, use_fft=False)  # noqa: E731
+    matmul = lambda c, s: synthesize(c, s, use_fft=False)  # noqa: E731
     values, tangent = jax.jvp(fast, primals, tangents)
-    dense_values, dense_tangent = jax.jvp(dense, primals, tangents)
+    dense_values, dense_tangent = jax.jvp(matmul, primals, tangents)
     for left, right in zip(values + tangent, dense_values + dense_tangent):
         np.testing.assert_allclose(left, right, rtol=2e-13, atol=2e-12)
     cotangent = tuple(jnp.asarray(rng.standard_normal(x.shape)) for x in values)

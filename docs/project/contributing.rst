@@ -42,7 +42,7 @@ The workflows obtain their selectors from the manifest:
   requests; ``Publish to PyPI`` runs on ``v*`` release tags only.
 - Every lane a manifest record names must be selected by one of these
   workflows or declared under ``local_only`` in ``tests/manifest.json`` with
-  the reason and the command (``tests/test_test_manifest.py`` enforces it).
+  the reason and the command (``tests/test_repo_consistency.py`` enforces it).
   ``gpu-smoke`` is the one local-only lane; see `GPU checks`_.
 - ``CI`` installs with ``uv`` and carries each test lane's XLA compilations
   from run to run (``tools/ci_compile_cache.py``). The cache is keyed on the
@@ -139,7 +139,7 @@ NVIDIA driver 580 or newer, without ``JAX_PLATFORMS`` or
   pip install -U "jax[cuda13]"
   pip install -e ".[coils,turbulence,freeb]" pytest
   pytest -q $(python tools/test_manifest.py select gpu-smoke)
-  python benchmarks/device_parity.py --quick --devices cpu,gpu --metrics quasisymmetry
+  python tools/device_parity.py --quick --devices cpu,gpu --metrics quasisymmetry
 
 With a GPU present, ``tests/test_gpu_ci.py`` fails if JAX does not select it
 by ordinary discovery or a platform pin is set; without one its GPU tests

@@ -57,6 +57,7 @@ base = replace(
 ### Run the scan ##############################################################
 
 print(f"free-boundary beta scan (EXTCUR held at {list(map(float, base.extcur[:2]))} A-turns)")
+print("The first point compiles the free-boundary solver (about 20 s on a laptop).")
 print(f"\n{'pres_scale':>11s} {'beta_tot':>10s} {'volume(m^3)':>12s} {'iters':>6s}")
 print(f"{'-'*11} {'-'*10} {'-'*12} {'-'*6}")
 

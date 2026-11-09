@@ -24,6 +24,7 @@ wout-file
 
 capabilities
 performance
+benchmarks
 ```
 
 ## Objectives and API

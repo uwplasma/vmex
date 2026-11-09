@@ -39,7 +39,7 @@ import jax.numpy as jnp
 
 from .fourier import ModeTable, TrigTables
 from .transforms import (
-    _fourier_to_real_fft,
+    _PARITY_PLANES,
     fourier_to_real,
     register_pytree_dataclass as _register,
 )
@@ -231,8 +231,8 @@ def real_space_geometry(
     s:
         Full-mesh radial grid, shape ``(ns,)`` (uniform, ``s in [0, 1]``).
     use_fft:
-        Use separable toroidal FFT synthesis; False retains the real dense
-        contraction used by the high-column implicit Jacobian.
+        Evaluate the toroidal stage of the separable synthesis with an inverse
+        real FFT instead of a matmul (same result to round-off).
     axis_closure:
         Apply VMEC's first-interior-row closure to the axis. Disable for a
         radial segment that does not begin on the magnetic axis.
@@ -251,23 +251,13 @@ def real_space_geometry(
         [jnp.asarray(R_sin), jnp.asarray(Z_sin), jnp.asarray(lambda_sin)], axis=0
     )
 
-    m = np.asarray(modes.m, dtype=int)
-    dtype = coeff_cos.dtype
-    # Poloidal-parity masks.  The odd plane is split into m=1 and m>=3 so the
-    # jmin1 axis rules can be applied per subset (jmin1(1)=1, jmin1(m>=2)=2).
-    mask_even = jnp.asarray((m % 2) == 0, dtype=dtype)
-    mask_m1 = jnp.asarray(m == 1, dtype=dtype)
-    mask_odd_rest = jnp.asarray((m % 2 == 1) & (m != 1), dtype=dtype)
-    mask_stack = jnp.stack([mask_even, mask_m1, mask_odd_rest], axis=0)
-
-    # (mask, field, ns, mnmax) batch; scalxc is exactly 1 for even m, so a
-    # single odd_m_sqrt_s=True synthesis serves all three parity subsets.
-    batched_cos = coeff_cos[None, ...] * mask_stack[:, None, None, :]
-    batched_sin = coeff_sin[None, ...] * mask_stack[:, None, None, :]
-    synthesize = _fourier_to_real_fft if use_fft else fourier_to_real
-    value, dtheta, dzeta = synthesize(
-        batched_cos,
-        batched_sin,
+    # Poloidal-parity planes: even m, m = 1 and odd m >= 3, so the jmin1 axis
+    # rules can be applied per subset (jmin1(1)=1, jmin1(m>=2)=2).  scalxc is
+    # exactly 1 for even m, so one odd_m_sqrt_s=True synthesis serves all
+    # three, and each subset only contracts its own poloidal modes.
+    value, dtheta, dzeta = fourier_to_real(
+        coeff_cos,
+        coeff_sin,
         modes=modes,
         trig=trig,
         derivatives=("value", "dtheta", "dzeta"),
@@ -275,6 +265,8 @@ def real_space_geometry(
         odd_m_sqrt_s=True,
         odd_m_scaling=odd_m_scaling,
         s=s,
+        use_fft=use_fft,
+        m_slices=_PARITY_PLANES,
     )
 
     def odd_internal(plane: Array, field: int) -> Array:

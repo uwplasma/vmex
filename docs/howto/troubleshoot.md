@@ -74,6 +74,4 @@ iteration traces part ways. Both are described in `tools/README.md`.
 ## Performance surprises
 
 A GPU run slower than CPU is usually the policy being right: small decks and
-high mode counts are measured CPU winners ({doc}`run-on-gpu`). For memory or
-compile-time profiles, `benchmarks/profile_workflows.py` records cold-vs-warm wall
-time and peak RSS per hot path.
+high mode counts are measured CPU winners ({doc}`run-on-gpu`).

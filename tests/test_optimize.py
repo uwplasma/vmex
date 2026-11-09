@@ -179,6 +179,25 @@ def test_boundary_elongation_is_traceable_and_grid_converged(solovev_eq):
     assert np.max(np.abs(gradient)) > 0.0
 
 
+
+def test_min_boundary_curvature_radius_matches_dense_geometry(solovev_eq):
+    """The smallest boundary curvature radius agrees with a dense independent curve."""
+    eq = solovev_eq
+    inp = eq.inp
+    theta = np.linspace(0.0, 2.0 * np.pi, 4096, endpoint=False)
+    m = np.arange(inp.rbc.shape[1])
+    R = np.cos(np.outer(theta, m)) @ inp.rbc[inp.ntor]
+    Z = np.sin(np.outer(theta, m)) @ inp.zbs[inp.ntor]
+    h = theta[1]
+    R1, Z1 = ((np.roll(f, -1) - np.roll(f, 1)) / (2 * h) for f in (R, Z))
+    R2, Z2 = ((np.roll(f, -1) - 2 * f + np.roll(f, 1)) / h**2 for f in (R, Z))
+    dense = np.min((R1**2 + Z1**2)**1.5 / np.abs(R1 * Z2 - Z1 * R2))
+    radius = opt.min_boundary_curvature_radius(eq.state, eq.runtime)
+    np.testing.assert_allclose(float(radius), dense, rtol=1e-3)  # sampled minimum
+    gradient = jax.grad(lambda z_sin: opt.min_boundary_curvature_radius(
+        dataclasses.replace(eq.state, Z_sin=z_sin), eq.runtime))(eq.state.Z_sin)
+    assert np.all(np.isfinite(np.asarray(gradient))) and np.max(np.abs(np.asarray(gradient))) > 0.0
+
 def test_solve_equilibrium_forwards_verbose(monkeypatch, solovev_eq):
     """The public final-solve helper exposes the VMEC iteration table flag."""
     captured = {}
@@ -268,6 +287,17 @@ def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     fd = (opt.min_abs_iota(plus, eq.runtime)
           - opt.min_abs_iota(minus, eq.runtime)) / (2.0 * h)
     np.testing.assert_allclose(float(jvp), float(fd), rtol=2e-5, atol=1e-10)
+
+
+def test_hinge_is_zero_inside_its_band_and_the_distance_outside(solovev_eq):
+    eq = solovev_eq
+    ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
+    assert ratio.shape == (3,) and np.all((ratio > 0) & (ratio <= 1))
+    inside = opt.Hinge(opt.edge_jacobian_ratio, floor=0.0, ceiling=1.0)
+    assert np.all(np.asarray(inside(eq.state, eq.runtime)) == 0.0)
+    above = opt.Hinge(opt.edge_jacobian_ratio, floor=1.5)
+    np.testing.assert_allclose(above(eq.state, eq.runtime), 1.5 - ratio, rtol=1e-12)
+    assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
 
 
 def test_scalar_targets_vs_golden(solovev_eq):
@@ -1232,7 +1262,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     monkeypatch.setattr(opt.jax, "device_get", fail_device_get)
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     assert scalar.fun(scalar.x0) == failed_value
     holder["scalar_certified"] = False
@@ -1252,7 +1282,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     holder["scalar_certified"] = True
     scalar._vg_cache = None
     failed_value, failed_gradient = scalar.value_and_grad(scalar.x0)
-    assert failed_value == wall
+    np.testing.assert_allclose(failed_value, wall, rtol=1e-14)  # jitted seed cost
     np.testing.assert_array_equal(failed_gradient, np.zeros_like(scalar.x0))
     monkeypatch.setattr(opt.jax, "device_get", real_device_get)
 
@@ -1624,8 +1654,10 @@ def test_subproblem_ladder_compiles_once():
             # compile once per process on first use; whether an earlier test
             # on the same xdist worker already paid them is order-dependent.
             name = re.match(r"Compiling jit\((\w+)\)", record.getMessage())
+            # Private jnp helpers (jit(_where), jit(_power)) are the same.
+            op = name[1].lstrip("_") if name else ""
             self.count += bool(name) and not (
-                hasattr(jax.numpy, name[1]) or hasattr(jax.lax, name[1]))
+                hasattr(jax.numpy, op) or hasattr(jax.lax, op))
 
     inp = _ladder_input()
     terms = [(opt.aspect_ratio, 4.0, 1.0)]
@@ -1751,7 +1783,8 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
         calls.append(initial_state)
         warm = initial_state is not None
         return SimpleNamespace(converged=not warm, fsqr=1e-6 if warm else 1e-13,
-                               fsqz=0.0, fsql=0.0, iterations=10, state=None)
+                               fsqz=0.0, fsql=0.0, iterations=10, state=None,
+                               fsq_history=np.full((10, 6), 1e-6))
 
     monkeypatch.setattr(im, "solve", fake_solve)
     monkeypatch.setattr(im, "input_with_params", lambda inp, params: inp)
@@ -1763,6 +1796,31 @@ def test_budget_exhausted_warm_seed_falls_through_to_cold(monkeypatch):
     im._HOT_CACHE[cfg] = "warm"
     result = im._host_solve(cfg, {"leaf": np.zeros(1)})
     assert calls == ["warm", None] and result.converged
+    # Two budget-limited warm rungs agree: the cold rung is skipped.
+    calls.clear()
+    im._LAST_SOLVE.pop(cfg, None)
+    im._HOT_CACHE[cfg], im._PERTURB_SEED[cfg] = "warm", "perturb"
+    assert not im._host_solve(cfg, {"leaf": np.ones(1)}).converged
+    assert calls == ["perturb", "warm"]
+    assert im._SOLVE_STATS[cfg]["abandoned_rungs"] == 1
+
+
+def test_rung_probe_abandons_a_rung_that_retraces_an_exhausted_one():
+    from types import SimpleNamespace
+
+    from vmex.core import implicit as im
+
+    reference = np.logspace(-2, -8, 100)  # best fsq of an exhausted rung
+    stop = im._rung_probe(reference)
+
+    def carry(iteration, fsq):
+        trajectory = np.zeros((100, 11))
+        trajectory[:, 1] = fsq
+        return SimpleNamespace(iteration=iteration, trajectory=trajectory)
+
+    assert not stop(carry(19, reference))  # before the probe point
+    assert stop(carry(20, reference))  # retraces the exhausted rung
+    assert not stop(carry(20, reference / 100.0))  # clearly ahead: keep going
 def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     from types import SimpleNamespace
 
@@ -1778,3 +1836,50 @@ def test_report_targets_prints_one_verdict_line(capsys, monkeypatch):
     out = capsys.readouterr().out.splitlines()
     assert out == ["Targets met.", "Targets NOT met: beta 0.02 below 0.025.",
                    "Targets NOT met: aspect 6.5 above 6.3; min |iota| 0.4 below 0.42."]
+
+
+def test_qi_residual_is_continuous_with_a_soft_minimum():
+    """The grid argmin makes the constructed-QI residual jump; the softmin does not.
+
+    A sine harmonic slides the well minimum along the field line.  With the
+    grid argmin the total jumps by ~2e-4, 200x its median step, each time the
+    minimum crosses a grid cell or a branch crossing reaches the period end;
+    with ``argmin_softness`` the largest step is ~10x the median, the
+    curvature of a continuous function sampled at 2.5e-3.
+    """
+    xm, xn = np.array([0, 0, 1]), np.array([0, 2, 2])
+
+    def total(t, softness):
+        return float(opt.quasi_isodynamic_residual(
+            bmnc_b=np.array([[1.0, 0.15, 0.04]]), bmns_b=np.array([[0.0, 0.15 * t, 0.0]]),
+            xm_b=xm, xn_b=xn, iota_b=np.array([0.6]), nfp=2, nphi=31, nalpha=5,
+            n_bounce=9, argmin_softness=softness)["total"])
+
+    ts = np.linspace(0.0, 0.3, 121)
+    hard = np.abs(np.diff([total(t, 0.0) for t in ts]))
+    soft = np.abs(np.diff([total(t, 1.0e-2) for t in ts]))
+    assert hard.max() > 50.0 * np.median(hard)
+    assert soft.max() < 15.0 * np.median(soft)
+
+
+def test_restart_source_prefers_the_equilibrium_state():
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    eq = opt.Equilibrium(inp=inp, state="state", runtime=None, result=None)
+    eq.__dict__["wout"] = "wout"  # cached_property slot: no wout is built
+    assert opt._restart_source(eq, inp) == "state"
+    assert opt._restart_source(eq, inp.change_resolution(mpol=inp.mpol + 1, ntor=inp.ntor)) == "wout"
+    assert opt._restart_source("path", inp) == "path"
+
+
+def test_l_grad_b_excess_rows_and_weighted_well(solovev_eq):
+    state, runtime = solovev_eq.state, solovev_eq.runtime
+    minimum = float(opt.l_grad_b_state(state, runtime))
+    assert not np.any(opt.l_grad_b_excess_state(state, runtime, target=.5*minimum))
+    rows = opt.l_grad_b_excess_state(state, runtime, target=2*minimum)
+    assert rows.size == 24*24 and float(rows.max()) == pytest.approx(1.0, rel=1e-12)
+    same = opt.weighted_magnetic_well(state, runtime, inner=jnp.ones_like, outer=jnp.ones_like)
+    assert float(same) == 0.0
+    vp = np.abs(np.asarray(solovev_eq.wout.vp))[1:]
+    s = (np.arange(vp.size) + .5)/vp.size
+    well = opt.weighted_magnetic_well(state, runtime, inner=lambda x: 1 - x, outer=lambda x: x)
+    assert float(well) == pytest.approx(np.sum((1 - 2*s)*vp)/np.sum(vp), rel=1e-6)

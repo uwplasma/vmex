@@ -49,7 +49,7 @@ def render(baseline: dict) -> str:
         v2k_txt, v2k = _cell(row.get("vmec2000"))
         cold_txt, _ = _cell(row.get("vmex_cold"))
         warm_txt, warm = _cell(row.get("vmex_warm"))
-        ref_txt, _ = _cell(row.get("vmecpp"))
+        ref_txt, _ = _cell(row.get("cpp_vmec"))
         if warm is not None and v2k is not None and warm < v2k:
             warm_txt = f"**{warm_txt}**"
         rows.append((v2k if v2k is not None else float("inf"), label, v2k_txt, cold_txt, warm_txt, ref_txt))
@@ -67,7 +67,7 @@ def render(baseline: dict) -> str:
         "     - VMEC2000",
         "     - vmex cold",
         "     - vmex warm",
-        "     - VMEC++",
+        "     - external C++",
     ]
     for _, label, v2k_txt, cold_txt, warm_txt, ref_txt in rows:
         lines += [

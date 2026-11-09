@@ -13,7 +13,7 @@ Usage::
     python tools/update_figure_manifest.py           # rewrite in place
     python tools/update_figure_manifest.py --check   # exit 1 when stale
 
-``tests/test_figure_provenance.py`` runs the same comparison, so a figure
+``tests/test_repo_consistency.py`` runs the same comparison, so a figure
 that changes without its row fails CI rather than shipping unexplained.
 """
 

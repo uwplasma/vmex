@@ -32,7 +32,7 @@ All spectral outputs are in the signed-(m, n) helical packing of
 state — in the m = 1 *constrained* basis evolved by the solver
 (``residue.f90`` / ``readin.f`` ``lconm1``).  Geometry synthesis
 (:func:`vmex.core.geometry.real_space_geometry`) consumes the *physical*
-basis; :func:`geometry_state` performs the conversion
+basis; ``_geometry_state_arrays`` performs the conversion
 (:func:`vmex.core.residuals.m1_constrained_to_physical` + the 3D lambda
 axis closure).
 
@@ -78,7 +78,6 @@ __all__ = [
     "validate_torflux_monotone",
     "interior_guess",
     "guess_axis",
-    "geometry_state",
     "run_setup",
 ]
 
@@ -170,7 +169,7 @@ class RunSetup:
     ``(ns, mnmax)`` — internal-normalized, m = 1-*constrained* spectral
     coefficients (the solver's evolution basis) — and ``lambda_cos/
     lambda_sin`` (zero; ``profil1d.f`` zeroes the lambda block of ``xc``).
-    Use :func:`geometry_state` to obtain the physical-basis inputs of
+    ``_geometry_state_arrays`` gives the physical-basis inputs of
     :func:`vmex.core.geometry.real_space_geometry`.
 
     Static metadata: ``signgs`` (always -1), ``lflip``, ``lasym``, ``lthreed``,
@@ -265,6 +264,63 @@ def radial_grids(ns: int, *, dtype=jnp.float64) -> RadialGrids:
 # ---------------------------------------------------------------------------
 
 
+def _volume_cubic(rbc, rbs, zbc, zbs, inp: VmecInput):
+    """``(A, B)`` with ``V(c) = A c^2 + B c^3`` the volume when the ``m > 0``
+    harmonics are scaled by ``c``.  ``V = 2 pi^2 <R^2 dZ/dtheta>`` is exact on
+    the ``(3 mpol, 3 ntor)`` grid used here, and ``<R_0^2 dZ/dtheta> = 0``.
+    """
+    mpol, ntor, nfp = int(inp.mpol), int(inp.ntor), int(inp.nfp)
+    theta = 2.0 * np.pi * np.arange(3 * mpol + 2) / (3 * mpol + 2)
+    zeta = 2.0 * np.pi * np.arange(3 * ntor + 1) / ((3 * ntor + 1) * nfp)
+    m = np.arange(mpol)
+    angle = m * theta[:, None, None, None] - (np.arange(-ntor, ntor + 1)[:, None] * nfp
+                                             * zeta[:, None, None])
+    cos, sin = np.cos(angle), np.sin(angle)
+    r0 = jnp.sum((m == 0) * (rbc * cos + rbs * sin), axis=(-2, -1))
+    r1 = jnp.sum((m > 0) * (rbc * cos + rbs * sin), axis=(-2, -1))
+    z1 = jnp.sum(m * (zbs * cos - zbc * sin), axis=(-2, -1))
+    return (4.0 * np.pi**2 * jnp.mean(r0 * r1 * z1),
+            2.0 * np.pi**2 * jnp.mean(r1**2 * z1))
+
+
+def boundary_volume(inp: VmecInput) -> float:
+    """Volume [m^3] enclosed by the input boundary, without solving."""
+    return abs(float(sum(_volume_cubic(inp.rbc, inp.rbs, inp.zbc, inp.zbs, inp))))
+
+
+def rescale_boundary_volume(rbc, rbs, zbc, zbs, inp: VmecInput):
+    """``TVOLUME``/``LVOLUME_RFIX``: scale the boundary to enclose ``tvolume``.
+
+    Without ``lvolume_rfix`` every harmonic is scaled by
+    ``(tvolume/V)^(1/3)``.  With it the ``m = 0`` harmonics (axis shape and
+    major radius) are held and the ``m > 0`` harmonics are scaled by ``c``,
+    with ``V(c) = A c^2 + B c^3`` solved exactly by Newton's method, where
+    VMEC2000 uses the Pappus estimate ``c = sqrt(tvolume/V)``.  Like VMEC2000,
+    it does nothing for a free-boundary run (``lfreeb``).  Traceable:
+    the scale factor carries the derivative of the volume constraint.
+
+    An optimizer's raw boundary coefficients therefore hold a null direction:
+    the overall scale of what gets rescaled (the ``m > 0`` harmonics with
+    ``lvolume_rfix``, every harmonic otherwise) does not change the solved
+    boundary.  Trust-region least squares tolerates it; hold one such
+    coefficient fixed for a nonsingular Jacobian (a fixed ``RBC(0,0)`` already
+    does so without ``lvolume_rfix``).
+    """
+    if inp.tvolume <= 0.0 or inp.lfreeb:  # VMEC2000 skips free boundary: the coils fix the size
+        return rbc, rbs, zbc, zbs
+    rbc, rbs, zbc, zbs = (jnp.asarray(x, dtype=float) for x in (rbc, rbs, zbc, zbs))
+    a, b = _volume_cubic(rbc, rbs, zbc, zbs, inp)
+    target = float(inp.tvolume) * jnp.sign(a + b)
+    if not inp.lvolume_rfix:
+        scale = jnp.cbrt(target / (a + b))
+        return rbc * scale, rbs * scale, zbc * scale, zbs * scale
+    c = jnp.sqrt(target / (a + b))
+    for _ in range(10):
+        c = c - (a * c**2 + b * c**3 - target) / (2.0 * a * c + 3.0 * b * c**2)
+    scale = jnp.where(np.arange(int(inp.mpol)) > 0, c, 1.0)
+    return rbc * scale, rbs * scale, zbc * scale, zbs * scale
+
+
 def _lasym_delta_rotation(rbc, rbs, zbc, zbs, *, mpol: int, ntor: int):
     """``readin.f`` lasym normalization: rotate theta so ``RBS(0,1) = ZBC(0,1)``.
 
@@ -308,6 +364,8 @@ def _internal_blocks_from_input(inp: VmecInput) -> tuple[dict[str, np.ndarray], 
     rbs = np.asarray(inp.rbs, dtype=float).copy()
     zbc = np.asarray(inp.zbc, dtype=float).copy()
     zbs = np.asarray(inp.zbs, dtype=float).copy()
+    rbc, rbs, zbc, zbs = (np.array(a) for a in
+                          rescale_boundary_volume(rbc, rbs, zbc, zbs, inp))
     if lasym:
         rbc, rbs, zbc, zbs = _lasym_delta_rotation(rbc, rbs, zbc, zbs,
                                                    mpol=mpol, ntor=ntor)
@@ -630,7 +688,9 @@ def flux_profiles(
     torflux, torflux_deriv = _torflux_functions(inp.aphi)
 
     two_pi = 2.0 * np.pi
-    psi_edge = jnp.asarray(signgs * inp.phiedge / two_pi, dtype=dtype)
+    # readin.f: phiedge = phiedge*bloat; BLOAT = 0 means 1 here as there.
+    bloat = inp.bloat if float(inp.bloat) != 0.0 else 1.0
+    psi_edge = jnp.asarray(signgs * inp.phiedge * bloat / two_pi, dtype=dtype)
     torflux_edge = psi_edge
     tf1 = torflux(jnp.asarray(1.0, dtype=dtype))
     torflux_edge = jnp.where(tf1 != 0.0, torflux_edge / jnp.where(tf1 != 0.0, tf1, 1.0),
@@ -1015,21 +1075,6 @@ def _geometry_state_arrays(
         R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
         lambda_cos=lambda_cos,
         lambda_sin=apply_lambda_axis_closure(lambda_sin, modes=modes, ntor=ntor),
-    )
-
-
-def geometry_state(setup: RunSetup, *, modes: ModeTable) -> dict[str, Array]:
-    """Convert the evolution-basis state into geometry-synthesis inputs.
-
-    Applies :func:`vmex.core.residuals.m1_constrained_to_physical`
-    (``residue.f90`` — undo the internal m = 1 constraint) and the 3D lambda
-    axis closure (``totzsp_mod.f``); the result is the keyword dict expected
-    by :func:`vmex.core.geometry.real_space_geometry`.
-    """
-    return _geometry_state_arrays(
-        (setup.R_cos, setup.R_sin, setup.Z_cos, setup.Z_sin,
-         setup.lambda_cos, setup.lambda_sin),
-        modes=modes, lthreed=setup.lthreed, lasym=setup.lasym, lconm1=setup.lconm1,
     )
 
 

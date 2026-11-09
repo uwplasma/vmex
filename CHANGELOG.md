@@ -1,9 +1,40 @@
 # Changelog
 
-Release notes are mirrored from the GitHub releases, which carry each release
-in full. A number appears here only where a committed artifact backs it, and
-`benchmarks/INDEX.md` lists every benchmark artifact with its generator, the
-revision it was measured at, and the pages that cite it.
+Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
+
+## 0.13.0 - 2026-11-03
+
+- **Self-consistent bootstrap at the ambipolar E_r.** `examples/optimization/QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to DKX's `<j.B>` at each surface's ambipolar `E_r` (`KineticBootstrapMismatch(ambipolar=True)`) with QI shape stages, and asserts that the final equilibrium current matches DKX within 5 % rms on the kinetic surfaces. `self_consistent_bootstrap` gains `current_model` and `initial_state`. Needs `dkx>=2.12.0`, now the floor of the `dkx` extra.
+- Add pwO vacuum, finite-beta and coil examples with independent transport checks.
+- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid; fix constructed-QI first-wall interpolation under a shifted toroidal origin.
+- `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
+
+## 0.12.0 - 2026-10-21
+
+- **Faster optimization.** Implicit executables are keyed on problem structure
+  and share one block factorization: QA stage compile 32-40 s to 24-27 s, a
+  second stage of the same shape 24-38 s to 13-15 s, peak memory about 30 %
+  lower (#599, #618). Adjoint tolerances are traced, so changing one no longer
+  recompiles (#623). Rejected trials stop early (#608), the Jacobian reuses the
+  refinement's block bands (#622), and multi-stage examples share one problem
+  (#621). Geometry synthesis is separable, 10-15 % faster warm solves (#597).
+- **Ballooning stability** is resolved along the field line (Richardson step,
+  fourth-order radial reads) and matches COBRAVMEC within 1.7 %; the hard
+  maximum is the default and the Jacobian is 6x cheaper (#589).
+- **Free boundary:** opt-in Newton anchoring (`solve_free_boundary_newton`, #575),
+  opt-in position control (`LPOSITION_CONTROL`, #570), a DEL-BSQ gate and a
+  coil-gradient test for single-stage runs (#614).
+- Opt-in radial preconditioner for the m = 0 lambda force,
+  `lambda_m0_floor=1e-3` (#598). 3-D force polishing with prescribed current (#558).
+- `boozer_spectrum_state(..., geometry=True)` returns the Boozer R, Z, nu and
+  Jacobian spectra (#610). Tracing takes explicit energy, mass and charge (#540).
+- JAX 0.12 support: the on-axis coil field stays differentiable (#620).
+- Every example finishes in under five minutes on a laptop and prints
+  progress (#562). README and docs restructured, with ballooning, polishing
+  and MRX sections and a CLI reference (#605, #617, #540).
+- CI runs all seven VMEC2000 golden-digest cases on every PR (#616); a
+  packaging-triggered and weekly install check covers Linux, macOS and Windows
+  (#588). `neo-jax>=1.0.6` (#588). About 880 fewer source lines (#601, #602).
 
 ## 0.11.11 - 2026-10-18
 
@@ -99,8 +130,7 @@ revision it was measured at, and the pages that cite it.
 - An outdated or missing optional dependency (ESSOS, virtual-casing-jax,
   neo-jax, GKX) now fails with the `pip install -U` command that fixes it,
   and the import guard also covers `booz_xform_jax` and `solvax` (#496).
-- No `RuntimeWarning` when no alpha is lost, and the terminal progress line
-  is cleared properly (#496).
+- No `RuntimeWarning` when no alpha is lost, and the terminal progress line is cleared properly (#496).
 
 ## 0.11.5 - 2026-09-28
 
@@ -165,32 +195,6 @@ surface, optimization results are the states the objective scored (#427), and
 the optimization examples were re-tuned against a five-minute budget. Full
 notes in the GitHub release.
 
-## 0.11.0 - 2026-09-21
-
-The interior field is built from the native VMEC form (#403), with a C2
-radial interpolant; radial lifts reject under-determined spline fits (#414),
-stalled restarts get one deterministic cold retry, and warm workflow profiles
-time every stage (#420). Full notes in the GitHub release.
-
-## 0.10.0 - 2026-09-20
-
-The interior field's geometry table carried a spurious `sqrt(s)` on every
-odd-`m` coefficient, which put `li383_low_res` surfaces 1.2 cm (R) and 5.9 cm
-(Z) off at mid-radius; it now reproduces the wout table to 6.7e-16 m and all
-126 adjacent surface pairs nest. Points well outside the plasma return NaN
-instead of raising, the inversion starts from the best of three seeds, and a
-query on the magnetic axis no longer returns NaN. Full notes in the GitHub
-release.
-
-## 0.9.1 - 2026-09-16
-
-Optimization gradients compile on a machine that has a GPU (the host-callback
-pin now applies only within one platform; jax-ml/jax#40722), the coil examples
-install from PyPI (`essos>=0.17`, new `all` extra), `max_fsq_ratio` defaults to
-`1e2`, and the exterior field sizes its source grid from the boundary (4.31e-07
-one minor radius out on the QA wout, against 2.46e-02 before). Full notes in
-the GitHub release.
-
-## 0.9.0 and earlier
+## 0.11.0 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).

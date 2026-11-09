@@ -66,6 +66,7 @@ __all__ = [
     "m1_physical_to_constrained",
     "m1_residue_rotation",
     "zero_m1_z_force",
+    "hold_m1_family",
     "m1_zero_condition",
     "edge_force_condition",
     "scalxc_scale_force",
@@ -361,6 +362,31 @@ def zero_m1_z_force(force: SpectralForce, enabled: Array) -> SpectralForce:
     return replace(force, **updates) if updates else force
 
 
+def hold_m1_family(state, source, modes: ModeTable, *, lasym: bool):
+    """``state`` with the m=1 constrained coordinate taken from ``source``.
+
+    ``(Rss - Zcs)/2`` (lasym: ``(Rsc - Zcc)/2``, all n), whose force
+    :func:`zero_m1_z_force` zeroes: the antisymmetric ``Z_sin`` part of each
+    ``(+n, -n)`` pair (lasym: the symmetric ``Z_cos`` part).  The lasym
+    ``n = 0`` entry is an exact theta-origin gauge and stays released.
+    """
+    m, n = np.asarray(modes.m, dtype=int), np.asarray(modes.n, dtype=int)
+    index = {(a, b): k for k, (a, b) in enumerate(zip(m, n))}
+    pos, neg = (np.asarray([index[(1, k * j)] for j in range(1, int(n.max()) + 1)], dtype=int) for k in (1, -1))
+
+    def take(x, y, sign):
+        x, y = jnp.asarray(x), jnp.asarray(y)
+        d = 0.5 * ((y[:, pos] - x[:, pos]) + sign * (y[:, neg] - x[:, neg]))
+        return x.at[:, pos].add(d).at[:, neg].add(sign * d)
+
+    if not pos.size:
+        return state
+    out = {"Z_sin": take(state.Z_sin, source.Z_sin, -1.0)}
+    if lasym:
+        out["Z_cos"] = take(state.Z_cos, source.Z_cos, 1.0)
+    return replace(state, **out)
+
+
 def m1_zero_condition(*, fsqz_previous: Array, iterations_since_restart: Array) -> Array:
     """Traced release condition for :func:`zero_m1_z_force` (``residue.f90``).
 
@@ -585,12 +611,33 @@ def apply_radial_preconditioner(
     return (result, safe) if return_safe else result
 
 
-def apply_lambda_preconditioner(force: SpectralForce, faclam: Array) -> SpectralForce:
+def apply_lambda_preconditioner(
+    force: SpectralForce, faclam: Array, m0_radial: Any = None,
+) -> SpectralForce:
     """Scale the lambda force blocks by ``faclam`` (``residue.f90``:
     ``gcl = faclam*gcl``; ``faclam`` from
-    :func:`vmex.core.preconditioner.lamcal`)."""
+    :func:`vmex.core.preconditioner.lamcal`).
+
+    With ``m0_radial`` (:func:`vmex.core.preconditioner.lamcal_m0_radial`)
+    the ``m = 0, n >= 1`` columns are instead solved against the radial
+    tridiagonal lambda block.
+    """
     faclam = jnp.asarray(faclam)
     updates = _map_blocks(force, _LAMBDA_BLOCKS, lambda b: b * faclam.astype(b.dtype))
+    if m0_radial is not None:
+        from solvax import tridiagonal_solve
+
+        sup, sub, diag = (jnp.asarray(x)[:, 1:] for x in m0_radial)
+        identity_axis = diag.at[0].set(1.0)
+        for name, axis_copy in (("force_lambda_cs", True), ("force_lambda_cc", False)):
+            block = getattr(force, name)
+            if block is None or block.shape[2] < 2:
+                continue
+            # totzsps copies lambda_1 into the symmetric axis row only.
+            d = identity_axis.at[1].add(diag[0]) if axis_copy else identity_axis
+            rhs = jnp.asarray(block)[:, 0, 1:].at[0].set(0.0)
+            x = tridiagonal_solve(sub, d, sup, rhs, method="thomas")
+            updates[name] = updates[name].at[:, 0, 1:].set(x.astype(block.dtype))
     return replace(force, **updates)
 
 

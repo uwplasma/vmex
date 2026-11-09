@@ -5,6 +5,45 @@ accelerator. The default `auto` uses a workload heuristic from an earlier
 benchmark campaign; it does not measure your hardware or guarantee a speedup.
 Compare CPU and GPU on your workload before choosing a device.
 
+## Running on CPU, GPU and whole nodes
+
+The defaults should cover most runs. They do the following:
+
+- **Precision and cache.** float64, and a compilation cache under `~/.cache/vmex/jax_cache`, split per machine.
+- **CPU threads.** One solve uses XLA's thread pool over the CPUs the process may use.
+- **Device.** `auto` chooses per stage from problem size (below). Mirror solves and the dense vacuum
+  factor stay on CPU.
+- **GPU memory.** Allocated on demand, so several processes can share a GPU.
+- **Several GPUs.** A solve uses the first GPU unless you pass a `jax.Device`. VMEX does not shard one
+  solve across GPUs, and no multi-GPU speedup of one solve has been measured.
+- **Ensembles and finite differences.** `workers=None` runs up to one thread per available CPU,
+  honouring affinity and the scheduler's allocation.
+- **Jacobian chunks.** `jac_chunk_size="auto"` bounds memory and avoids compiling a second graph.
+
+| Setting | Default | Change it when |
+| --- | --- | --- |
+| `device=` / `--device` | `auto` | Your timing shows the other device wins: the crossover varies by machine. `auto` runs eager free-boundary gradients on the GPU when the problem is large, and falls back to the CPU if GPU memory runs out |
+| `device=jax.devices("gpu")[i]` | first GPU | You assign independent cases to separate GPUs |
+| `workers=` | available CPUs, at most one per case | Sharing a node, or the case count exceeds what the cores can run well: each worker also uses XLA threads |
+| `adjoint_solver=` (free boundary) | `boundary_schur` | Use `coupled_gcrot` only to cross-check a gradient, or when the banded factor does not fit host memory |
+| `jac_chunk_size=` | `auto` | Memory runs out (smaller), or memory is ample and Jacobians are slow (larger) |
+| `NPROC`, `OPENBLAS_NUM_THREADS` | `min(available_cpus(), 16)` when unset | Set per-process shares before JAX backend initialization (`NPROC`) or BLAS loading; existing values are preserved |
+| `VMEX_COMPILATION_CACHE_DIR` | under `~/.cache` | The home filesystem is slow or small, or a cluster needs a shared path; `disabled` turns the cache off |
+| `XLA_PYTHON_CLIENT_PREALLOCATE=true` | `false` | A dedicated GPU, one process, and you want JAX's preallocation |
+| `VMEX_FAST_COMPILE=1` | off | Short CPU runs dominated by compile time; warm kernels get slightly slower |
+
+Measured on one Xeon W-2295 (36 logical CPUs, JAX 0.12.0.1), warm value plus gradient of a
+free-boundary problem at `mpol = ntor = 5`, `ns = 16`, `boundary_schur`, other jobs on the node:
+
+- Threads for one process, one run each at load 5-7: 1, 2, 4, 8 and 18 threads took 10.8, 6.4, 5.7,
+  5.0 and 6.3 s, using 10.8, 11.6, 16.4, 22.1 and 52.9 CPU-seconds. More cores soon stop helping.
+- `coupled_gcrot` took 301 s against 5-8 s for `boundary_schur`, with gradient norms agreeing to about
+  9 digits (one run, load about 30).
+- On 8 pinned cores at load 64-76, a 4-worker thread ensemble gave 0.14-0.17 evaluations/s against
+  0.07-0.08 for serial evaluations (two rounds), and the gradients matched.
+
+These numbers are from one busy node; time your own deck before changing a default.
+
 ## Select the device
 
 ```console
@@ -28,8 +67,8 @@ placement. Install notes for GPU wheels: {doc}`/installation`.
 ## When the GPU pays off
 
 The policy in {mod}`vmex.core.device` uses the historical measurements in
-`benchmarks/gpu_baseline.json` (regenerate with `benchmarks/device_parity.py`
-and the benchmark scripts). These motivated the thresholds below; the later
+`benchmarks/gpu_baseline.json` (regenerate with `tools/run_gpu_matrix.py`;
+`tools/device_parity.py` checks CPU/GPU agreement). These motivated the thresholds below; the later
 A4000 results show why they are not a portable performance guarantee:
 
 - Per-iteration throughput favors the GPU — up to 3x wall on
@@ -73,7 +112,7 @@ On the two shipped decks that prints `1632 100000` / `cpu` for
 **The crossover these thresholds encode does not transfer between machines.**
 They come from `benchmarks/gpu_baseline.json`, measured 2026-07-09. The same
 sweep re-run on 2026-09-16 on two RTX A4000s (JAX 0.11.1, driver 580.173,
-one process per cell — `benchmarks/gpu_a4000_2026-09-16.json`) found **no cell
+one process per cell, VMEX 0.9.1) found **no cell
 where the GPU wins**, warm wall in seconds:
 
 | case | CPU warm | GPU warm | GPU gain |
@@ -93,7 +132,7 @@ CPU and GPU cell (434, 2829, 125, 189), so the two ran the same physics. Peak
 device memory across every GPU cell was 4.8 to 113.5 MB.
 
 So treat `recommended_device` as a starting guess and time the deck you actually
-run: `python benchmarks/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
+run: `python tools/run_gpu_matrix.py --skip-tridiag --out my_gpu_matrix.json`
 reproduces the table above on your own hardware (without `--out` it overwrites
 the committed `benchmarks/gpu_baseline.json`). The implicit-gradient path is the exception that
 does pay off — the single-stage finite-beta value-and-gradient is 1.3–1.6 s warm
@@ -114,9 +153,8 @@ so VMEX leaves both out.
 
 ## CPU placement and optimization defaults
 
-- **Ensembles.** Multi-solve ensembles are CPU-threaded
-  ({doc}`parallel-ensembles`): the host solver's `pure_callback` cannot run
-  on a GPU.
+- **Ensembles.** The ensemble helpers are CPU thread pools and assign no GPUs
+  ({doc}`parallel-ensembles`); give each case its own `device=` to use several.
 - **Implicit Jacobians in optimization.** High-level optimization defaults
   its implicit-gradient path to CPU because it is launch-bound on the tested
   GPUs; low-level {func}`vmex.core.implicit.run` follows JAX placement when
@@ -147,7 +185,7 @@ For a new GPU or a slow installation, run the cache-reload audit from a VMEX
 source checkout:
 
 ```console
-python benchmarks/device_cache_reload.py --devices cpu,gpu \
+python tools/device_cache_reload.py --devices cpu,gpu \
     --output vmex-device-cache-reload.json
 ```
 

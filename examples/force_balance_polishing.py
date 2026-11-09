@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import vmex as vj
+from _polish_figure import polish_figure
 from vmex.core.polish import polished_wout_input, polished_wout_state
 
 # Input deck: fixed-boundary, axisymmetric, prescribed pressure and iota.
@@ -101,33 +102,16 @@ print(f"  the written file reproduces the native state: RMS |F| "
 
 ### Plot and save #############################################################
 
-INK2, GRID, BASELINE = "#52514e", "#e1e0d9", "#c3c2b7"
-colors = {"VMEC solve": "#eda100", "polished": "#2a78d6"}
-plt.rcParams.update({"axes.edgecolor": BASELINE, "axes.labelcolor": INK2,
-                     "xtick.color": INK2, "ytick.color": INK2, "legend.frameon": False})
-figure, (profile, regions) = plt.subplots(1, 2, figsize=(9.0, 3.6),
-                                          gridspec_kw={"width_ratios": [1.6, 1.0]},
-                                          layout="constrained")
-for label, certificate in certificates.items():
-    profile.semilogy(np.asarray(certificate.radial_nodes), np.asarray(certificate.flux_surface_average),
-                     color=colors[label], linewidth=2.0, label=label)
-profile.set(xlim=(0.0, 1.0), xlabel=r"$\rho=\sqrt{s}$",
-            ylabel=r"$\langle|\mathbf{J}\times\mathbf{B}-\nabla p|\rangle_s$  [N m$^{-3}$]")
-profile.grid(True, which="major", color=GRID)
-profile.legend(loc="upper center")
+INK2 = "#52514e"
 names = ("near axis\n" r"$\rho<0.2$", "bulk\n" r"$0.2\leq\rho\leq0.8$", "edge\n" r"$\rho>0.8$")
-x, width = np.arange(3), 0.38
-for i, (label, certificate) in enumerate(certificates.items()):
-    values = [float(certificate.near_axis_l2), float(certificate.bulk_l2), float(certificate.edge_l2)]
-    bars = regions.bar(x + (i - 0.5) * (width + 0.02), values, width, color=colors[label], label=label)
-    regions.bar_label(bars, fmt="%.0f", fontsize=8, color=INK2, padding=2)
-regions.set_yscale("log")
-regions.set_xticks(x, names)
-regions.set_ylabel(r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$  [N m$^{-3}$]")
-regions.grid(True, axis="y", which="major", color=GRID)
-regions.legend(loc="upper right")
-figure.savefig(README_FIGURE, dpi=160, pil_kwargs={"lossless": True})
-plt.close(figure)
+polish_figure(
+    README_FIGURE,
+    {label: (np.asarray(c.radial_nodes), np.asarray(c.flux_surface_average))
+     for label, c in certificates.items()},
+    {label: [float(c.near_axis_l2), float(c.bulk_l2), float(c.edge_l2)]
+     for label, c in certificates.items()},
+    names, r"$\langle|\mathbf{J}\times\mathbf{B}-\nabla p|\rangle_s$  [N m$^{-3}$]",
+    r"RMS $|\mathbf{J}\times\mathbf{B}-\nabla p|$  [N m$^{-3}$]")
 
 # `vmex --plot` of both files, side by side.  Its force panel is a
 # finite-difference reconstruction from the WOUT, not the certificate above.

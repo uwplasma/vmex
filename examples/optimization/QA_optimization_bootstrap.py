@@ -25,7 +25,8 @@ from scipy.optimize import least_squares
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core.bootstrap import (ELEMENTARY_CHARGE, KineticProfiles,
-                                 RedlBootstrapMismatch, self_consistent_bootstrap)
+                                 RedlBootstrapMismatch, self_consistent_bootstrap,
+                                 trapped_fraction_from_state, vmec_j_dot_B)
 
 # Number of field periods, and the seed deck the boundary is shaped from:
 NFP = 2
@@ -250,6 +251,12 @@ final_equilibrium = opt.solve_equilibrium(final_input, initial_state=equilibrium
 ### Print, plot and save ######################################################
 
 report("final", final_equilibrium)
+# The equilibrium <J.B> from the MHD identity and the effective trapped
+# fraction, the two geometric inputs of the Redl bootstrap formula:
+jdotb = vmec_j_dot_B(final_equilibrium.state, final_equilibrium.runtime)
+f_trapped = trapped_fraction_from_state(final_equilibrium.state, final_equilibrium.runtime)
+print(f"<J.B> on s = 0.05..0.95 [A T/m^2]: {np.array2string(np.asarray(jdotb), precision=3)}")
+print(f"effective trapped fraction at the edge: {float(f_trapped[-1]):.3f}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

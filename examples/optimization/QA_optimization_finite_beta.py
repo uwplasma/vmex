@@ -95,7 +95,7 @@ OUTPUT_NAME = "QA_finite_beta_optimized"
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     SURFACES = np.array([0.25, 0.6, 0.9])
-    MAX_MODES, MAX_NFEV, MINIMUM_MPOL = [1], [2], 3
+    MAX_MODES, MAX_NFEV, MINIMUM_MPOL = [1], [3], 3
     FINAL_NS, FINAL_FTOL = 31, 1e-10
 
 ###############################################################################
@@ -124,6 +124,9 @@ inp = replace(inp, rbc=rbc, zbs=zbs, pmass_type="power_series", am=am,
 equilibrium = opt.solve_equilibrium(inp)
 closed_form_beta = float(equilibrium.wout.betatotal)
 inp = replace(inp, phiedge=closed_form_phiedge * np.sqrt(closed_form_beta / TARGET_BETA))
+# Hold the seed's plasma volume at fixed major radius (TVOLUME with
+# LVOLUME_RFIX), so the optimizer cannot change the plasma size:
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)
 equilibrium = opt.solve_equilibrium(inp, initial_state=equilibrium.solution)
 print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
       f"{closed_form_beta:.4%}; corrected {inp.phiedge:.6f} Wb gives beta "
@@ -179,7 +182,8 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
         problem = opt.VmecProblem.from_tuples(
             inp, objective_function_terms, max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-            ess_alpha=ESS_ALPHA, restart_from=equilibrium)
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+            progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:

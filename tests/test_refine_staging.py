@@ -20,6 +20,7 @@ no repeated full solves):
 from __future__ import annotations
 
 import dataclasses
+import types
 from pathlib import Path
 
 import jax
@@ -146,12 +147,7 @@ def test_adjoint_counters_cover_eager_and_staged_gradients() -> None:
         stats = im._SOLVE_STATS[cfg]
         assert stats["adjoints"] == 1 and stats["adjoint_seconds"] > 0.0
         assert stats["adjoint_krylov_iterations"] == 0  # the exact block adjoint
-        previous = bool(jax.config.jax_disable_jit)
-        jax.config.update("jax_disable_jit", False)  # the suite default is eager
-        try:
-            jax.jit(jax.grad(volume))(p0)
-        finally:
-            jax.config.update("jax_disable_jit", previous)
+        jax.jit(jax.grad(volume))(p0)
         assert stats["adjoints"] is None
         assert stats["adjoint_krylov_iterations"] is None
         assert stats["adjoint_seconds"] is None
@@ -211,21 +207,16 @@ def test_step_without_krylov_progress_ends_refinement(monkeypatch) -> None:
     monkeypatch.setattr(im, "_refine_step", without_progress)
     lanes = (im._refine_step_core, im._preconditioned_residual_lane)
     steps = lambda: im._SOLVE_STATS.get(cfg, {}).get("refinement_steps", 0)  # noqa: E731
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)  # the suite default is eager
-    try:
-        start = steps()
-        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", 0.0)
-        refined = im._refined_state(cfg, p0, state, mask)
-        assert steps() - start == 1
-        compiled = [lane._cache_size() for lane in lanes]
-        assert min(compiled) >= 1  # both staged programs ran
-        monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", default)
-        again = im._refined_state(cfg, p0, refined, mask)
-        assert steps() - start == 1 + im._REFINE_MAX_STEPS
-        assert [lane._cache_size() for lane in lanes] == compiled
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    start = steps()
+    monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", 0.0)
+    refined = im._refined_state(cfg, p0, state, mask)
+    assert steps() - start == 1
+    compiled = [lane._cache_size() for lane in lanes]
+    assert min(compiled) >= 1  # both staged programs ran
+    monkeypatch.setattr(im, "_REFINE_MIN_PROGRESS", default)
+    again = im._refined_state(cfg, p0, refined, mask)
+    assert steps() - start == 1 + im._REFINE_MAX_STEPS
+    assert [lane._cache_size() for lane in lanes] == compiled
     for result in (refined, again):
         for result_leaf, state_leaf in zip(jax.tree.leaves(result), jax.tree.leaves(state)):
             np.testing.assert_array_equal(np.asarray(result_leaf), np.asarray(state_leaf))
@@ -255,7 +246,8 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
         return float(im._tree_norm(F(P(value), p0)))
 
     def counted(**patch):
-        keys = ("refinement_krylov_iterations", "refinement_factorizations")
+        keys = ("refinement_krylov_iterations", "refinement_factorizations",
+                "block_factorizations")
         stats = im._SOLVE_STATS.setdefault(cfg, dict.fromkeys(im._COUNTERS, 0))
         before = {key: stats[key] for key in keys}
         with monkeypatch.context() as m:
@@ -265,13 +257,8 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
         return refined, {key: stats[key] - before[key] for key in keys}
 
     assert certificate(state) > cfg.refine_tol  # the descent stops short of the root
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)  # the suite default is eager
-    try:
-        krylov, krylov_work = counted(_REFINE_BLOCK_MAX_STEPS=0)
-        block, block_work = counted()
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    krylov, krylov_work = counted(_REFINE_BLOCK_MAX_STEPS=0)
+    block, block_work = counted()
 
     assert certificate(krylov) <= cfg.refine_tol
     # Both arms land on the double-precision roundoff floor (a few 1e-16 on this
@@ -280,6 +267,8 @@ def test_block_finish_reaches_the_krylov_anchor_with_one_factorization(monkeypat
     assert certificate(block) <= cfg.refine_tol
     assert krylov_work["refinement_factorizations"] == 0
     assert block_work["refinement_factorizations"] == 1
+    assert block_work["block_factorizations"] == 1  # every host factorization is counted
+    assert krylov_work["block_factorizations"] == 0
     assert block_work["refinement_krylov_iterations"] < krylov_work["refinement_krylov_iterations"]
     moved = im._tree_norm(jax.tree.map(jnp.subtract, block, krylov))
     assert float(moved) <= 1.0e-8 * float(im._tree_norm(krylov))
@@ -299,7 +288,7 @@ def test_block_finish_lowering_is_shared_across_trial_points() -> None:
     previous = bool(jax.config.jax_disable_jit)
     jax.config.update("jax_disable_jit", False)
     try:
-        factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)
+        factors = im._refine_block_factor_core(z0, p0, state, mask, cfg)[:3]
     finally:
         jax.config.update("jax_disable_jit", previous)
     step_a = im._refine_block_step_core.lower(z0, p0, state, mask, factors, cfg=cfg).as_text()
@@ -318,16 +307,11 @@ def test_block_finish_without_progress_replays_the_krylov_anchor(monkeypatch) ->
         fz = im.residual_fn(config, frozen, dof_mask)(z, params)
         return z, fz, im._tree_norm(fz), linear
 
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        with monkeypatch.context() as m:
-            m.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)
-            krylov = im._refined_state(cfg, p0, state, mask)
-        monkeypatch.setattr(im, "_refine_block_step", without_progress)
-        replayed = im._refined_state(cfg, p0, state, mask)
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    with monkeypatch.context() as m:
+        m.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 0)
+        krylov = im._refined_state(cfg, p0, state, mask)
+    monkeypatch.setattr(im, "_refine_block_step", without_progress)
+    replayed = im._refined_state(cfg, p0, state, mask)
     for replayed_leaf, krylov_leaf in zip(jax.tree.leaves(replayed), jax.tree.leaves(krylov)):
         np.testing.assert_array_equal(np.asarray(replayed_leaf), np.asarray(krylov_leaf))
 
@@ -349,19 +333,14 @@ def test_refinement_restarts_from_its_best_iterate(monkeypatch) -> None:
     def residual(tree):
         return float(im._tree_norm(F(P(tree), p0)))
 
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 1)
-        monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
-        with monkeypatch.context() as m:
-            m.setattr(im, "_REFINE_RESTARTS", 0)
-            one_pass = im._refined_state(cfg, p0, state, mask)
-            m.setattr(im, "_REFINE_RESTARTS", 0)
-            again = im._refined_state(cfg, p0, state, mask)
-        restarted = im._refined_state(cfg, p0, state, mask)
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    monkeypatch.setattr(im, "_REFINE_BLOCK_MAX_STEPS", 1)
+    monkeypatch.setattr(im, "_REFINE_MAX_STEPS", 1)
+    with monkeypatch.context() as m:
+        m.setattr(im, "_REFINE_RESTARTS", 0)
+        one_pass = im._refined_state(cfg, p0, state, mask)
+        m.setattr(im, "_REFINE_RESTARTS", 0)
+        again = im._refined_state(cfg, p0, state, mask)
+    restarted = im._refined_state(cfg, p0, state, mask)
     for a, b in zip(jax.tree.leaves(one_pass), jax.tree.leaves(again)):
         np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
     host, single, multi = residual(state), residual(one_pass), residual(restarted)
@@ -433,57 +412,102 @@ def test_block_stall_far_from_root_skips_krylov_and_rejects_the_trial(monkeypatc
     assert int(status) == 3 and im._LAST_REFINED[cfg][2]
 
 
-def test_adjoint_reusing_anchor_factors_matches_the_fresh_block_adjoint() -> None:
-    """The anchor's factorization preconditions the adjoint to the same multiplier."""
+
+
+def _resume_setup(monkeypatch):
+    """A converged solve whose block finish is made to miss at the host state."""
     inp, _, p0 = _small_solovev_setup()
-    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000, refine_tol=1.0e-15)
-    host, mask = _host_state(cfg, p0)
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        root = im._refined_state(cfg, p0, host, mask)
-        P = im._dof_projector(cfg, mask)
-        factors = im._refine_block_factors(cfg, p0, host, mask, P(host))
-        b = P(jax.tree.map(
-            lambda a: jnp.asarray(np.random.default_rng(0).standard_normal(a.shape)), root))
-        fresh, fresh_stats = im._adjoint_block_core(p0, P(root), root, mask, b, cfg)
-        reused, stats = im._adjoint_block_reuse_core(
-            p0, P(root), root, mask, b, factors, cfg)
-    finally:
-        jax.config.update("jax_disable_jit", previous)
-    assert bool(stats.converged) and bool(fresh_stats.converged)
-    difference = im._tree_norm(jax.tree.map(jnp.subtract, reused, fresh))
-    assert float(difference) <= 1.0e-10 * float(im._tree_norm(fresh))
-    assert jax.tree.structure(factors) == jax.tree.structure(im._factor_struct(cfg))
-    for leaf, struct in zip(jax.tree.leaves(factors), jax.tree.leaves(im._factor_struct(cfg))):
-        assert leaf.shape == struct.shape and leaf.dtype == struct.dtype
+    cfg = im.make_config(inp, ftol=1.0e-8, max_iterations=1000)
+    # Equal configs share one object, hence one refinement memo.
+    for memo in (im._LAST_REFINED, im._LAST_REFINEMENT_CORRECTION, im._LAST_SOLVE):
+        memo.pop(cfg, None)
+    host = im._host_solve(cfg, p0)
+    state, mask = _host_state(cfg, p0)
+    real_step, real_krylov = im._refine_block_step, im._refine_step
+    krylov_steps = []
+
+    def missing(config, params, frozen, dof_mask, z, factors):
+        out = real_step(config, params, frozen, dof_mask, z, factors)
+        if np.array_equal(np.asarray(frozen.R_cos), np.asarray(host.state.R_cos)):
+            fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+            return z, fz, im._tree_norm(fz), out[3]
+        return out
+
+    def counted(*args):
+        krylov_steps.append(1)
+        return real_krylov(*args)
+
+    monkeypatch.setattr(im, "_refine_block_step", missing)
+    monkeypatch.setattr(im, "_refine_step", counted)
+    return cfg, p0, state, mask, krylov_steps
 
 
-def test_anchor_factor_callback_and_eager_miss_fall_back_to_the_fresh_adjoint() -> None:
-    """Rejected or unmemoized trials get zeros or root factors; a miss refactors."""
-    _, cfg, p0 = _small_solovev_setup()
-    params_np = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), p0)
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    try:
-        root, mask = im._host_solve_and_mask(cfg, params_np)
-        for leaf in jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 2)):
-            assert not np.any(leaf)                       # rejected: zeros
-        im._LAST_ANCHOR_FACTORS.pop(cfg, None)
-        at_root = im._host_anchor_factors(cfg, params_np, 0)  # rebuilt at the root
-        assert np.any(jax.tree.leaves(at_root)[0])
-        refined = im._LAST_REFINED.pop(cfg)
-        im._LAST_ANCHOR_FACTORS.pop(cfg, None)
-        assert not np.any(jax.tree.leaves(im._host_anchor_factors(cfg, params_np, 0))[0])
-        im._LAST_REFINED[cfg] = refined
+def _certificate(cfg, p0, state, mask):
+    return im._anchor_residual(cfg, p0, state, mask)
 
-        root, mask = (jax.tree.map(jnp.asarray, tree) for tree in (root, mask))
-        gbar = jax.tree.map(jnp.ones_like, root)
-        zeros = jax.tree.map(jnp.zeros_like, at_root)     # certificate miss
-        (fresh,) = im._solve_implicit_bwd_impl(cfg, (p0, root, mask), gbar)
-        (missed,) = im._solve_implicit_bwd_impl(
-            cfg, (p0, root, mask), gbar, factors=zeros)
-    finally:
-        jax.config.update("jax_disable_jit", previous)
-    for a, b in zip(jax.tree.leaves(missed), jax.tree.leaves(fresh)):
-        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-12, atol=0.0)
+
+def test_missed_block_finish_resumes_the_solve_instead_of_the_krylov_replay(monkeypatch) -> None:
+    """A converged solve the block finish cannot certify is resumed to a tighter ftol."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+    assert _certificate(cfg, p0, state, mask) > cfg.refine_tol
+    refined = im._refine_fixed_point(cfg, p0, state, mask)
+    assert _certificate(cfg, p0, refined, mask) <= cfg.refine_tol
+    assert not krylov_steps
+
+
+def test_failed_resume_replays_the_krylov_refinement(monkeypatch) -> None:
+    """An unconverged, failing or no better resume falls back to the Krylov replay."""
+    class Unconverged:
+        converged = False
+
+    def raises(*args, **kwargs):
+        raise VmecError("no")
+
+    for resume in (lambda *a, **k: Unconverged(), raises, "host"):
+        with monkeypatch.context() as m:
+            cfg, p0, state, mask, krylov_steps = _resume_setup(m)
+            if resume == "host":
+                same = types.SimpleNamespace(converged=True, state=state)
+                resume = lambda *a, **k: same  # noqa: E731
+            m.setattr(im, "solve", resume)
+            refined = im._refine_fixed_point(cfg, p0, state, mask)
+            assert krylov_steps
+            assert _certificate(cfg, p0, refined, mask) <= cfg.refine_tol
+
+
+def test_resume_that_the_block_finish_cannot_certify_is_kept(monkeypatch) -> None:
+    """A resumed state closer to the root is the anchor even when it is not certified."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+
+    def never(config, params, frozen, dof_mask, z, factors):
+        fz = im.residual_fn(config, frozen, dof_mask)(z, params)
+        return z, fz, im._tree_norm(fz), jnp.asarray(0.0)
+
+    monkeypatch.setattr(im, "_refine_block_step", never)
+    refined = im._refine_fixed_point(cfg, p0, state, mask)
+    assert not krylov_steps
+    assert _certificate(cfg, p0, refined, mask) < _certificate(cfg, p0, state, mask)
+
+
+def test_block_only_refinement_skips_the_krylov_replay(monkeypatch) -> None:
+    """``krylov=False`` ends a missed block finish at the start state."""
+    cfg, p0, state, mask, krylov_steps = _resume_setup(monkeypatch)
+    refined = im._refined_state(cfg, p0, state, mask, krylov=False)
+    assert not krylov_steps
+    for a, b in zip(jax.tree.leaves(refined), jax.tree.leaves(state)):
+        np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_resume_budget_has_a_floor_for_hot_restarted_solves(monkeypatch) -> None:
+    """A hot-restarted solve of few iterations still gets a resume that can finish."""
+    cfg, p0, state, mask, _ = _resume_setup(monkeypatch)
+    budgets = []
+
+    def fake(*args, max_iterations, **kwargs):
+        budgets.append(max_iterations)
+        return types.SimpleNamespace(converged=False)
+
+    monkeypatch.setattr(im, "solve", fake)
+    for iterations in (25, 10 * im._REFINE_RESUME_MIN_ITERATIONS):
+        assert im._resumed_refinement(cfg, p0, state, mask, iterations) is None
+    assert budgets == [min(cfg.max_iterations, im._REFINE_RESUME_MIN_ITERATIONS), cfg.max_iterations]

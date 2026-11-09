@@ -422,7 +422,10 @@ class CircularCoils:
 
     def __call__(self, points: Array) -> Array:
         points = jnp.asarray(points)
-        rho = jnp.hypot(points[..., 0], points[..., 1])[..., None]
+        # sqrt(x^2 + y^2) with a finite derivative on the axis (jnp.hypot's JVP
+        # is 0/0 there since JAX 0.12).
+        rho_squared = points[..., 0] ** 2 + points[..., 1] ** 2
+        rho = jnp.where(rho_squared > 0.0, jnp.sqrt(jnp.where(rho_squared > 0.0, rho_squared, 1.0)), 0.0)[..., None]
         radius = jnp.atleast_1d(jnp.asarray(self.radius, dtype=points.dtype))
         height = points[..., 2][..., None] - jnp.atleast_1d(jnp.asarray(self.z, dtype=points.dtype))
         scale = 2.0e-7 * jnp.atleast_1d(jnp.asarray(self.current, dtype=points.dtype))  # mu0 I / (2 pi)

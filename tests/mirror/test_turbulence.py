@@ -65,21 +65,24 @@ def test_closed_mirror_contract_is_periodic_equal_arc_and_positive(closed_mirror
     np.testing.assert_allclose(mapping["gradpar"], mapping["gradpar"][0], rtol=0.0, atol=0.0)
     metric_determinant = np.asarray(mapping["gds2"]) * np.asarray(mapping["gds22"]) - np.asarray(mapping["gds21"]) ** 2
     assert np.min(metric_determinant) > 0.0
-    # The named field-line mirror ratio, not an anonymous max/min: R_m,axis
-    # and R_m,LCFS are separate equilibrium-level quantities (31.4-R3).
-    field_line_ratio = float(mapping["vmex_mirror"]["field_line_mirror_ratio"])
+    # max|B| / min|B| along the sampled line. The export key is
+    # "field_line_mirror_ratio", but on this seeded racetrack it is not a
+    # mirror ratio: it is set by the elliptical section, equals
+    # (semi_major / semi_minor)**2 = (0.4 / 0.3)**2, and is exactly 1 for a
+    # circular section. The fixture is a shape contract, not a physics case.
+    b_max_over_min = float(mapping["vmex_mirror"]["field_line_mirror_ratio"])
     np.testing.assert_allclose(
-        field_line_ratio,
+        b_max_over_min,
         np.max(mapping["bmag"]) / np.min(mapping["bmag"]),
         rtol=1.0e-14,
     )
-    assert field_line_ratio > 1.5
+    np.testing.assert_allclose(b_max_over_min, (0.4 / 0.3) ** 2, rtol=1.0e-3)
     # "epsilon" is the field-line |B| modulation depth, the one definition
     # shared with the core lane (GKX's own bmag = 1/(1 + eps cos theta) has
-    # exactly this eps); the VMEX-named diagnostic repeats it, and the
-    # field-line mirror ratio is (1 + eps) / (1 - eps).
+    # exactly this eps); the VMEX-named diagnostic repeats it, and
+    # max|B| / min|B| is (1 + eps) / (1 - eps).
     modulation = float(mapping["vmex_mirror"]["field_line_b_modulation"])
-    np.testing.assert_allclose(modulation, (field_line_ratio - 1.0) / (field_line_ratio + 1.0), rtol=1.0e-14)
+    np.testing.assert_allclose(modulation, (b_max_over_min - 1.0) / (b_max_over_min + 1.0), rtol=1.0e-14)
     assert float(mapping["epsilon"]) == modulation
     assert 0.0 < modulation < 1.0
     # Not the former std/mean export, which is ~eps/sqrt(2) for a cosine-like

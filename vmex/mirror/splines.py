@@ -21,6 +21,7 @@ from vmex.core.device import (
     _put_numeric_leaves,
     mirror_device_context,
 )
+from vmex.core.radial_basis import _apply_matrix
 
 from .basis import CubicBSplineBasis, MirrorGrid, ThetaBasis
 from .geometry import (
@@ -63,21 +64,14 @@ class _SplineEvaluationBasis:
     def size(self) -> int:
         return int(self.nodes.size)
 
-    @staticmethod
-    def _apply(matrix: Array, values: Array, axis: int) -> Array:
-        values = jnp.asarray(values)
-        moved = jnp.moveaxis(values, axis, 0)
-        result = jnp.tensordot(jnp.asarray(matrix), moved, axes=((1,), (0,)))
-        return jnp.moveaxis(result, 0, axis)
-
     def differentiate(self, values: Array, *, axis: int = -1) -> Array:
-        return self._apply(self.derivative_matrix, values, axis)
+        return _apply_matrix(self.derivative_matrix, values, axis)
 
     def differentiate_transpose(self, values: Array, *, axis: int = -1) -> Array:
-        return self._apply(self.derivative_matrix.T, values, axis)
+        return _apply_matrix(self.derivative_matrix.T, values, axis)
 
     def differentiate_twice(self, values: Array, *, axis: int = -1) -> Array:
-        return self._apply(self.second_derivative_matrix, values, axis)
+        return _apply_matrix(self.second_derivative_matrix, values, axis)
 
     def integrate(self, values: Array, *, axis: int = -1) -> Array:
         moved = jnp.moveaxis(jnp.asarray(values), axis, -1)
@@ -87,7 +81,7 @@ class _SplineEvaluationBasis:
         return np.asarray(self.spline.basis_matrix(target_nodes)) @ self.recovery_matrix
 
     def interpolate(self, values: Array, target_nodes: Array, *, axis: int = -1) -> Array:
-        return self._apply(self.interpolation_matrix(target_nodes), values, axis)
+        return _apply_matrix(self.interpolation_matrix(target_nodes), values, axis)
 
 
 @dataclass(frozen=True)

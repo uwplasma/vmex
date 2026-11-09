@@ -171,9 +171,8 @@ open.
 #. **Met.** JAX directional derivatives against centered finite differences
    (``test_geometry_directional_derivative_matches_centered_difference``).
 #. **Partial.** Cold/warm JIT and memory profiles of the hybrid solve plus this
-   export are recorded on CPU as workflow ``M3`` of
-   ``benchmarks/profile_workflows.py`` (``benchmarks/baselines/m4/M3_*.json``);
-   CPU/GPU value and gradient parity is not recorded.
+   export were recorded on CPU (workflow ``M3``, VMEX 0.11, retired with its
+   profiling harness); CPU/GPU value and gradient parity is not recorded.
 #. **External.** GKX constant-field and manufactured mirror-force tests live in
    GKX, not here.
 #. **Open.** Linear resolution/eigenfunction convergence, then quasilinear and

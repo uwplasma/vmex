@@ -96,6 +96,8 @@ The two stability indices and $V''(s)$ use separate scales whose zero levels
 are aligned; $V''(s)<0$ denotes a magnetic well. Their legend sits below the
 panel so it cannot hide a curve.
 
+The $J$ panel draws unfilled $J$ contours with a colorbar. Dashed curves are bounce-averaged drift surfaces of the same pitch, launched at several radii and integrated by {func}`~vmex.core.maxj.drift_orbits`: they follow the $J$ contours, so circles mean the particles stay on flux surfaces, and a dashed curve reaching $s=1$ is a lost orbit (Sengupta, Bhattacharjee and Buller, arXiv:2608.20042 (2026), Eq. (4)). `examples/drift_surfaces.py` computes the same orbits from Python with {func}`~vmex.core.maxj.drift_surfaces_from_boozer`.
+
 `*_stability.png` first separates `DMerc` into shear, well, current, and
 geodesic terms. Its second panel rescales the WOUT pressure profile and plots
 the worst frozen-equilibrium margins, $\min_s D_{Merc}$ and $-\max_s D_R$,
@@ -174,3 +176,9 @@ The resulting `boozmn_*.nc` is the standard format that the C++
   fill-valued where its producer is not implemented; the disclosed cases are
   in {doc}`/reference/wout-file` and
   {doc}`/reference/vmec2000-compatibility`.
+
+## References
+
+- A. H. Boozer, *Phys. Fluids* 24, 1999 (1981): Boozer coordinates, used for the Boozer $|B|$ panel.
+- C. Mercier, *Nucl. Fusion Suppl.* 2, 801 (1962), and M. Landreman and R. Jorge, *J. Plasma Phys.* 86, 905860510 (2020): the Mercier criterion $D_{\rm Merc}$ and magnetic well.
+- V. V. Nemov, S. V. Kasilov, W. Kernbichler and M. F. Heyn, *Phys. Plasmas* 6, 4622 (1999): effective ripple $\varepsilon_{\rm eff}$.

@@ -324,9 +324,33 @@ def test_j_dot_B_redl_formula_parity_zeff():
         "alpha": [0.4543400490751495, 0.814992230099803],
         "jdotB": [-4131811.6745255208, -4884860.735215111],
     }
+    # Those rows use p*dln(ne); add the ion term from dZeff/ds that they omit.
+    surfaces = np.array([0.3, 0.6])
+    Zeff, d_Zeff = 1.8 + 0.2 * surfaces, 0.2
+    ne = 4.13e20 * (1 - surfaces ** 5)
+    Ti = 11.0e3 * (1 - 0.9 * surfaces)
+    pref = -np.array([35.1, 34.9]) * bs.ELEMENTARY_CHARGE / (-8.2 * np.array([0.42, 0.44]))
+    expected["jdotB"] = np.array(expected["jdotB"]) - pref * np.array(expected["L31"]) * Ti * ne * d_Zeff / Zeff ** 2
     for name, ref in expected.items():
         np.testing.assert_allclose(np.asarray(det[name]), ref, rtol=1e-12, err_msg=name)
     np.testing.assert_allclose(np.asarray(jdotB), expected["jdotB"], rtol=1e-12)
+
+
+def test_constant_zeff_keeps_the_published_density_term():
+    """Landreman 2022 (A1), Redl eq (2) with separate gradients: at constant Zeff dni/ni = dne/ne."""
+    profiles = bs.KineticProfiles(
+        ne_coeffs=4.13e20 * np.array([1, 0, 0, 0, 0, -1.0]), Te_coeffs=12.0e3 * np.array([1, -1.0]),
+        Ti_coeffs=11.0e3 * np.array([1, -0.9]), Zeff_coeffs=np.array([1.8]))
+    geom = bs.RedlGeometry(
+        surfaces=jnp.array([0.3, 0.6]), iota=jnp.array([0.42, 0.44]),
+        G=jnp.array([35.1, 34.9]), I=jnp.zeros(2), R=jnp.array([5.92, 5.95]),
+        epsilon=jnp.array([0.08, 0.11]), f_t=jnp.array([0.41, 0.48]),
+        fsa_B2=jnp.zeros(2), fsa_1overB=jnp.zeros(2),
+        Bmin=jnp.zeros(2), Bmax=jnp.zeros(2), psi_edge=jnp.asarray(-8.2), nfp=2)
+    _, det = bs.j_dot_B_redl(profiles, geom, 0)
+    pref = -geom.G * bs.ELEMENTARY_CHARGE / (geom.psi_edge * geom.iota)
+    published = pref * (det["ne_s"] * det["Te_s"] + det["ni_s"] * det["Ti_s"]) * det["L31"] * (det["d_ne_d_s"] / det["ne_s"])
+    np.testing.assert_allclose(det["dnds_term"], published, rtol=1e-13)
 
 
 # ---------------------------------------------------------------------------
@@ -390,10 +414,10 @@ def test_flat_profiles_give_zero_jdotB():
 
 
 def test_isomorphism_enters_only_through_iota_minus_N():
-    """(iota, N = nfp*helicity_n) == (iota - N, 0) manually shifted."""
+    """(iota, N = nfp*helicity_n) == (iota - N, 0) with G -> G + N*I (Landreman 2022 A1)."""
     geom = _toy_geometry()
     N = geom.nfp * (-1)
-    shifted = dataclasses.replace(geom, iota=geom.iota - N)
+    shifted = dataclasses.replace(geom, iota=geom.iota - N, G=geom.G + N * geom.I)
     j1, _ = bs.j_dot_B_redl(PAPER_PROFILES, geom, -1)
     j2, _ = bs.j_dot_B_redl(PAPER_PROFILES, shifted, 0)
     np.testing.assert_allclose(np.asarray(j1), np.asarray(j2), rtol=1e-14)
@@ -599,11 +623,7 @@ def _interp_full(wout, surfaces, values):
 @pytest.mark.parametrize("fixture", ["eq", "lasym_eq"])
 def test_vmec_j_dot_B_state_lane_matches_wout_jdotb(request, fixture):
     """Traceable identity <J.B> vs the wout-engine jdotb (jxbforce.f): <= 1%
-    (observed ~5e-5 solovev, ~9e-4 up_down); wout-table identity ditto.
-
-    The LASYM row is the regression gate on the ``geom=None`` synthesis: with
-    the sine families dropped the last assertion missed by 2.8e-3.
-    """
+    (observed ~5e-5 solovev, ~9e-4 up_down)."""
     eq = request.getfixturevalue(fixture)
     surfaces = np.linspace(0.2, 0.9, 8)
     jv = np.asarray(bs.vmec_j_dot_B(eq.state, eq.runtime, surfaces=surfaces))
@@ -611,39 +631,6 @@ def test_vmec_j_dot_B_state_lane_matches_wout_jdotb(request, fixture):
     scale = np.max(np.abs(jw))
     assert scale > 1e3  # the deck carries real current: the gate is nontrivial
     np.testing.assert_allclose(jv, jw, atol=1e-2 * scale)
-    jv_wout = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces))
-    np.testing.assert_allclose(jv_wout, jw, atol=1e-2 * scale)
-    # fsa_B2 reuse path (geom from the same surfaces) is the same identity.
-    geom = bs.redl_geometry_from_wout(eq.wout, surfaces)
-    jv_geom = np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, surfaces, geom=geom))
-    np.testing.assert_allclose(jv_geom, jv_wout, rtol=1e-3)
-    # The two lanes are the same identity, so they must agree exactly, not
-    # merely within the gate above -- and at the axis too.  Every m != 0
-    # harmonic vanishes where the surface degenerates to a point;
-    # redl_geometry_from_wout zeroes them there and the geom=None lane did
-    # not, which put the two 4.0e-4 apart at s = 0 while they matched
-    # bit-for-bit everywhere else.
-    with_axis = np.concatenate([[0.0], surfaces])
-    axis_geom = bs.redl_geometry_from_wout(eq.wout, with_axis)
-    np.testing.assert_array_equal(
-        np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, with_axis)),
-        np.asarray(bs.vmec_j_dot_B_from_wout(eq.wout, with_axis,
-                                             geom=axis_geom)))
-
-
-@needs_zenodo
-@pytest.mark.parametrize("config", sorted(OPTIMA))
-def test_zenodo_identity_matches_wout_jdotb(config):
-    """V4: the section-6.2 identity from wout arrays vs wout jdotb, <= 2%
-    interior on the three optimized finite-beta Zenodo wouts (observed
-    <= 5e-4) — both the dI/ds and the mu0*I*dp/ds term live at beta > 0."""
-    path, _, _, _ = OPTIMA[config]
-    from vmex.core.wout import read_wout
-    wout = read_wout(path)
-    surfaces = np.linspace(0.1, 0.9, 17)
-    jv = np.asarray(bs.vmec_j_dot_B_from_wout(wout, surfaces))
-    jw = _interp_full(wout, surfaces, wout.jdotb)
-    np.testing.assert_allclose(jv, jw, atol=2e-2 * np.max(np.abs(jw)))
 
 
 # ---------------------------------------------------------------------------
@@ -720,15 +707,25 @@ TOKAMAK_PROFILES = bs.KineticProfiles(
     Ti_coeffs=2.0e3 * np.array([1, -1.0]))
 
 
-def test_self_consistent_bootstrap_picard_converges():
+@pytest.mark.parametrize("n_iter", [0, 1, 10])
+def test_self_consistent_bootstrap_picard_converges(n_iter):
     """V6 (small): Picard loop on the ncurr=1 tokamak converges (delta below
     tol) in <= 10 iterations and drives f_boot down ~two orders of magnitude.
     relax=0.5 because iota here is entirely bootstrap-driven (the undamped
     <J.B> ~ 1/iota ~ 1/I map is marginally stable)."""
     inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))  # flat I' guess
+    if n_iter == 0:
+        with pytest.raises(ValueError, match="n_iter"):
+            bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, n_iter=n_iter)
+        return
     res = bs.self_consistent_bootstrap(
-        inp, TOKAMAK_PROFILES, 0, n_iter=10, tol=1e-3, relax=0.5, degree=6,
+        inp, TOKAMAK_PROFILES, 0, n_iter=n_iter, tol=1e-3, relax=0.5, degree=6,
         s_eval=np.linspace(0.02, 0.98, 25))
+    assert res.input.curtor == res.equilibrium.inp.curtor == res.history[-1]["curtor"]
+    np.testing.assert_array_equal(res.input.ac, res.equilibrium.inp.ac)
+    if n_iter == 1:
+        assert not res.converged and res.iterations == 1
+        return
     assert res.converged and res.iterations <= 10
     assert res.input.ncurr == 1 and res.input.pcurr_type == "power_series"
     # fixed point: ~0.38 MA of bootstrap current, sign preserved
@@ -737,6 +734,23 @@ def test_self_consistent_bootstrap_picard_converges():
     f_last = res.history[-1]["f_boot"]
     assert f_last < 0.02 and f_last < 0.05 * f_first
     assert res.history[-1]["delta"] <= 1e-3
+
+
+def test_self_consistent_bootstrap_current_model_hook():
+    """``current_model`` replaces the Redl <J.B> the loop inverts: the model sees
+    the solved equilibrium and a smaller target gives a smaller applied current."""
+    calls = []
+
+    def half(eq, s_eval, jr):
+        calls.append((eq.wout.ns, np.asarray(s_eval).size))
+        return 0.5 * jr
+
+    kwargs = dict(n_iter=2, degree=6, s_eval=np.linspace(0.02, 0.98, 25))
+    inp = _tokamak_ncurr1(curtor=-2.0e5, ac01=(1.0, 0.0))
+    full = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, **kwargs)
+    model = bs.self_consistent_bootstrap(inp, TOKAMAK_PROFILES, 0, current_model=half, **kwargs)
+    assert calls and calls[0][1] == 25
+    assert abs(model.input.curtor) < 0.75 * abs(full.input.curtor)
 
 
 def test_current_dof_packing_and_validation():

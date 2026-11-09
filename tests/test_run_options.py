@@ -18,7 +18,6 @@ from vmex.core.errors import VmecInputError
 from vmex.core.input import VmecInput
 from vmex.core.run_options import (
     RunOptions,
-    format_indata_directives,
     parse_indata_run_options,
     polish_config_from_options,
     read_input_request,
@@ -84,13 +83,6 @@ def test_quoted_exclamation_marks_do_not_become_directives():
     assert parse_indata_run_options(text) == RunOptions()
     inp = VmecInput.from_indata_text(text)
     assert "!@VMEX" in inp.mgrid_file
-
-
-def test_directive_round_trip_through_format():
-    options = RunOptions(polish="auto", polish_fail="warn")
-    text = format_indata_directives(options) + "&INDATA\nMPOL = 3\n/\n"
-    assert parse_indata_run_options(text) == options
-    assert format_indata_directives(RunOptions()) == ""
 
 
 # ---------------------------------------------------------------------------

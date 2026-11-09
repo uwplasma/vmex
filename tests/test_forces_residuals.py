@@ -54,6 +54,8 @@ def _allclose(new, old, name, rtol=RTOL, atol=ATOL):
 def case(request):
     name = request.param
     inp = VmecInput.from_file(DATA_DIR / f"input.{name}")
+    if inp.lasym:  # Exercise both LASYM m=1 pairs and the released n=0 gauge.
+        inp = inp.change_resolution(mpol=inp.mpol, ntor=1, nzeta=4)
     resolution = resolution_from_input(inp)
     # These are pure force-kernel tests, so request a regular inferred axis
     # for all-zero-axis decks.  Production keeps the supplied zero axis and
@@ -90,6 +92,30 @@ def test_m1_mappings_roundtrip(case):
     if not (bool(setup.lthreed) or bool(setup.lasym)):
         for name, phys, orig in zip(("R_cos", "Z_sin"), physical[:2], originals[:2]):
             _allclose(phys, orig, f"m1 identity {name}")
+
+
+def test_hold_m1_family_sets_only_the_constrained_coordinate(case):
+    """The coordinate comes from ``source`` and nothing else moves: the
+    difference is antisymmetric in each ``Z_sin`` pair (symmetric in ``Z_cos``
+    on lasym), and holding twice changes nothing."""
+    rt, x = case.rt, case.state
+    rng = np.random.default_rng(0)
+    y = jax.tree.map(lambda a: jnp.asarray(rng.standard_normal(np.shape(a))), x)
+    lasym = bool(rt.resolution.lasym)
+    h = newr.hold_m1_family(x, y, rt.modes, lasym=lasym)
+    m, n = np.asarray(rt.modes.m), np.asarray(rt.modes.n)
+    pairs = [(np.flatnonzero((m == 1) & (n == j))[0], np.flatnonzero((m == 1) & (n == -j))[0]) for j in range(1, n.max() + 1)]
+    for name, sign in (("Z_sin", -1.0), ("Z_cos", 1.0))[:1 + lasym]:
+        d, e = (np.asarray(getattr(h, name)) - np.asarray(getattr(t, name)) for t in (x, y))
+        for p, q in pairs:
+            _allclose(d[:, p] - sign * d[:, q], 0.0 * d[:, p], f"{name} pair kept")
+            _allclose(e[:, p] + sign * e[:, q], 0.0 * e[:, p], f"{name} pair taken")
+        mask = np.ones(m.size, bool); mask[[k for pq in pairs for k in pq]] = False  # noqa: E702
+        mask[(m == 1) & (n == 0)] = True
+        assert not np.any(d[:, mask])
+    assert lasym or np.array_equal(np.asarray(h.Z_cos), np.asarray(x.Z_cos))
+    for a, b in zip(jax.tree.leaves(newr.hold_m1_family(h, y, rt.modes, lasym=lasym)), jax.tree.leaves(h)):
+        _allclose(a, b, "hold twice")
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +214,15 @@ def test_full_chain_residuals_finite(case):
         assert np.isfinite(value) and value > 0.0, name
     for leaf in jax.tree.leaves(gc):
         assert bool(jnp.all(jnp.isfinite(leaf)))
+    if case.rt.resolution.lasym:
+        from dataclasses import replace
+
+        free = evaluate_forces(case.state, case.rt, iteration=3)[0]
+        held = evaluate_forces(case.state, replace(case.rt, hold_m1=True), iteration=3)[0]
+        m, n = np.asarray(case.rt.modes.m), np.asarray(case.rt.modes.n)
+        gauge = (m == 1) & (n == 0)
+        assert np.any(np.asarray(free.Z_cos)[:, gauge] != 0.0)
+        _allclose(held.Z_cos[:, gauge], free.Z_cos[:, gauge], "released LASYM gauge")
 
 
 def test_full_chain_is_jittable(case):
@@ -309,7 +344,7 @@ def test_alias_lasym_gcon_matches_index_map_reference(shape):
 # ``IF (lasym) tcon = p5*tcon`` in ``bcovar.f``.  Upstream retired BOTH
 # together (STELLOPT v6.5.0-42-g9177f58c and PARVMEC master: ``dnorm =
 # 1/(nzeta*(ntheta2-1))`` unconditionally, the ``tcon`` halving commented
-# out); VMEC++ 0.5.3 implements the same pair-free convention.  VMEX follows
+# out); C++ VMEC 0.5.3 implements the same pair-free convention.  VMEX follows
 # the retired-pair convention, so both the analysis weight and ``tcon`` are
 # LASYM-independent and the two tests below pin that as an exact symmetric
 # limit.  Reinstating either factor alone breaks these by exactly 2x.  See

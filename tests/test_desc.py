@@ -63,12 +63,8 @@ def test_truncation_is_minimal_and_bounds_off_grid_geometry(asymmetric):
 @pytest.fixture
 def desc_equilibrium():
     pytest.importorskip("desc")
-    import jax
     from desc.equilibrium import Equilibrium
-    previous = jax.config.jax_disable_jit
-    jax.config.update("jax_disable_jit", False)
-    yield Equilibrium
-    jax.config.update("jax_disable_jit", previous)
+    return Equilibrium
 
 
 @pytest.mark.parametrize("family,current,asymmetric,extension", [
@@ -395,7 +391,7 @@ def test_summary_force_error_matches_desc(tmp_path, desc_equilibrium, variant, r
     data = eq.compute(["|F|", "|grad(|B|^2)|/2mu0", "sqrt(g)"], grid=grid)
     s = grid.nodes[:, 0] ** 2
     weight = np.abs(data["sqrt(g)"]) * grid.weights * ((s >= 0.1) & (s <= 0.99))
-    expected = np.sum(weight * data["|F|"]) / np.sum(weight * data["|grad(|B|^2)|/2mu0"])
+    expected = float(np.sum(weight * data["|F|"]) / np.sum(weight * data["|grad(|B|^2)|/2mu0"]))
     VMECIO.save(eq, str(tmp_path / "wout_desc.nc"), surfs=101, verbose=0)
     measured = _relative_force_error_profile(read_wout(str(tmp_path / "wout_desc.nc")))[2]
-    assert measured == pytest.approx(expected, rel=rtol)
+    assert measured == pytest.approx(float(expected), rel=rtol)

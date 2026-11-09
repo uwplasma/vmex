@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import jax
+import numpy as np
 import pytest
 
 from vmex.core import implicit as im
 from vmex.core import optimize as opt
+from vmex.core import setup as setup_mod
 from vmex.core.device import AUTO
 from vmex.core.input import VmecInput
 
@@ -208,3 +210,27 @@ def test_second_device_placement_and_gradient_no_outer_context(tmp_path):
     assert proc.returncode == 0, proc.stderr[-3000:]
     assert "SECOND-DEVICE AUDIT OK" in proc.stdout
     assert f"VMEX-AT {repo}" in proc.stdout, proc.stdout[-500:]
+
+
+def test_jit_value_and_grad_first_call_matches_eager():
+    # The first outer-jit call builds the runtime template and packing tables
+    # inside the trace; they must come out concrete and match eager.
+    inp = VmecInput.from_file("examples/data/input.solovev")
+    p0 = im.params_from_input(inp)
+
+    def f(p):
+        return im.run(inp, p, ftol=1e-12, max_iterations=2000).wb
+
+    # Cold host caches: the traced first call must populate them itself.
+    im._template_runtime.cache_clear()
+    im._PACK_TABLE_CACHE.clear()
+    setup_mod._setup_lane.cache_clear()
+    v_jit, g_jit = jax.jit(jax.value_and_grad(f))(p0)
+    for leaf in jax.tree.leaves(list(im._PACK_TABLE_CACHE.values())):
+        assert not isinstance(leaf, jax.core.Tracer)
+
+    v_eager, g_eager = jax.value_and_grad(f)(p0)
+    np.testing.assert_allclose(float(v_jit), float(v_eager), rtol=1e-12)
+    for a, b in zip(jax.tree.leaves(g_jit), jax.tree.leaves(g_eager)):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=1e-8, atol=1e-12)
+    assert any(np.any(np.asarray(a) != 0.0) for a in jax.tree.leaves(g_jit))

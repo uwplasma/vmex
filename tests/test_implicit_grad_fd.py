@@ -26,7 +26,6 @@ from vmex.core.statephysics import mean_iota
 
 # Shared fixtures register here by name.  Assignment rather than import keeps
 # the test parameters that request them from shadowing an imported name.
-_jit_enabled = _base._jit_enabled
 _release_jax_caches_in_full_matrix = _base._release_jax_caches_in_full_matrix
 solovev = _base.solovev
 
@@ -83,14 +82,14 @@ def test_gradient_independent_of_iteration_policy(solovev):
 
 # ---------------------------------------------------------------------------
 # 7. solver-sensitive metric (iota_edge, ncurr=1): the implicit adjoint equals
-#    the FROZEN-PATH FD; a naive full re-solve FD is NOT a valid reference.
+#    the FROZEN-PATH FD.
 # ---------------------------------------------------------------------------
 
 
 def test_iota_edge_gradient_vs_frozen_path_fd():
     """``d(iota_edge)/d(boundary)`` on the 3D ``ncurr=1`` case: the implicit
-    adjoint must equal the frozen-path central FD to solver accuracy.  A naive
-    re-solve FD is deliberately NOT the reference (measured, ``h=1e-4``):
+    adjoint must equal the frozen-path central FD to solver accuracy.  With the
+    m=1 family released, a naive re-solve FD was far off (``h=1e-4``):
 
         RBC(n=-1,m=1):  adjoint -0.77343,  frozen-path FD -0.77343,  naive FD +0.04543  (sign flip)
         RBC(n=+1,m=1):  adjoint -1.26567,  frozen-path FD -1.26567,  naive FD -2.14135  (69% off)
@@ -122,89 +121,40 @@ def test_iota_edge_gradient_vs_frozen_path_fd():
             f"(rel {rel:.2e}) — the implicit gradient must match the frozen path")
 
 
-def test_li383_mean_iota_resolve_fd_gap_is_the_m1_constrained_family():
-    """Mean iota: the implicit derivative against an independent re-solve FD.
+def test_li383_resolve_fd_matches_the_implicit_derivative():
+    """Cold re-solves 1 % away from the config's first solve match the implicit
+    derivative.  The m=1 constrained family has no equation at the root; the
+    released family left mean iota 1-3 % off and an interior ``Z_sin``
+    objective up to 140x.  Implicit solves hold it on the input's guess."""
+    from vmex.core.residuals import hold_m1_family
 
-    The two differ, and by more than solver accuracy (1.0% on ``RBC(1,1)``,
-    2.8% on ``ZBS(-1,1)`` at ftol 1e-13).  The whole gap is the released
-    m=1 ``Z_sin`` pair combination (``residue.f90`` zeroes its force once
-    ``fsqz < 1e-6``).  The linearization holds it at its converged value,
-    while each cold re-solve freezes it wherever its own path left it, at a
-    rate of about 0.5 per unit boundary change.  Iota depends on that
-    angle-gauge coordinate only through truncation error, so neither answer
-    is wrong.  The implicit value is the exact derivative with the gauge held
-    fixed, and the re-solve adds the gauge drift of the solver's path.
-
-    Checked here as a closure: the re-solve FD must equal the implicit
-    derivative plus the iota response to moving only that family by the
-    re-solves' own drift.  Measured closures: 2.3e-6 and 1.6e-5.
-    """
-    name = "li383_low_res"
-    inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
-    cfg = im.make_config(inp, **CASES[name])
+    inp = VmecInput.from_file(str(DATA_DIR / "input.li383_low_res"))
+    cfg = im.make_config(inp, **CASES["li383_low_res"])
     p0 = im.params_from_input(inp)
-    ntor = int(inp.ntor)
-    assert int(inp.ncurr) == 1
-
-    def metric(state, runtime):
-        return mean_iota(state, runtime)
-
-    grad = jax.grad(lambda p: metric(
-        im.solve_implicit(p, cfg), im.runtime_from_params(p, cfg)))(p0)
-    x0, mask = im.solve_implicit_with_aux(p0, cfg)
-    project = im._dof_projector(cfg, mask)
-    edge = im._edge_mask(cfg)
-
-    def constrained(x):
-        # Entries that are neither evolved nor set by the boundary.
-        return jax.tree.map(
-            lambda a, b, e: (a - b) * (1.0 - e), x, project(x), edge)
-
-    def norm(tree):
-        return float(jnp.sqrt(sum(jnp.vdot(v, v) for v in jax.tree.leaves(tree))))
-
-    def root_with(frozen):
-        # Newton on the frozen residual at p0, only the constrained family moved.
-        residual = im.residual_fn(cfg, frozen, mask)
-        z = project(x0)
-        for _ in range(20):
-            fz = residual(z, p0)
-            if norm(fz) <= 1e-12:
-                break
-            _, jvp = jax.linearize(lambda zz: residual(zz, p0), z)
-            delta, _ = im._adjoint_solve_gcrot(jvp, fz, cfg, enforce=False)
-            z = jax.tree.map(jnp.subtract, z, delta)
-        assert norm(residual(z, p0)) < 1e-10
-        runtime = im.runtime_from_params(p0, cfg)
-        return float(metric(im._assemble(z, runtime, frozen, project, edge), runtime))
-
-    h = 5e-4
+    ntor, js = int(inp.ntor), cfg.resolution.ns // 2
     zero = jax.tree.map(jnp.zeros_like, p0)
+    unit = lambda f, n: dataclasses.replace(zero, **{f: getattr(zero, f).at[ntor + n, 1].set(1.0)})  # noqa: E731
+    metrics = {"mean iota": lambda x, p: mean_iota(x, im.runtime_from_params(p, cfg)),
+               "interior Z_sin": lambda x, p: jnp.mean(x.Z_sin[js] ** 2)}
+    im.solve_implicit(p0, cfg)
+    p1 = jax.tree.map(lambda a, d: a + 0.01 * d, p0, unit("rbc", 1))
+    x1, rt1 = im.solve_implicit(p1, cfg), im.runtime_from_params(p1, cfg)
+    held = hold_m1_family(x1, im._initial_state(rt1.setup), rt1.modes, lasym=False)
+    np.testing.assert_allclose(np.asarray(held.Z_sin), np.asarray(x1.Z_sin), rtol=0, atol=1e-15)
+    grads = {k: jax.grad(lambda p, f=f: f(im.solve_implicit(p, cfg), p))(p1) for k, f in metrics.items()}
+    h = 5e-4
     for field, n in (("rbc", 1), ("zbs", -1)):
-        column = getattr(zero, field).at[ntor + n, 1].set(1.0)
-        tangent = dataclasses.replace(zero, **{field: column})
-        implicit = float(sum(jnp.vdot(a, b) for a, b in zip(
-            jax.tree.leaves(grad), jax.tree.leaves(tangent))))
-        states, values = [], []
+        t, legs = unit(field, n), []
         for sign in (1.0, -1.0):
-            p = jax.tree.map(lambda a, d, s=sign: a + s * h * d, p0, tangent)
-            x, _ = im.solve_implicit_with_aux(p, cfg)
-            states.append(x)
-            values.append(float(metric(x, im.runtime_from_params(p, cfg))))
-        resolve = (values[0] - values[1]) / (2 * h)
-        drift = jax.tree.map(lambda a, b: (a - b) / (2 * h),
-                             constrained(states[0]), constrained(states[1]))
-        # The re-solves move the constrained family and nothing else frozen.
-        assert norm(drift) > 0.1
-        assert norm(drift) == pytest.approx(float(jnp.linalg.norm(drift.Z_sin)))
-        gauge = (root_with(jax.tree.map(lambda a, d: a + h * d, x0, drift))
-                 - root_with(jax.tree.map(lambda a, d: a - h * d, x0, drift))) / (2 * h)
-        gap = abs(implicit / resolve - 1.0)
-        closure = abs((implicit + gauge) / resolve - 1.0)
-        print(f"\n[{name}] d(mean iota)/d({field.upper()}(n={n:+d},m=1)): "
-              f"implicit {implicit:+.6e} re-solve {resolve:+.6e} (gap {gap:.1e}), "
-              f"m=1 family term {gauge:+.6e}, closure {closure:.1e}")
-        assert closure < 1e-4
+            for cache in (im._HOT_CACHE, im._LAST_REFINED, im._LAST_SOLVE, im._LAST_REFINEMENT_CORRECTION):
+                cache.clear()
+            p = jax.tree.map(lambda a, d, s=sign: a + s * h * d, p1, t)
+            legs.append({k: float(f(im.solve_implicit(p, cfg), p)) for k, f in metrics.items()})
+        for k in metrics:
+            implicit = float(sum(jnp.vdot(a, b) for a, b in zip(jax.tree.leaves(grads[k]), jax.tree.leaves(t))))
+            resolve = (legs[0][k] - legs[1][k]) / (2 * h)
+            print(f"\nd({k})/d({field}(n={n:+d},m=1)): implicit {implicit:+.6e} re-solve {resolve:+.6e}")
+            assert implicit == pytest.approx(resolve, rel=1e-3)
 
 
 # ---------------------------------------------------------------------------

@@ -1001,19 +1001,6 @@ def refinement_convergence(residuals: Sequence[float] | Array) -> RefinementConv
     )
 
 
-def passes_promotion_gate(
-    residuals: Sequence[float] | Array,
-    *,
-    absolute_gate: float,
-) -> bool:
-    """Promotion criterion: finest residual under the gate and monotone refinement."""
-
-    if absolute_gate <= 0.0:
-        raise ValueError("absolute_gate must be positive")
-    convergence = refinement_convergence(residuals)
-    return convergence.monotone and convergence.residuals[-1] <= absolute_gate
-
-
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

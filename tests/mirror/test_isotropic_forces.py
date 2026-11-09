@@ -29,7 +29,6 @@ from vmex.mirror.forces import (  # noqa: E402
     isotropic_staggered_weak_residual,
     mass_profile_from_pressure,
     mirror_energy,
-    passes_promotion_gate,
     refinement_convergence,
     staggered_field_strength,
 )
@@ -39,16 +38,6 @@ from vmex.mirror.solver import (  # noqa: E402
     _valid_energy_objective,
 )
 from vmex.mirror.model import project_fixed_boundary_state  # noqa: E402
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _enable_solver_jit():
-    """Exercise nonlinear solver tests in their production execution mode."""
-
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", previous)
 
 
 def _cylinder(*, ns: int = 11, nxi: int = 21, radius: float = 0.3, half_length: float = 1.2):
@@ -377,15 +366,6 @@ def test_refinement_convergence_reports_ratios_and_monotonicity() -> None:
         refinement_convergence([0.1])
     with pytest.raises(ValueError):
         refinement_convergence([0.1, -0.2])
-
-
-def test_promotion_gate_requires_absolute_pass_and_refinement() -> None:
-    ladder = [0.0667, 0.0267, 0.0142]
-    assert passes_promotion_gate(ladder, absolute_gate=0.05)
-    assert not passes_promotion_gate(ladder, absolute_gate=0.01)
-    assert not passes_promotion_gate([0.0267, 0.0142, 0.0151], absolute_gate=0.05)
-    with pytest.raises(ValueError):
-        passes_promotion_gate(ladder, absolute_gate=0.0)
 
 
 def test_staggered_polynomial_force_converges_with_lambda_current_and_pressure() -> None:

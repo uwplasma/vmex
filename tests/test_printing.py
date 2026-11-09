@@ -1,6 +1,6 @@
 """Unit tests for :mod:`vmex.core.printing` (printout.f format port).
 
-The screen/threed1 iteration lines and headers are asserted byte-for-byte
+The screen iteration lines and headers are asserted byte-for-byte
 for representative values in every variant (symmetric/lasym, fixed/free
 boundary), plus the stage/vacuum banners and the termination summary
 (known and unknown ier_flag codes).
@@ -63,39 +63,6 @@ def test_screen_line_lasym_and_freeb_columns():
                                  del_bsq=5.5e-4)
     assert len(freeb) == len(base) + 11
     assert freeb.rstrip("\n").endswith("5.500E-04")
-
-
-def test_threed1_header_variants():
-    fixed = printing.threed1_header()
-    assert fixed.startswith("\n  ITER    FSQR")
-    assert fixed.endswith("<M>\n\n")
-    freeb = printing.threed1_header(lfreeb=True)
-    assert freeb.endswith("DEL-BSQ   FEDGE\n\n")
-
-
-def test_threed1_line_fixed():
-    line = printing.threed1_line(
-        500, 1.0e-14, 2.0e-15, 3.0e-16, 4.0e-11, 5.0e-12, 6.0e-13,
-        0.9, 3.999, 0.14123, 1.234e-2, 1.567,
-    )
-    assert line == (
-        "   500   1.00E-14  2.00E-15  3.00E-16  4.00E-11  5.00E-12  6.00E-13"
-        "  9.00E-01  3.999E+00  1.4123E-01  1.234E-02  1.567\n"
-    )
-
-
-def test_threed1_line_freeb_appends_vacuum_diagnostics():
-    fixed = printing.threed1_line(1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1,
-                                  0.9, 3.999, 0.14, 1e-2, 1.5)
-    freeb = printing.threed1_line(1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1,
-                                  0.9, 3.999, 0.14, 1e-2, 1.5,
-                                  del_bsq=1.2e-3, f_edge=4.5e-6)
-    assert len(freeb) == len(fixed) + 18
-    assert freeb.rstrip("\n").endswith(" 1.20E-03 4.50E-06")
-    # both diagnostics are required for the vacuum columns
-    partial = printing.threed1_line(1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1, 1e-1,
-                                    0.9, 3.999, 0.14, 1e-2, 1.5, del_bsq=1.2e-3)
-    assert partial == fixed
 
 
 def test_improved_axis_block_symmetric_bytes():

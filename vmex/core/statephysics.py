@@ -109,6 +109,35 @@ def _mode_matrix(wout, name: str, *, ns: int, mn: int, optional: bool = False) -
 # ---------------------------------------------------------------------------
 
 
+def _field_line_frame(pos_fn, lam_fn, modb_fn, q, *, iota, diota, phipf_j, phi_rel=0.0) -> dict:
+    """Covariant frame and field at ``q = (t, theta, phi)`` on one flux surface.
+
+    ``pos_fn``/``lam_fn``/``modb_fn`` are the per-surface closures of
+    :func:`vmex.core.stability._surface_closures`.  Returns ``J`` (columns
+    ``e_s, e_theta, e_phi``), its inverse ``dual`` (rows ``grad s, grad theta,
+    grad phi``), ``sqrt_g``, ``lam_g = grad lambda``,
+    ``B = phi'[(iota - lambda_phi) e_theta + (1 + lambda_theta) e_phi]/sqrt_g``,
+    ``modB``, ``dB = grad_(s,theta,phi)|B|``, ``grad_modB``, ``b_sup_phi`` and
+    ``grad_alpha`` for ``alpha = theta* - iota (phi - zeta0)`` with
+    ``phi_rel = phi - zeta0`` carrying the secular shear term.  The
+    ballooning, gyrokinetic and Gamma_c point tuples are built from it.
+    """
+    J = jax.jacfwd(pos_fn)(q)
+    sqrt_g = jnp.linalg.det(J)
+    dual = jnp.linalg.inv(J)
+    lam_g = jax.grad(lam_fn)(q)
+    iota_t = iota + diota * q[0]
+    B = phipf_j * ((iota_t - lam_g[2]) * J[:, 1] + (1.0 + lam_g[1]) * J[:, 2]) / sqrt_g
+    dB = jax.grad(modb_fn)(q)
+    alpha_cov = (lam_g[0] - phi_rel * diota, 1.0 + lam_g[1], lam_g[2] - iota_t)
+    return dict(
+        J=J, dual=dual, sqrt_g=sqrt_g, lam_g=lam_g, B=B, modB=jnp.linalg.norm(B), dB=dB,
+        grad_modB=dB[0] * dual[0] + dB[1] * dual[1] + dB[2] * dual[2],
+        grad_alpha=alpha_cov[0] * dual[0] + alpha_cov[1] * dual[1] + alpha_cov[2] * dual[2],
+        b_sup_phi=phipf_j * (1.0 + lam_g[1]) / sqrt_g,
+    )
+
+
 def _field_chain(state: SpectralState, rt: SolverRuntime):
     """Geometry -> Jacobian -> metric -> fields -> energies of a core state.
 
@@ -201,29 +230,8 @@ def volume_average_beta(state: SpectralState, rt: SolverRuntime) -> Array:
     return jnp.where(wb != 0.0, jnp.asarray(energies.wp) / wb, 0.0)
 
 
-def elongation_profile(
-    state: SpectralState,
-    rt: SolverRuntime,
-    *,
-    ntheta: int | None = None,
-    nphi: int | None = None,
-) -> jnp.ndarray:
-    """Boundary elongation at equally spaced toroidal cross-sections.
-
-    Each constant-geometric-toroidal-angle cross-section is reconstructed
-    from the physical edge Fourier coefficients.  Its area ``A`` and
-    perimeter ``P`` define the equivalent ellipse, whose semi-axes are
-    recovered with Ramanujan's perimeter approximation.  The returned ratio
-    is ``a_major / a_minor`` at each toroidal sample, the same definition used
-    by DESC's elongation objective.
-
-    The default grids (at least 32 poloidal and 24 toroidal points per field
-    period) resolve optimization modes through ``max_mode <= 5`` without
-    adding user-facing sampling knobs to ordinary scripts.  Explicit positive
-    ``ntheta`` and ``nphi`` values are available for convergence studies.
-    The calculation is JAX-traceable and supports stellarator-asymmetric
-    boundaries.
-    """
+def _boundary_sections(state, rt, ntheta, nphi):
+    """Edge ``R, Z`` and their first and second poloidal derivatives, shape ``(ntheta, nphi)``."""
     res = rt.resolution
     ntheta = max(4 * int(res.mpol), 32) if ntheta is None else int(ntheta)
     nphi = max(4 * int(res.ntor) + 1, 24) if nphi is None else int(nphi)
@@ -278,6 +286,36 @@ def elongation_profile(
         "k,tpk->tp", -zc * poloidal_mode, sine
     ) + jnp.einsum("k,tpk->tp", zs * poloidal_mode, cosine)
 
+    second = poloidal_mode**2
+    d2R = -jnp.einsum("k,tpk->tp", rc * second, cosine) - jnp.einsum("k,tpk->tp", rs * second, sine)
+    d2Z = -jnp.einsum("k,tpk->tp", zc * second, cosine) - jnp.einsum("k,tpk->tp", zs * second, sine)
+    return ntheta, R, Z, dR_dtheta, dZ_dtheta, d2R, d2Z
+
+
+def elongation_profile(
+    state: SpectralState,
+    rt: SolverRuntime,
+    *,
+    ntheta: int | None = None,
+    nphi: int | None = None,
+) -> jnp.ndarray:
+    """Boundary elongation at equally spaced toroidal cross-sections.
+
+    Each constant-geometric-toroidal-angle cross-section is reconstructed
+    from the physical edge Fourier coefficients.  Its area ``A`` and
+    perimeter ``P`` define the equivalent ellipse, whose semi-axes are
+    recovered with Ramanujan's perimeter approximation.  The returned ratio
+    is ``a_major / a_minor`` at each toroidal sample, the same definition used
+    by DESC's elongation objective.
+
+    The default grids (at least 32 poloidal and 24 toroidal points per field
+    period) resolve optimization modes through ``max_mode <= 5`` without
+    adding user-facing sampling knobs to ordinary scripts.  Explicit positive
+    ``ntheta`` and ``nphi`` values are available for convergence studies.
+    The calculation is JAX-traceable and supports stellarator-asymmetric
+    boundaries.
+    """
+    ntheta, R, Z, dR_dtheta, dZ_dtheta, _, _ = _boundary_sections(state, rt, ntheta, nphi)
     dtheta = 2.0 * np.pi / ntheta
     perimeter = dtheta * jnp.sum(
         jnp.sqrt(dR_dtheta**2 + dZ_dtheta**2), axis=0
@@ -335,6 +373,18 @@ def max_elongation(
     )
 
 
+def min_boundary_curvature_radius(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Smallest poloidal radius of curvature of the boundary cross-sections, in metres.
+
+    Coils at a finite distance cannot hold a boundary tip much sharper than
+    their distance; a floor on this radius keeps such tips out of a design.
+    Sampled on at least 96 poloidal and 24 toroidal points per field period.
+    """
+    _, _, _, dR, dZ, d2R, d2Z = _boundary_sections(
+        state, rt, max(16 * int(rt.resolution.mpol), 96), max(4 * int(rt.resolution.ntor) + 1, 24))
+    return jnp.min((dR**2 + dZ**2) ** 1.5 / jnp.abs(dR * d2Z - dZ * d2R))
+
+
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     """Mean rotational transform over the half-mesh surfaces (axis excluded).
 
@@ -375,6 +425,25 @@ def soft_min_abs_iota(
         raise ValueError("tau must be positive")
     magnitude = jnp.abs(_iotas_half(state, rt)[1:])
     return jnp.sum(magnitude * jax.nn.softmax(-magnitude / tau))
+
+
+def edge_jacobian_ratio(state: SpectralState, rt: SolverRuntime, *, cells: int = 3) -> Array:
+    """Min/max Jacobian ratio over each of the outermost ``cells`` radial cells.
+
+    A ratio near zero marks a cell pinched flat at one point. It passes on the
+    optimizer's grid but changes sign when the boundary is re-solved on a finer
+    one, so a floor of about 0.25 keeps the final solve well posed.
+    """
+    tau = (_field_chain(state, rt)[1].tau * rt.setup.signgs)[-cells:].reshape(cells, -1)
+    return jnp.min(tau, axis=1) / jnp.max(tau, axis=1)
+
+
+def axis_excursion(state: SpectralState, rt: SolverRuntime) -> Array:
+    """RMS size of the magnetic axis' n != 0 harmonics, in metres."""
+    modes = rt.modes
+    helical = (np.asarray(modes.m) == 0) & (np.asarray(modes.n) != 0)
+    # The state stores modes with a sqrt(2) scaling that this undoes.
+    return jnp.sqrt(2 * jnp.sum(state.R_cos[0, helical]**2 + state.Z_sin[0, helical]**2))
 
 
 def edge_iota(state: SpectralState, rt: SolverRuntime) -> Array:

@@ -16,7 +16,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
   ``<J.B>`` formula (eqs. 10-16, 19-21 with the Sauter 18b-18e
   collisionalities), transcribed verbatim from simsopt ``j_dot_B_Redl``
   including its quasisymmetry isomorphism: ``iota -> iota - nfp*helicity_n``
-  everywhere iota appears, ``G`` unshifted.
+  everywhere iota appears, with the prefactor ``G -> G + N*I``.
 - :class:`KineticProfiles` / :func:`profile_value_and_dds` — polynomial
   ``ne/Te/Ti/Zeff`` profiles in ``s`` (lowest order first, simsopt
   ``ProfilePolynomial`` convention), value + analytic d/ds via Horner.
@@ -26,7 +26,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
 - :func:`redl_geometry_from_state` — traceable lane on
   ``(SpectralState, SolverRuntime)`` using the solver's half-mesh internal
   grid; iota/G/I from ``_iotas_half``/``surface_currents``.
-- :func:`vmec_j_dot_B` / :func:`vmec_j_dot_B_from_wout` — equilibrium
+- :func:`vmec_j_dot_B` — equilibrium
   ``<J.B>`` via the MHD identity (validated against the Zenodo
   ``convertSfincsToVmecCurrentProfile`` script and the wout ``jdotb``):
 
@@ -88,7 +88,6 @@ __all__ = [
     "redl_geometry_from_state",
     "j_dot_B_redl",
     "vmec_j_dot_B",
-    "vmec_j_dot_B_from_wout",
     "RedlBootstrapMismatch",
     "BootstrapPicardResult",
     "self_consistent_bootstrap",
@@ -570,12 +569,13 @@ def j_dot_B_redl(
     ne_s, d_ne_d_s = profile_value_and_dds(profiles.ne_coeffs, s)
     Te_s, d_Te_d_s = profile_value_and_dds(profiles.Te_coeffs, s)
     Ti_s, d_Ti_d_s = profile_value_and_dds(profiles.Ti_coeffs, s)
-    Zeff_s, _ = profile_value_and_dds(profiles.Zeff_coeffs, s)
+    Zeff_s, d_Zeff_d_s = profile_value_and_dds(profiles.Zeff_coeffs, s)
 
     ne_s = jnp.maximum(ne_s, 1e17)
     Te_s = jnp.maximum(Te_s, 1.0)
     Ti_s = jnp.maximum(Ti_s, 1.0)
     ni_s = ne_s / Zeff_s
+    d_ni_d_s = d_ne_d_s / Zeff_s - ne_s * d_Zeff_d_s / Zeff_s ** 2
     pe_s = ne_s * Te_s
     pi_s = ni_s * Ti_s
 
@@ -648,8 +648,10 @@ def j_dot_B_redl(
         / (1 + 0.004 * nu_i * nu_i * (f_t ** 6))
 
     # Factor of ELEMENTARY_CHARGE converts temperatures from eV to J:
-    pref = -geom.G * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
-    dnds_term = pref * (ne_s * Te_s + ni_s * Ti_s) * L31 * (d_ne_d_s / ne_s)
+    # Landreman 2022 (A1): the quasisymmetric prefactor is G + N*I, not G.
+    pref = -(geom.G + helicity_N * geom.I) * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
+    # Redl eq (2) with separate gradients; ni=ne/Zeff assumes one ion species.
+    dnds_term = pref * (Te_s * d_ne_d_s + Ti_s * d_ni_d_s) * L31
     dTeds_term = pref * pe_s * (L31 + L32) * (d_Te_d_s / Te_s)
     dTids_term = pref * pi_s * (L31 + L34 * alpha) * (d_Ti_d_s / Ti_s)
     jdotB = dnds_term + dTeds_term + dTids_term
@@ -731,74 +733,6 @@ def vmec_j_dot_B(
         surfaces = np.linspace(0.05, 0.95, 16)
     return _jv_from_half(_half_mesh_fields(state, rt), _as_1d(surfaces))
 
-
-def vmec_j_dot_B_from_wout(wout, surfaces, *, geom: RedlGeometry | None = None,
-                           ntheta: int = 64, nphi: int = 65) -> Array:
-    """The section-6.2 identity evaluated from wout tables (parity lane).
-
-    Same formula as :func:`vmec_j_dot_B` with ``buco``/``pres``/``phi`` read
-    from the wout dataset and ``<B^2>`` synthesized from ``bmnc``/``gmnc``
-    (plus the ``bmns``/``gmns`` partners when ``lasym``) at the requested
-    ``surfaces``; pass ``geom`` (a :class:`RedlGeometry` from
-    :func:`redl_geometry_from_wout` at the *same* surfaces) to reuse its
-    ``fsa_B2`` instead.  This is the validation lane — the wout ``jdotb``
-    itself (jxbforce.f) is what :class:`RedlBootstrapMismatch` consumes.
-    """
-    if isinstance(wout, (str, Path)):
-        wout = read_wout(wout)
-    wout = getattr(wout, "wout", wout)
-    surfaces = _as_1d(surfaces)
-
-    ns = int(wout.ns)
-    s_full = jnp.linspace(0.0, 1.0, ns)
-    hs = s_full[1] - s_full[0]
-    s_half = _half_grid(ns, s_full.dtype)
-    buco = _as_1d(np.asarray(wout.buco, dtype=float))[1:]
-    p_int = MU0 * _as_1d(np.asarray(wout.pres, dtype=float))[1:]
-    phi_edge = _as_1d(np.asarray(wout.phi, dtype=float))[-1] / (2.0 * jnp.pi)
-    signgs = float(wout.signgs)
-
-    if geom is not None:
-        fsa_B2 = jnp.asarray(geom.fsa_B2)
-    else:
-        xm = _as_1d(np.asarray(wout.xm_nyq, dtype=float))
-        xn = _as_1d(np.asarray(wout.xn_nyq, dtype=float))
-        mn = int(xm.shape[0])
-
-        # Every m != 0 harmonic vanishes at the magnetic axis, where the
-        # surface degenerates to a point.  redl_geometry_from_wout zeroes them
-        # there; without the same treatment the two lanes disagreed by 4.0e-4
-        # at s = 0 while matching bit-for-bit everywhere else.
-        axis_modes = (np.asarray(surfaces) == 0.0)[:, None] & (xm != 0.0)[None, :]
-
-        def half(name):
-            values = _interp_half_grid(
-                _mode_matrix(wout, name, ns=ns, mn=mn)[1:], surfaces, s_half)
-            return jnp.where(axis_modes, 0.0, values)
-
-        theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, int(ntheta), endpoint=False)
-        phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / int(wout.nfp), int(nphi),
-                             endpoint=False)
-        angle = (theta1d[:, None, None] * xm[None, None, :]
-                 - phi1d[None, :, None] * xn[None, None, :])
-        cosangle = jnp.cos(angle)
-        modB = jnp.einsum("sm,tpm->stp", half("bmnc"), cosangle)
-        sqrtg = jnp.einsum("sm,tpm->stp", half("gmnc"), cosangle)
-        if bool(getattr(wout, "lasym", False)):
-            # On a LASYM wout the sine families carry the up-down-asymmetric
-            # half of |B| and sqrt(g); dropping them symmetrizes <B^2> (same
-            # synthesis as :func:`redl_geometry_from_wout`).
-            sinangle = jnp.sin(angle)
-            modB += jnp.einsum("sm,tpm->stp", half("bmns"), sinangle)
-            sqrtg += jnp.einsum("sm,tpm->stp", half("gmns"), sinangle)
-        sqrtg = jnp.abs(sqrtg)
-        fsa_B2 = (jnp.mean(modB * modB * sqrtg, axis=(1, 2))
-                  / jnp.mean(sqrtg, axis=(1, 2)))
-
-    dI = _interp_half_grid(_dds_half(buco, hs), surfaces, s_half)
-    dp = _interp_half_grid(_dds_half(p_int, hs), surfaces, s_half)
-    I = _interp_half_grid(buco, surfaces, s_half)  # noqa: E741 - Boozer I
-    return signgs * (fsa_B2 * dI + I * dp) / (MU0 * phi_edge)
 
 
 # ===========================================================================
@@ -942,8 +876,9 @@ class RedlBootstrapMismatch:
 class BootstrapPicardResult:
     """Outcome of :func:`self_consistent_bootstrap`.
 
-    ``input`` carries the final ``AC``/``CURTOR`` (``ncurr=1``,
-    ``pcurr_type="power_series"``); ``equilibrium`` is the last solved
+    ``input`` is the deck used for ``equilibrium``, with its final
+    ``AC``/``CURTOR``; refits use ``ncurr=1``, ``pcurr_type="power_series"``.
+    ``equilibrium`` is the last solved
     :class:`~vmex.core.optimize.Equilibrium`; ``history`` is one dict per
     iteration (``curtor``, ``delta``, ``f_boot``).  ``delta`` is the
     self-consistency error ``max|I'_Redl - I'_applied| / max|I'_Redl|``
@@ -987,6 +922,8 @@ def self_consistent_bootstrap(
     degree: int = 12,
     s_eval=None,
     solve_kwargs: dict | None = None,
+    current_model=None,
+    initial_state=None,
     verbose: bool = False,
 ) -> BootstrapPicardResult:
     """Fixed-boundary Picard iteration to a bootstrap-consistent current profile.
@@ -1017,10 +954,17 @@ def self_consistent_bootstrap(
     stable.  ``degree`` is clipped to ``ns - 2``.  The first solve uses
     ``inp``'s own current settings (any ``pcurr_type``); every refit
     switches to ``ncurr=1`` + ``power_series``.
+
+    ``current_model(equilibrium, s_eval, jr)`` replaces the Redl ``<J.B>``
+    ``jr`` [A T/m^2] on ``s_eval`` in step 2, e.g. by a kinetic calculation
+    on the solved equilibrium; the loop then converges to that current.
+    ``initial_state`` hot-starts the first solve.
     """
     from . import optimize as opt
 
     solve_kwargs = dict(solve_kwargs or {})
+    if n_iter < 1:
+        raise ValueError("n_iter must be positive")
     if s_eval is None:
         s_eval = np.linspace(0.02, 0.98, 49)
     s_eval = np.atleast_1d(np.asarray(s_eval, dtype=float))
@@ -1031,7 +975,7 @@ def self_consistent_bootstrap(
     mismatch = RedlBootstrapMismatch(profiles, helicity_n,
                                      surfaces=np.clip(s_eval, 0.05, 0.95))
     history: list[dict] = []
-    state = None
+    state = initial_state
     dIds_applied = None   # I'(s_full) currently driving the equilibrium
     eq = None
     converged = False
@@ -1054,6 +998,8 @@ def self_consistent_bootstrap(
 
         geom = redl_geometry_from_wout(w, s_eval)
         jr, _ = j_dot_B_redl(profiles, geom, helicity_n)
+        if current_model is not None:
+            jr = current_model(eq, s_eval, jr)
         jr_full = np.interp(s_full, np.concatenate([[0.0], s_eval, [1.0]]),
                             np.concatenate([[0.0], np.asarray(jr), [0.0]]))
         fsa_B2_full = np.interp(s_full, s_eval, np.asarray(geom.fsa_B2))
@@ -1086,6 +1032,8 @@ def self_consistent_bootstrap(
         if delta <= float(tol):
             converged = True
             break
+        if it + 1 == int(n_iter):
+            break  # Return the solved deck, not an unevaluated next iterate.
 
         dIds_use = (dIds_new if dIds_applied is None
                     else (1.0 - relax) * dIds_applied + relax * dIds_new)

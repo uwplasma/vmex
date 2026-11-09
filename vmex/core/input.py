@@ -2,7 +2,7 @@
 
 VMEC2000 counterparts: ``LIBSTELL/Sources/Modules/vmec_input.f``
 (``read_indata_namelist``: variable set and defaults) and ``readin.f``
-(post-read normalizations).  The JSON schema follows VMEC++
+(post-read normalizations).  The JSON schema follows the C++ VMEC reimplementation
 (``vmecpp.VmecInput``): identical key names, boundary coefficients as sparse
 ``{"m": int, "n": int, "value": float}`` lists, dense axis arrays, and
 ``adiabatic_index`` accepted as an alias for ``gamma``.
@@ -138,6 +138,9 @@ _KNOWN_INDATA_NAMES = {
     "LBOOZ", "MBOOZ", "NBOOZ", "BOOZ_SURFACES",
     # VMEX extension: hot restart from a wout file (no VMEC2000 equivalent).
     "RESTART_WOUT",
+    # VMEX extension: free-boundary position control (see core/position_control.py).
+    "LPOSITION_CONTROL", "POSITION_TARGET", "POSITION_INTERVAL",
+    "POSITION_GAIN", "POSITION_NMAX",
 }
 
 def _strip_fortran_comments(line: str) -> str:
@@ -625,13 +628,6 @@ def _validate_indata_modes(
             "anisotropic-pressure/flow (ANIMEC) physics is not implemented",
         )
 
-    if float(first("TVOLUME", -1.0)) > 0.0:
-        raise UnsupportedInputModeError(
-            "D00G_VOLUME_RESCALE_UNSUPPORTED",
-            "TVOLUME/LVOLUME_RFIX",
-            "VMEC2000 boundary-volume rescaling is not implemented",
-        )
-
     precon_type = str(first("PRECON_TYPE", "NONE")).strip().upper()
     if precon_type not in {"", "NONE", "DEFAULT", "GMRES"}:
         raise UnsupportedInputModeError(
@@ -650,12 +646,6 @@ def _validate_indata_modes(
             "D00I_ITERATION_CONTROL_UNSUPPORTED",
             "MAX_MAIN_ITERATIONS",
             "automatic continuation by additional NITER blocks is not implemented",
-        )
-    if bool(first("LGIVEUP", False)):
-        raise UnsupportedInputModeError(
-            "D00I_ITERATION_CONTROL_UNSUPPORTED",
-            "LGIVEUP/FGIVEUP",
-            "VMEC2000 early termination between multigrid stages is not implemented",
         )
 
     if bool(first("LBSUBS", False)):
@@ -691,6 +681,28 @@ def _validate_indata_modes(
         )
 
 
+# Keys of the JSON input format of the C++ VMEC reimplementation that VMEX
+# accepts at their default only (its writer emits every key).  The -1 sentinels
+# mean "use mpol/ntor".  INDATA equivalents: iteration_style=vmec_8_52 is the
+# VMEC2000 iteration; lgiveup/fgiveup, lbsubs are INDATA LGIVEUP/FGIVEUP/LBSUBS
+# (rejected at INDATA too); the rest have no INDATA control.
+_JSON_DEFAULT_ONLY: Dict[str, Any] = {
+    "vacuum_mpol": 0, "vacuum_ntor": 0, "signgs": -1,
+    "iteration_style": "vmec_8_52", "lbsubs": False,
+    "lambda_preconditioner_scale": 0.5, "always_fix_m1_gauge": False,
+}
+# Accepted at any value: VMEX always returns its final state and keeps no
+# backup of the evaluated state, so neither changes a converged solve.
+_JSON_ANY_VALUE = ("backup_evaluated_state", "return_outputs_even_if_not_converged")
+
+
+def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
+    value = data[key]
+    if isinstance(default, str):
+        return str(value).strip().lower() == default
+    return value == default
+
+
 def _validate_json_modes(data: Dict[str, Any]) -> None:
     """Apply the same no-silent-fallback policy to structured JSON controls."""
     method = str(data.get("free_boundary_method", "nestor")).strip().lower()
@@ -701,8 +713,26 @@ def _validate_json_modes(data: Dict[str, Any]) -> None:
             "VMEX JSON solves support NESTOR; only_coils/biest are different models",
         )
 
+    for key in ("mpol", "ntor"):  # geometry resolution >= mpol/ntor or < 0: same
+        geometry = data.get(key + "_geometry")
+        if geometry is not None and 0 <= int(geometry) < int(data.get(key, 6 if key == "mpol" else 0)):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key + "_geometry",
+                "a reduced R/Z resolution with full-resolution lambda is not "
+                "implemented; VMEX uses one resolution for both",
+            )
+    for key, default in _JSON_DEFAULT_ONLY.items():
+        if key in data and not _json_is_default(data, key, default):
+            raise UnsupportedInputModeError(
+                "D00L_JSON_KEY_UNSUPPORTED", key,
+                f"only the default ({default!r}) is implemented; the "
+                "VMEC2000 INDATA deck has no equivalent control",
+            )
+
     field_names = {field.name for field in fields(VmecInput)}
-    known = field_names | {"adiabatic_index", "free_boundary_method"}
+    known = (field_names | {"adiabatic_index", "free_boundary_method"}
+             | set(_JSON_DEFAULT_ONLY) | set(_JSON_ANY_VALUE)
+             | {"mpol_geometry", "ntor_geometry", "lambda_precondition_checkerboard_terms"})
     unknown = sorted(set(data) - known)
     if unknown:
         raise ValueError(
@@ -775,6 +805,8 @@ class VmecInput:
     zbs: Any = None              #: Z boundary sin(m u - n nfp v)
     rbs: Any = None              #: R boundary sin (lasym)
     zbc: Any = None              #: Z boundary cos (lasym)
+    tvolume: float = -1.0        #: rescale the boundary to this volume [m^3] (<= 0: off)
+    lvolume_rfix: bool = False   #: hold the m = 0 harmonics when rescaling
 
     # -- free boundary (readin.f) --
     lfreeb: bool = True          #: forced False when mgrid_file == 'NONE'
@@ -790,6 +822,16 @@ class VmecInput:
 
     # -- VMEX extension: hot restart (no VMEC2000 equivalent) --
     restart_wout: str = ""       #: wout path to seed the solve from ('' = cold)
+
+    # -- VMEX extension: free-boundary position control (no VMEC2000 equivalent) --
+    lposition_control: bool = False  #: hold the plasma at a target radius with a vertical field
+    position_target: float = 0.0     #: target axis radius [m]; <= 0 keeps the initial axis
+    position_interval: int = 20      #: iterations between control updates
+    position_gain: float = 4.0       #: proportional gain, in units of mu0 I / (4 pi R0^2)
+    lgiveup: bool = False        #: stop the ladder after a stage above fgiveup*ftol
+    fgiveup: float = 30.0        #: give-up factor on ftol (lgiveup)
+    lambda_m0_floor: float | None = None  #: radial m=0 lambda preconditioner floor (None: diagonal)
+    position_nmax: int = 0           #: highest helical harmonic controlled (0 = uniform B_Z only)
 
     def __post_init__(self) -> None:
         set_ = object.__setattr__
@@ -809,6 +851,19 @@ class VmecInput:
         set_(self, "precon_type", str(self.precon_type).strip())
         set_(self, "mgrid_file", str(self.mgrid_file).strip())
         set_(self, "restart_wout", str(self.restart_wout).strip())
+        set_(self, "tvolume", float(self.tvolume))
+        set_(self, "lvolume_rfix", bool(self.lvolume_rfix))
+        set_(self, "lposition_control", bool(self.lposition_control))
+        set_(self, "position_target", float(self.position_target))
+        set_(self, "position_interval", int(self.position_interval))
+        set_(self, "position_gain", float(self.position_gain))
+        set_(self, "position_nmax", int(self.position_nmax))
+        if self.position_interval < 1:
+            raise ValueError("POSITION_INTERVAL must be a positive iteration count")
+        if self.position_gain <= 0.0:
+            raise ValueError("POSITION_GAIN must be positive")
+        if not 0 <= self.position_nmax <= max(int(self.ntor), 0):
+            raise ValueError("POSITION_NMAX must lie between 0 and NTOR")
 
         # readin.f stops at the first nonpositive or decreasing entry; later
         # values are outside multi_ns_grid and never reach runvmec.f.
@@ -1268,11 +1323,20 @@ class VmecInput:
             precon_type=str(get("PRECON_TYPE", "NONE")),
             prec2d_threshold=float(get("PREC2D_THRESHOLD", 1e-30)),
             restart_wout=str(get("RESTART_WOUT", "")),
+            tvolume=float(get("TVOLUME", -1.0)),
+            lvolume_rfix=bool(get("LVOLUME_RFIX", False)),
+            lposition_control=bool(get("LPOSITION_CONTROL", False)),
+            position_target=float(get("POSITION_TARGET", 0.0)),
+            position_interval=int(get("POSITION_INTERVAL", 20)),
+            position_gain=float(get("POSITION_GAIN", 4.0)),
+            position_nmax=int(get("POSITION_NMAX", 0)),
+            lgiveup=bool(get("LGIVEUP", False)),
+            fgiveup=float(get("FGIVEUP", 30.0)),
         )
 
     @classmethod
     def from_json_text(cls, text: str) -> "VmecInput":
-        """Build from structured JSON text (vmecpp.VmecInput layout).
+        """Build from structured JSON text (layout of the C++ VMEC reimplementation).
 
         Same key names as the dataclass fields; ``adiabatic_index`` is
         accepted as an alias for ``gamma``; ``rbc/zbs/rbs/zbc`` are sparse
@@ -1284,9 +1348,12 @@ class VmecInput:
         data = json.loads(text)
         # Reserved execution-metadata section: run controls, never physics.
         # ``vmex.core.run_options`` validates and consumes it; the physics
-        # schema stays VMEC++ compatible once it is removed.
+        # schema stays compatible once it is removed.
         data.pop("_vmex", None)
         _validate_json_modes(data)
+        floor = data.get("lambda_precondition_checkerboard_terms")
+        if floor is not None and "lambda_m0_floor" not in data:
+            data["lambda_m0_floor"] = float(floor) if float(floor) >= 0 else None
         if "adiabatic_index" in data and "gamma" not in data:
             data["gamma"] = data["adiabatic_index"]
 
@@ -1316,13 +1383,13 @@ class VmecInput:
         kwargs["mpol"] = mpol
         kwargs["ntor"] = ntor
         if "lfreeb" not in kwargs:
-            kwargs["lfreeb"] = False  # VMEC++ default (vmecpp.VmecInput)
+            kwargs["lfreeb"] = False  # default of that format
         return cls(**kwargs)
 
     # -- writers --------------------------------------------------------------
 
     def to_json(self, path: str | Path) -> Path:
-        """Write VMEC++-schema JSON that round-trips through :meth:`from_file`.
+        """Write JSON in that format that round-trips through :meth:`from_file`.
 
         Boundary coefficients are written as sparse ``{"m","n","value"}``
         lists (nonzero entries only); axis and profile arrays are dense.
@@ -1419,6 +1486,15 @@ class VmecInput:
         put("PREC2D_THRESHOLD", self.prec2d_threshold)
         if self.restart_wout:
             put("RESTART_WOUT", self.restart_wout)
+        if self.tvolume > 0.0:
+            put("TVOLUME", self.tvolume)
+            put("LVOLUME_RFIX", self.lvolume_rfix)
+        if self.lposition_control:
+            put("LPOSITION_CONTROL", True)
+            put("POSITION_TARGET", self.position_target)
+            put("POSITION_INTERVAL", self.position_interval)
+            put("POSITION_GAIN", self.position_gain)
+            put("POSITION_NMAX", self.position_nmax)
         put("RAXIS_CC", self.raxis_c)
         put("ZAXIS_CS", self.zaxis_s)
         if self.lasym or np.any(self.raxis_s) or np.any(self.zaxis_c):

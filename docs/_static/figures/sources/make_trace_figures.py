@@ -3,7 +3,7 @@
 
 - ``readme_trace_benchmark.webp`` plots ``benchmarks/trace_cross_code.json``:
   loss fraction against time for VMEX, SIMPLE and SIMSOPT, and their runtimes
-  without compilation.  The record comes from ``benchmarks/trace_cross_code.py``.
+  without compilation.  The record comes from ``tools/trace_cross_code.py``.
 - ``readme_trace_output.webp`` is the six-panel ``*_trace.png`` that
   ``vmex --trace`` writes, for the VMEX run of that record.  The trace is
   deterministic, so it is re-run from the recorded settings, and the lost count

@@ -237,8 +237,7 @@ vacuum deck ``input.LandremanPaul2021_QA_lowres`` (``ctor`` of order
 field has these median | maximum errors relative to ``volavgB``, for 40
 targets along the outward normal, ``digits = 4``, versus distance in minor
 radii :math:`a` and per-period source grid ``nphi = ntheta = N``. The runs
-date from 2026-09-13 (``benchmarks/review_20260913.json`` records the
-``N = 32`` rows), before the grid was sized from the boundary:
+date from 2026-09-13, before the grid was sized from the boundary:
 
 .. list-table::
    :header-rows: 1
@@ -336,8 +335,7 @@ toroidal rule, validated numerically, not taken from a reference.
 Spatial derivatives of the direct path come from the same closed-form
 kernels on the finest schedule level, where nested ``jacfwd`` through the
 schedule used to differentiate the quadrature: the values agree to 1e-12. On
-a 36-core CPU host (A/B/A/B, ``benchmarks/extender_ab_20260923.json``,
-generator ``benchmarks/extender_ab.py``) the first ``B`` to ``gradgradgradB``
+a 36-core CPU host (A/B/A/B, 2026-09-23) the first ``B`` to ``gradgradgradB``
 calls at 16 targets took 2.9 s against 6.0 s, and a warm ``gradgradgradB``
 took 0.09 s against 0.50 s at 16 targets and 0.47 s against 1.98 s at 128.
 At 16 targets 0.05 minor radii out the default settings now cost 0.42 s warm
@@ -405,27 +403,21 @@ CPU and is not yet a practical GPU path. Its ``device="auto"`` policy therefore
 uses the CPU on an accelerator host unless the process already pins JAX
 placement, while retaining an explicit per-call GPU override.
 Three transpose solvers are available through ``adjoint_solver``:
-``"coupled_gcrot"`` (the certified default), ``"edge_response"``, which
-iterates the coupled transpose on a dense model of NESTOR's edge response
-built once per gradient, and ``"boundary_schur"``, the boundary-Schur
-transpose. The boundary-Schur solver
+``"boundary_schur"``, the default, and two advanced settings:
+``"coupled_gcrot"``, the matrix-free cross-check for a suspect gradient, and
+``"edge_response"``, which iterates the coupled transpose on a dense model of
+NESTOR's edge response built once per gradient. The boundary-Schur solver
 differentiates one three-surface force row at a time, retains every terminal
 radial stencil coupling in the bulk, isolates the one evolved edge row that
 contains NESTOR's response, and eliminates the radial bulk with a
-two-sided-equilibrated, globally pivoted
-sparse LU. Reverse-mode row differentiation is used because each local
+two-sided-equilibrated, row-pivoted banded LU (LAPACK ``gbtrf``). Reverse-mode row differentiation is used because each local
 Jacobian has three times more inputs than outputs. The reduced transpose is
 solved and back-substituted, then checked against the original coupled
-residual; a failed certificate continues with coupled Krylov from the Schur
-answer. No dense full-state Jacobian is formed.
+residual; a failed certificate is refined on that exact operator, then continues
+there with Krylov. No dense full-state Jacobian is formed.
 
-The reduced lane is not yet the default. Direct local-row assembly removes
-the full radial basis sweep, the pivoted band solve removes the inaccurate
-no-pivot elimination, and the exact one-row interface avoids redundant NESTOR
-pullbacks. Local-force and vacuum-response compilation remain the cold-cost
-targets. The next measured step is to cache accepted-state local executables
-and batch the NESTOR edge pullbacks on GPU. Promotion requires lower cold time
-and memory on the bundled 3-D case
-while retaining the re-solve finite-difference, CPU/GPU, and fixed/free field
-certificates. Timings belong in the resource harness, not committed
+Promotion to default rested on agreement with the coupled solver on the NCSX,
+CTH-like, LASYM DIII-D and single-stage decks. Against re-solve finite
+differences both solvers carry the same error, because they solve one system. Local-force and vacuum-response compilation remain the cold-cost
+targets. Timings belong in the resource harness, not committed
 JSON files.

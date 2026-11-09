@@ -20,6 +20,7 @@ links to the module that documents it.
 - :func:`~vmex.core.multigrid.solve_file` — run a deck the way the CLI does
   (directives honored, ``wout_<case>.nc`` written)
 - :func:`~vmex.core.freeboundary.solve_free_boundary` — NESTOR free boundary
+- :func:`~vmex.core.freeboundary.relax_free_boundary_constraint` — remove the constraint bias of a free-boundary LCFS
 - :func:`~vmex.core.multigrid.solve_free_boundary_multigrid` — free-boundary ladder
 - :func:`~vmex.core.freeboundary.solve_phiedge` — PHIEDGE whose free-boundary
   LCFS meets a target outboard radius or volume
@@ -29,6 +30,9 @@ links to the module that documents it.
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit` /
   :func:`~vmex.core.freeboundary_implicit.solve_free_boundary_implicit_status`
   — coupled NESTOR/VMEC implicit derivative
+- :func:`~vmex.core.newton.solve_free_boundary_newton` →
+  :class:`~vmex.core.newton.NewtonResult` — opt-in Newton polish of a
+  free-boundary equilibrium on its coupled root
 - :func:`~vmex.core.restart.state_from_wout` /
   :func:`~vmex.core.restart.restart_state` — hot restart from any wout
   (also ``solve*(..., restart_from=...)``)
@@ -42,6 +46,10 @@ links to the module that documents it.
   field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
   / :func:`~vmex.core.scaling.scale_mgrid` — dimensional similarity transforms
+- :func:`~vmex.core.scaling.axis_field` / :func:`~vmex.core.scaling.match_b0` —
+  ``|B|`` on the magnetic axis, and the scaled deck that sets it
+- :func:`~vmex.core.setup.boundary_volume` — input-boundary volume, the
+  ``TVOLUME`` that holds an optimized plasma at its seed size
 
 **High-order reconstruction and strong-force certificate**
 
@@ -49,6 +57,7 @@ links to the module that documents it.
   :func:`~vmex.core.strong_force.high_order_state_from_wout` /
   :func:`~vmex.core.strong_force.lift_high_order_state` — axis-regular
   continuous reconstruction
+  (:func:`~vmex.core.strong_force.traced_lift` is its traceable form)
 - :func:`~vmex.core.strong_force.evaluate_high_order_fields` →
   :class:`~vmex.core.strong_force.HighOrderFieldSamples`;
   :func:`~vmex.core.strong_force.evaluate_high_order_surface` →
@@ -113,6 +122,9 @@ links to the module that documents it.
   / :func:`~vmex.core.mgrid.read_mgrid` / :func:`~vmex.core.mgrid.write_mgrid`
   / :func:`~vmex.core.mgrid.tabulate_cartesian_field` — mgrid or tabulated
   direct field (``MgridField.from_coils`` tabulates an ESSOS coil set)
+- :class:`~vmex.core.position_control.PositionControl` — opt-in feedback on a
+  vertical field that holds a plasma at a target radius in a free-boundary
+  solve (``position_control=`` of the free-boundary solvers)
 - :class:`~vmex.core.extender.MagneticField` — base JAX field with explicit
   and stored-point evaluation;
   :class:`~vmex.core.extender.VmecInteriorField` — field inside the plasma;
@@ -151,16 +163,21 @@ from packaging.version import Version as _Version
 
 # Oldest supported versions, equal to the pyproject.toml floors.  SciPy 1.16
 # added the least_squares(callback=) that the optimization examples pass.
-_MINIMUM_VERSIONS = {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
-                     "booz_xform_jax": (0, 4, 3), "solvax": (0, 27, 0)}
+# SciPy 1.16 and JAX 0.7+ need Python 3.11, so Python 3.10 has lower floors.
+_MINIMUM_VERSIONS = (
+    {"scipy": (1, 16), "jax": (0, 9, 2), "jaxlib": (0, 9, 2),
+     "booz_xform_jax": (0, 5, 1), "solvax": (0, 35, 1)}
+    if _sys.version_info >= (3, 11) else
+    {"scipy": (1, 15), "jax": (0, 6, 2), "jaxlib": (0, 6, 2),
+     "booz_xform_jax": (0, 5, 1), "solvax": (0, 35, 1)})
 
 
 def _check_supported_versions() -> None:
     """Fail at import, not deep inside an example, on an unsupported stack."""
-    if _sys.version_info < (3, 11):
+    if _sys.version_info < (3, 10):
         raise ImportError(
-            f"vmex requires Python >= 3.11 (found {_sys.version.split()[0]}); "
-            "install vmex in a Python 3.11+ environment.")
+            f"vmex requires Python >= 3.10 (found {_sys.version.split()[0]}); "
+            "install vmex in a Python 3.10+ environment.")
     for name, minimum in _MINIMUM_VERSIONS.items():
         try:
             found = _package_version(name)
@@ -220,9 +237,12 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "solve_multigrid": (".core.multigrid", "solve_multigrid"),
     "solve_free_boundary_multigrid": (
         ".core.multigrid", "solve_free_boundary_multigrid"),
+    "relax_free_boundary_constraint": (".core.freeboundary", "relax_free_boundary_constraint"),
     "solve_free_boundary": (".core.freeboundary", "solve_free_boundary"),
     "solve_phiedge": (".core.freeboundary", "solve_phiedge"),
     "phiedge_root": (".core.freeboundary_implicit", "phiedge_root"),
+    "solve_free_boundary_newton": (".core.newton", "solve_free_boundary_newton"),
+    "NewtonResult": (".core.newton", "NewtonResult"),
     "make_free_boundary_config": (
         ".core.freeboundary_implicit", "make_free_boundary_config"),
     "solve_free_boundary_implicit": (
@@ -301,6 +321,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     # external fields
     "MgridData": (".core.mgrid", "MgridData"),
     "MgridField": (".core.mgrid", "MgridField"),
+    "PositionControl": (".core.position_control", "PositionControl"),
     "read_mgrid": (".core.mgrid", "read_mgrid"),
     "tabulate_cartesian_field": (".core.mgrid", "tabulate_cartesian_field"),
     "write_mgrid": (".core.mgrid", "write_mgrid"),
@@ -316,7 +337,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "surface_field_data_from_wout": (
         ".core.virtual_casing", "surface_field_data_from_wout"),
     # dimensional scaling
+    "axis_field": (".core.scaling", "axis_field"),
+    "match_b0": (".core.scaling", "match_b0"),
     "scale_input": (".core.scaling", "scale_input"),
+    "boundary_volume": (".core.setup", "boundary_volume"),
     "scale_mgrid": (".core.scaling", "scale_mgrid"),
     "scale_wout": (".core.scaling", "scale_wout"),
     # errors
@@ -340,16 +364,26 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
 __all__ = ["__version__", *sorted(_LAZY_ATTRS)]
 
 
-def __getattr__(name: str):
-    entry = _LAZY_ATTRS.get(name)
-    if entry is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute = entry
-    module = _import_module(module_name, __name__)
-    value = module if attribute is None else getattr(module, attribute)
-    globals()[name] = value
-    return value
+def _lazy_exports(package: str, table: dict, namespace: dict):
+    """PEP 562 ``(__getattr__, __dir__)`` resolving ``table`` on first access.
+
+    ``table`` maps a public name to ``(relative module, attribute)``; an
+    attribute of ``None`` exports the module itself.  Resolved values are
+    cached in ``namespace`` so later lookups bypass ``__getattr__``.
+    """
+
+    def __getattr__(name: str):
+        entry = table.get(name)
+        if entry is None:
+            raise AttributeError(f"module {package!r} has no attribute {name!r}")
+        module = _import_module(entry[0], package)
+        namespace[name] = value = module if entry[1] is None else getattr(module, entry[1])
+        return value
+
+    def __dir__():
+        return sorted(set(namespace) | set(table))
+
+    return __getattr__, __dir__
 
 
-def __dir__():
-    return sorted(set(globals()) | set(_LAZY_ATTRS))
+__getattr__, __dir__ = _lazy_exports(__name__, _LAZY_ATTRS, globals())

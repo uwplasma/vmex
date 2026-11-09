@@ -133,26 +133,33 @@ monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
+# Every stage shares one resolution, so one problem at the largest max_mode
+# serves them all: problem.subproblem() frees only the stage's harmonics and
+# every jitted residual and Jacobian is compiled once.
+mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
+inp = replace(inp, delt=0.5).change_resolution(
+    mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+# A RuntimeWarning about uncertified Jacobian columns is expected once the
+# optimizer leaves the seed and needs no action; see examples/README.md.
+problem = opt.VmecProblem.from_tuples(
+    inp, objective_function_terms, max_mode=max(MAX_MODES),
+    vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA,
+    progress=not ci_smoke, evaluation_progress=not ci_smoke)
+monitor.problem = problem
+if not ci_smoke:
+    problem.compile_residual_and_jacobian()
+x = problem.x0
 for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QP stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    # A RuntimeWarning about uncertified Jacobian columns is expected once the
-    # optimizer leaves the seed and needs no action; see examples/README.md.
-    problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms, max_mode=max_mode,
-        vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, ess_alpha=ESS_ALPHA)
-    print(f"dof_names = {problem.dof_names}")
-    monitor.problem = problem
-    if not ci_smoke:
-        problem.compile_residual_and_jacobian()
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage.dof_names}")
     result = least_squares(
-        problem.residual, problem.x0, jac=problem.residual_jac,
-        x_scale=problem.scales, max_nfev=max_nfev, ftol=1e-6, xtol=1e-10,
+        stage.residual, stage.x0, jac=stage.residual_jac,
+        x_scale=stage.scales, max_nfev=max_nfev, ftol=1e-6, xtol=1e-10,
         verbose=2, callback=monitor)
-    inp = problem.input_from_x(result.x)
-    equilibrium = problem.equilibrium_from_x(result.x)
+    x = stage.embed(result.x)
+    inp = problem.input_from_x(x)
+    equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
     inp.to_indata(f"input.{STAGE_NAME}_max_mode_{max_mode:03d}")
 

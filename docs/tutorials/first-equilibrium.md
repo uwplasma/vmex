@@ -145,4 +145,19 @@ Boozer `|B|` spectrum on the last closed flux surface:
 :language: python
 ```
 
+## Model and references
+
+VMEC finds nested flux surfaces that make the ideal-MHD energy stationary,
+
+$$W = \int_V \left(\frac{B^2}{2\mu_0} + \frac{p}{\gamma-1}\right) dV, \qquad \delta W = 0 \iff \mathbf{J}\times\mathbf{B} = \nabla p ,$$
+
+with the surface shapes $R, Z$ and the stream function $\lambda$ as Fourier series in the angles and
+finite differences in radius. The force residuals `fsqr`, `fsqz`, `fsql` printed during the solve are the
+normalized squared Fourier-space forces; the run stops when all three fall below `FTOL`. The method,
+its preconditioner and the multigrid ladder are derived in {doc}`/explanation/variational-problem`
+and {doc}`/explanation/iteration`.
+
+- S. P. Hirshman and J. C. Whitson, *Phys. Fluids* 26, 3553 (1983): the energy principle and steepest-descent moment method.
+- S. P. Hirshman, W. I. van Rij and P. Merkel, *Comput. Phys. Commun.* 43, 143 (1986): the free-boundary extension.
+
 Next: {doc}`first-gradient` differentiates an equilibrium.

@@ -10,6 +10,7 @@ exactly, so the batched path is a pure efficiency win with identical gradients.
 from __future__ import annotations
 
 import dataclasses
+import types
 from pathlib import Path
 
 import jax
@@ -223,13 +224,14 @@ def test_block_response_forward_transpose_and_fd():
         np.testing.assert_allclose(
             directional, finite_difference, rtol=2e-5, atol=2e-8
         )
-def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeypatch):
-    """A column the corrector leaves uncertified is refined through the block factors.
+def test_block_preconditioned_corrector_recovers_a_poor_direct_solve(monkeypatch):
+    """A column the direct block solve misses is certified by the corrector.
 
-    Before refinement, one such column sent the automatic optimizer Jacobian to the
-    reverse lane, which maps a pullback over every residual row (655 s instead of
-    27 s for 17,716 rows and 48 columns). A stalled corrector is simulated here: it
-    returns a perturbed warm start with a non-converged report.
+    The corrector is GMRES on the raw operator, right-preconditioned by the
+    same block factors, so a perturbed direct solve converges back to the
+    reference in one preconditioned iteration instead of sending the optimizer Jacobian
+    to the reverse lane (655 s instead of 27 s for 17,716 rows and 48
+    columns on the stage that motivated block refinement).
     """
     inp, cfg, p0 = _small_solovev_setup()
     state, mask = im.solve_implicit_with_aux(p0, cfg)
@@ -246,34 +248,31 @@ def test_block_response_refines_columns_the_corrector_leaves_uncertified(monkeyp
 
     reference, report = respond()
     assert np.all(np.asarray(report.converged))
-
-    def stalled(A, b, cfg, *, x0=None, max_restarts=None, rtol=None):
-        return jax.tree.map(lambda value: 1.001 * value, x0), im.LinearResponseReport(
-            residual_norm=jnp.asarray(1.0e30), tolerance=jnp.asarray(0.0),
-            iterations=jnp.asarray(1, jnp.int32), converged=jnp.asarray(False))
-
-    monkeypatch.setattr(im, "_adjoint_solve", stalled)
-    passes = im._BLOCK_REFINEMENT_PASSES
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", 0)
-    _, unrefined = respond()
-    assert not np.any(np.asarray(unrefined.converged))
-    monkeypatch.setattr(im, "_BLOCK_REFINEMENT_PASSES", passes)
-    refined, report = respond()
+    direct = im._raw_block_solve
+    monkeypatch.setattr(im, "_raw_block_solve", lambda *a, **k: (
+        jax.tree.map(lambda value: 1.001 * value, direct(*a, **k)[0]), None))
+    corrected, report = respond()
     assert np.all(np.asarray(report.converged))
-    assert _relative_difference(refined, reference) < 1e-8
+    assert _relative_difference(corrected, reference) < 1e-7
 
 
 def test_raw_block_probe_chunking_preserves_exact_factors():
-    """Bounded VJP batches assemble the same local block Jacobian."""
+    """Bounded VJP batches assemble the same local block Jacobian.
+
+    ``probe_chunk_size`` bounds only the per-row reverse build, which a
+    supplied ``runtime`` selects; the default colored build sizes its batches
+    from ``_COLORED_PROBE_BUDGET`` (varied in the colored-versus-local test).
+    """
 
     _, cfg, params = _small_solovev_setup()
     state, mask = im.solve_implicit_with_aux(params, cfg)
     active = im._active_state_fields(cfg)
+    runtime = im.runtime_from_params(params, cfg)
     scalar = im._raw_block_system(
-        params, cfg, state, mask, active, probe_chunk_size=1
+        params, cfg, state, mask, active, probe_chunk_size=1, runtime=runtime
     )
     chunked = im._raw_block_system(
-        params, cfg, state, mask, active, probe_chunk_size=4
+        params, cfg, state, mask, active, probe_chunk_size=4, runtime=runtime
     )
     for name in ("lower", "diagonal", "upper", "row_scale", "column_scale"):
         np.testing.assert_allclose(
@@ -314,6 +313,50 @@ def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
         np.testing.assert_allclose(
             getattr(colored, name), getattr(per_row, name), rtol=0, atol=1e-12 * scale
         )
+
+
+def _jaxpr_array_sizes(jaxpr):
+    """Element counts of every array an equation of ``jaxpr`` (nested too) produces."""
+    sizes = []
+    for eqn in jaxpr.eqns:
+        sizes += [int(np.prod(v.aval.shape, dtype=np.int64)) for v in eqn.outvars
+                  if hasattr(v.aval, "shape")]
+        for value in eqn.params.values():
+            for inner in value if isinstance(value, (list, tuple)) else [value]:
+                inner = getattr(inner, "jaxpr", inner)
+                if hasattr(inner, "eqns"):
+                    sizes += _jaxpr_array_sizes(inner)
+    return sizes
+
+
+@pytest.mark.parametrize("ns,block", [(24, 3), (13, 4)])
+def test_colored_bands_recover_bands_without_a_quadratic_intermediate(ns, block):
+    """The band extraction stays linear in the radial count.
+
+    The colored build holds ``3 * block * ns * block`` responses.  Selecting
+    each row's color before its surface once built an
+    ``(ns, block, ns, block)`` array -- ``ns / 3`` times the responses, 30 GB
+    per band for the ns = 65 integer 3-D deck -- so no equation of the traced
+    build may exceed a small multiple of the responses, and the bands must
+    still equal the operator's blocks exactly.
+    """
+    rng = np.random.default_rng(ns)
+    lower, diagonal, upper = (jnp.asarray(rng.standard_normal((ns, block, block)))
+                              for _ in range(3))
+    lower, upper = lower.at[0].set(0.0), upper.at[-1].set(0.0)
+
+    def operator(tangent):
+        return im.block_tridiag_matvec(lower, diagonal, upper, tangent)
+
+    identity = lambda value: value  # noqa: E731
+    build = lambda: im._colored_bands(  # noqa: E731
+        operator, identity, identity, identity, ns, block, jnp.float64, 5)
+    got = build()
+    for name, mine, theirs in zip(("lower", "diagonal", "upper"), got,
+                                  (lower, diagonal, upper)):
+        np.testing.assert_allclose(mine, theirs, rtol=0, atol=1e-14, err_msg=name)
+    responses = 3 * block * ns * block
+    assert max(_jaxpr_array_sizes(jax.make_jaxpr(build)().jaxpr)) <= 2 * responses
 
 
 @pytest.mark.full
@@ -486,3 +529,52 @@ def test_chunk_size_resolver_accepts_auto_and_rejects_other_strings():
 def test_tree_bytes_is_exact_from_shapes():
     tree = {"a": jnp.zeros((3, 4)), "b": np.zeros(5, dtype=np.float32)}
     assert im._tree_bytes(tree) == 3 * 4 * 8 + 5 * 4
+
+
+def test_block_factor_backends_agree_and_auto_follows_the_platform(monkeypatch):
+    """Thomas and cyclic reduction give the same certified responses.
+
+    Eleven surfaces put the cutoff-8 reduction through one real level
+    (``ns <= 8`` would be plain Thomas); ``"auto"`` is Thomas on the host
+    and cyclic reduction when the placement device or default backend is a GPU.
+    """
+    inp = _small_solovev_setup()[0]
+    inp = dataclasses.replace(inp, ns_array=np.asarray([11]))
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=1000)
+    p0 = im.params_from_input(inp)
+    state, mask = im.solve_implicit_with_aux(p0, cfg)
+    rhs = jax.tree.map(lambda v: jax.random.normal(
+        jax.random.PRNGKey(4), (2, *v.shape), v.dtype), state)
+    out = {}
+    original = im._block_factor
+    for method in ("thomas", "cyclic_reduction"):
+        def factor(lower, diagonal, upper, _cfg, method=method):
+            if method == "cyclic_reduction":
+                return im.block_cyclic_reduction_factor(lower, diagonal, upper)
+            return im.block_thomas_factor(lower, diagonal, upper, normalized=True)
+        monkeypatch.setattr(im, "_block_factor", factor)
+        c = cfg
+        system = im._raw_block_system(
+            p0, c, state, mask, im._active_state_fields(c), 4)
+        assert hasattr(system.factors, "levels") == (method == "cyclic_reduction")
+        out[method] = []
+        for transpose in (False, True):
+            solution, report = im._raw_block_solve(
+                system, rhs, c, transpose=transpose)
+            assert np.all(np.asarray(report.converged))
+            out[method].append(solution)
+    for got, reference in zip(out["cyclic_reduction"], out["thomas"]):
+        assert _relative_difference(got, reference) < 1e-10
+
+    monkeypatch.setattr(im, "_block_factor", original)
+    monkeypatch.setattr(im, "block_thomas_factor", lambda *_a, **_k: "thomas")
+    monkeypatch.setattr(im, "block_cyclic_reduction_factor", lambda *_a, **_k: "cyclic")
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "cyclic"
+    for device in ("gpu", "cuda", "rocm", types.SimpleNamespace(platform="gpu")):
+        assert original(None, None, None, dataclasses.replace(cfg, device=device)) == "cyclic"
+    assert original(None, None, None, dataclasses.replace(cfg, device="cpu")) == "thomas"
+    monkeypatch.setattr(jax, "default_backend", lambda: "cpu")
+    assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "thomas"
+    with jax.default_device(jax.devices("cpu")[0]):
+        assert original(None, None, None, dataclasses.replace(cfg, device=None)) == "thomas"

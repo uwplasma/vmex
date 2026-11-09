@@ -6,7 +6,7 @@ state, solves, continuation, implicit derivatives, MOUT I/O, and plotting.
 Numerical kernels remain available from their owning submodules.
 """
 
-from importlib import import_module as _import_module
+from vmex import _lazy_exports
 
 from .._compat import ensure_configured as _ensure_configured
 
@@ -91,16 +91,4 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
 __all__ = sorted(_LAZY_ATTRS)
 
 
-def __getattr__(name: str):
-    entry = _LAZY_ATTRS.get(name)
-    if entry is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    module_name, attribute = entry
-    module = _import_module(module_name, __name__)
-    value = module if attribute is None else getattr(module, attribute)
-    globals()[name] = value
-    return value
-
-
-def __dir__():
-    return sorted(set(globals()) | set(_LAZY_ATTRS))
+__getattr__, __dir__ = _lazy_exports(__name__, _LAZY_ATTRS, globals())

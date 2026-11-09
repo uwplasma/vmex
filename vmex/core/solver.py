@@ -62,6 +62,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields as dataclass_fields, is_dataclass, replace
 from typing import Any, Callable
 
+import contextvars
 import functools
 import platform
 
@@ -111,6 +112,7 @@ _harden_compilation_cache()
 import jax.numpy as jnp
 from jax import lax
 
+from .aot import aot_lane, compile_lane, release as aot_release
 from .device import (
     AUTO,
     GPU_MAX_SPECTRAL_MODES,
@@ -140,7 +142,8 @@ from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_
 from .input import VmecInput
 from .preconditioner import (
     RadialPreconditionerCoefficients, TridiagonalMatrices,
-    angular_integration_weights, lamcal, precondn, scalfor_matrices,
+    angular_integration_weights, lamcal, lamcal_m0_radial, precondn,
+    scalfor_matrices,
 )
 from .preconditioner_2d import Prec2DConfig, newton_direction
 from .printing import (
@@ -150,11 +153,12 @@ from .printing import (
 from .residuals import (
     ForceResiduals, PreconditionedResiduals, apply_lambda_preconditioner,
     apply_radial_preconditioner, edge_force_condition, force_residuals,
-    m1_constrained_to_physical, m1_residue_rotation, m1_zero_condition,
-    preconditioned_residuals, scale_m1_preconditioner_rhs, scalxc_scale_force,
-    zero_m1_z_force,
+    m1_constrained_to_physical, m1_physical_to_constrained,
+    m1_residue_rotation, m1_zero_condition, preconditioned_residuals,
+    scale_m1_preconditioner_rhs, scalxc_scale_force,
+    zero_m1_z_force, hold_m1_family,
 )
-from .setup import GUESS_AXIS_GRID_POINTS, RunSetup, guess_axis, interior_guess, run_setup
+from .setup import RunSetup, guess_axis, interior_guess, run_setup
 from .step import (
     DAMPING_CAP, GROWTH_BACKOFF_DIVISOR, GROWTH_LIMIT, GROWTH_MIN_ITERATIONS,
     JACOBIAN_RESET_FACTOR, NDAMP, RESTART_GROWTH, RESTART_JACOBIAN, STEP_OK,
@@ -221,7 +225,8 @@ class PreconditionerCache:
     ``tcon`` (constraint scaling), the residual norms ``fnorm/fnormL/fnorm1``,
     the :func:`precondn` coefficients and assembled :func:`scalfor_matrices`
     for the R and Z force families, the ``LFORBAL`` ``rzu_fac/rru_fac``
-    factors, and the ``lamcal`` diagonal ``faclam``.
+    factors, the ``lamcal`` diagonal ``faclam`` and the ``m = 0`` lambda
+    radial block :func:`lamcal_m0_radial` (zeros when disabled).
     """
 
     tcon: Array
@@ -235,6 +240,7 @@ class PreconditionerCache:
     matrices_R: TridiagonalMatrices
     matrices_Z: TridiagonalMatrices
     faclam: Array
+    lambda_m0: TridiagonalMatrices
 
 
 @dataclass(frozen=True)
@@ -411,6 +417,7 @@ class SolverRuntime:
     jmax: int                           # evolved radial rows (fixed: ns-1)
     lforbal: bool = False               # tomnsp_mod.f m=1,n=0 force replacement
     lmove_axis: bool = True             # funct3d.f first-force irst=4 path
+    hold_m1: bool = False               # never release the m=1 constrained Z (HOLD_M1)
 
     # -- free-boundary seam (core/freeboundary.py; funct3d.f/forces.f) ------
     # lfreeb=True selects the vacuum-coupled lane: the edge row is evolved
@@ -433,6 +440,9 @@ class SolverRuntime:
     prec2d: Any = None
     #: trajectory buffer rows (static); 0 means ``max_iterations``.
     trajectory_rows: int = 0
+    #: floor of the m = 0 lambda radial preconditioner
+    #: (:func:`lamcal_m0_radial`); None keeps VMEC2000's diagonal ``faclam``.
+    lambda_m0_floor: float | None = None
 
     # -- trace-time-static tables, derived from the meta resolution ---------
     @property
@@ -475,9 +485,14 @@ class SolverRuntime:
 
 _register(SolverRuntime, meta=(
     "resolution", "gamma", "tcon0",
-    "jmax", "lforbal", "lmove_axis",
-    "lfreeb", "prec2d", "trajectory_rows",
+    "jmax", "lforbal", "lmove_axis", "hold_m1",
+    "lfreeb", "prec2d", "trajectory_rows", "lambda_m0_floor",
 ))
+
+
+def _lambda_m0_active(rt: SolverRuntime) -> bool:
+    """Static: use the m = 0 lambda radial block (3D runs only)."""
+    return rt.lambda_m0_floor is not None and rt.resolution.ntor > 0
 
 
 def _trajectory_rows(rt: SolverRuntime) -> int:
@@ -692,6 +707,7 @@ def prepare_runtime(
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     use_fft: bool = False,
+    lambda_m0_floor: float | None = None,
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
 
@@ -713,6 +729,10 @@ def prepare_runtime(
     :class:`~vmex.core.preconditioner_2d.Prec2DConfig`) switch on the
     optional 2D block preconditioner (``precon2d.f``); ``None``/``"NONE"``
     (the default) leaves the VMEC2000 1-D radial/lambda path unchanged.
+    ``lambda_m0_floor`` sets the m = 0 lambda radial block
+    (:func:`~vmex.core.preconditioner.lamcal_m0_radial`); ``None`` restores
+    VMEC2000's diagonal lambda preconditioner (the default, which keeps
+    iteration-for-iteration VMEC2000 parity); ``1e-3`` enables it.
     """
     from .._compat import require_x64
 
@@ -766,13 +786,63 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
+        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and resolution.ntor > 0),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
+        lambda_m0_floor=lambda_m0_floor,
     )
     rcon0, zcon0 = _constraint_baselines(
         _initial_state(setup), rt, use_fft=use_fft
     )
     return replace(rt, rcon0=rcon0, zcon0=zcon0)
+
+
+def _polar_rotated_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
+    """Re-parametrise ``state`` into the edge's m = 1 polar angle (``lasym``).
+
+    ``delta = atan2(Rs - Zc, Rc + Zs)`` of the edge row's ``(m, n) = (1, 0)``
+    pair, the formula ``readin.f`` applies to the boundary, rotates every
+    shell, ``(m, n)`` pair and lambda by ``m * delta``.  The edge is what the
+    fixed-boundary solver pins, so its ``delta`` is zero for any state the
+    solver or a wout produced; below round-off the state is returned
+    unchanged.  Traceable: the skip is a ``where``, not a Python branch.
+    """
+    m = np.asarray(rt.modes.m, dtype=int)
+    n = np.asarray(rt.modes.n, dtype=int)
+    index = np.where((m == 1) & (n == 0))[0]
+    if index.size == 0:
+        return state
+    i1 = int(index[0])
+    R_cos, Z_sin, R_sin, Z_cos = m1_constrained_to_physical(
+        state.R_cos, state.Z_sin, state.R_sin, state.Z_cos,
+        modes=rt.modes, lthreed=rt.setup.lthreed, lasym=True,
+        lconm1=rt.setup.lconm1)
+    dtype = R_cos.dtype
+    delta = jnp.arctan2(R_sin[-1, i1] - Z_cos[-1, i1], R_cos[-1, i1] + Z_sin[-1, i1])
+    delta = jnp.where(jnp.abs(delta) > 100 * jnp.finfo(dtype).eps, delta, 0.0)
+    angle = delta * jnp.asarray(m, dtype=dtype)[None, :]
+    c, s = jnp.cos(angle), jnp.sin(angle)
+
+    def rotate(cos_part, sin_part):
+        return cos_part * c + sin_part * s, sin_part * c - cos_part * s
+
+    R_cos2, R_sin2 = rotate(R_cos, R_sin)
+    Z_cos2, Z_sin2 = rotate(Z_cos, Z_sin)
+    L_cos2, L_sin2 = rotate(state.L_cos, state.L_sin)
+    R_cos2, Z_sin2, R_sin2, Z_cos2 = m1_physical_to_constrained(
+        R_cos2, Z_sin2, R_sin2, Z_cos2,
+        modes=rt.modes, lthreed=rt.setup.lthreed, lasym=True,
+        lconm1=rt.setup.lconm1)
+
+    def pick(new, old):
+        return jnp.where(delta != 0.0, new, jnp.asarray(old, dtype=dtype))
+
+    return replace(
+        state,
+        R_cos=pick(R_cos2, state.R_cos), R_sin=pick(R_sin2, state.R_sin),
+        Z_cos=pick(Z_cos2, state.Z_cos), Z_sin=pick(Z_sin2, state.Z_sin),
+        L_cos=pick(L_cos2, state.L_cos), L_sin=pick(L_sin2, state.L_sin),
+    )
 
 
 def hot_restart_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
@@ -788,9 +858,24 @@ def hot_restart_state(rt: SolverRuntime, state: SpectralState) -> SpectralState:
     held fixed) — which lands the edge row exactly on the new boundary
     (``facj(ns) = 1``) and keeps the interior near equilibrium (measured:
     initial ``fsqr ~ 4e-6`` for a 1% ``RBC(0,1)`` perturbation on cth).
-    Lambda is carried over unchanged.
+    Lambda is carried over unchanged, except for the ``lasym`` polar rotation
+    below.
+
+    ``lasym`` decks: ``readin.f`` rotates the *boundary* poloidal angle by
+    ``delta = atan2(rbs(0,1) - zbc(0,1), rbc(0,1) + zbs(0,1))`` so the edge
+    satisfies the m = 1 polar condition ``R1s = Z1c``.  A state supplied in
+    the unrotated angle (e.g. an exact surface family projected from the
+    deck's own boundary) has an edge whose ``delta`` is nonzero; the edge
+    would then be sheared against the interior, and lambda would belong to
+    the wrong angle.  Such a state is re-parametrised first, every shell by
+    the edge's ``delta`` (``theta' = theta - delta``, each ``(m, n)`` pair
+    rotated by ``m * delta``, lambda included).  States from this solver, a
+    wout, or any deck whose edge is already polar have ``delta = 0`` and pass
+    through bit-for-bit.
     """
     setup = rt.setup
+    if setup.lasym:
+        state = _polar_rotated_state(rt, state)
     s = jnp.asarray(setup.s_full)
     dtype = s.dtype
     m = np.asarray(rt.modes.m, dtype=int)
@@ -943,6 +1028,7 @@ def _zero_cache(rt: SolverRuntime) -> PreconditionerCache:
         coefficients_R=coeffs, coefficients_Z=coeffs,
         force_balance_R=z((ns,)), force_balance_Z=z((ns,)),
         matrices_R=mats, matrices_Z=mats, faclam=z((ns, mpol, nr)),
+        lambda_m0=TridiagonalMatrices(ax=z((ns, nr)), bx=z((ns, nr)), dx=z((ns, nr))),
     )
 
 
@@ -1050,7 +1136,10 @@ def _force_pipeline(
     # -- residue.f90 chain ---------------------------------------------------
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
     zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
-    released = zero_m1_z_force(rotated, zero_gate)
+    released = zero_m1_z_force(rotated, jnp.asarray(True) if rt.hold_m1 else zero_gate)
+    if rt.hold_m1 and released.force_Z_cc is not None:  # n = 0 lasym: exact gauge, released as VMEC2000
+        cc = jnp.asarray(rotated.force_Z_cc)[:, 1, 0] * (1.0 - jnp.asarray(zero_gate).astype(rotated.force_Z_cc.dtype))
+        released = replace(released, force_Z_cc=jnp.asarray(released.force_Z_cc).at[:, 1, 0].set(cc))
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
     )
@@ -1072,7 +1161,10 @@ def _force_pipeline(
         return_safe=True,
     )
     radial_solve_finite = _all_finite(solved) if collect_health else passing
-    preconditioned = apply_lambda_preconditioner(solved, cache.faclam)
+    preconditioned = apply_lambda_preconditioner(
+        solved, cache.faclam,
+        cache.lambda_m0 if _lambda_m0_active(rt) else None,
+    )
     health = ForcePipelineHealth(
         real_space_finite=real_space_finite,
         spectral_finite=spectral_finite,
@@ -1303,6 +1395,14 @@ def _evaluate(
             mpol=res.mpol, ntor=res.ntor, nfp=res.nfp,
             lthreed=setup.lthreed,
         )
+        lambda_m0_new = (
+            lamcal_m0_radial(
+                guu_half=metrics_b.guu, sqrt_g_half=jacobian_b.sqrt_g,
+                lamscale=fields_b.lamscale, angular_weight=rt.weights,
+                ntor=res.ntor, nfp=res.nfp, floor=float(rt.lambda_m0_floor),
+            )
+            if _lambda_m0_active(rt) else cache_b.lambda_m0
+        )
         fnorm1_new = preconditioned_force_norm(
             R_cos=state_b.R_cos, Z_sin=state_b.Z_sin, modes=rt.modes,
             R_sin=state_b.R_sin if setup.lasym else None,
@@ -1314,7 +1414,7 @@ def _evaluate(
             coefficients_Z=coefficients_Z,
             force_balance_R=force_balance_R,
             force_balance_Z=force_balance_Z, matrices_R=matrices_R,
-            matrices_Z=matrices_Z, faclam=faclam_new,
+            matrices_Z=matrices_Z, faclam=faclam_new, lambda_m0=lambda_m0_new,
         )
         # scalfor_matrices returns the n-independent ax/bx with a length-1
         # trailing axis; the old compute-then-where build broadcast them into
@@ -1487,8 +1587,7 @@ def _evaluation_nonfinite(result: _EvalResult) -> Array:
 
     Detection uses only the ten summary scalars
     (``fsqr/fsqz/fsql``, ``fsqr1/fsqz1/fsql1``, ``wb/wp``, ``r00/z00``),
-    mirroring VMEC++'s per-iteration guard (``vmec.cc``: ``isfinite`` of
-    ``fsqr/fsqz/fsql`` only).  They witness almost everything: a NaN/Inf
+    a per-iteration guard on ``isfinite`` of ``fsqr/fsqz/fsql``.  They witness almost everything: a NaN/Inf
     anywhere in ``gc`` propagates into the preconditioned sums
     ``fsqr1/fsqz1/fsql1`` (``residuals.py``), one in the scaled force into
     ``fsqr/fsqz/fsql``, and energy/geometry failures land in ``wb/wp`` and
@@ -1497,7 +1596,7 @@ def _evaluation_nonfinite(result: _EvalResult) -> Array:
     Deliberate semantics caveat: a non-finite value confined to the
     preconditioner CACHE can be masked by the checked-tridiagonal identity
     fallback and is then detected one iteration LATE, when it poisons a
-    force.  This mirrors VMEC++'s scalar-only guard; the fallback status
+    force.  This is the cost of a scalar-only guard; the fallback status
     (``radial_preconditioner_safe``) independently flags rejected
     preconditioner columns.
 
@@ -1522,90 +1621,6 @@ def _evaluation_nonfinite(result: _EvalResult) -> Array:
     )
 
 
-def _guess_axis_traced(geometry, *, s, trig, signgs, grid_points=GUESS_AXIS_GRID_POINTS):
-    """Fixed-shape JAX port of :func:`~vmex.core.setup.guess_axis` for traced solves.
-
-    The same ``guess_axis.f`` grid search and tie-breaks, vectorized over
-    zeta planes; up-down-symmetric planes scan a zero ``z`` grid of full size,
-    which selects the same point as the host's single ``z = 0`` row.  The host
-    solver keeps the NumPy routine.
-    """
-    lasym = bool(trig.lasym)
-    ntheta1, ntheta2, ntheta3 = int(trig.ntheta1), int(trig.ntheta2), int(trig.ntheta3)
-    ns, nzeta = int(s.shape[0]), int(geometry.R_even.shape[2])
-    sqrts = jnp.sqrt(jnp.maximum(s, 0.0))
-    ns12 = (ns + 1) // 2 - 1
-    ds = (ns - 1 - ns12) * (s[1] - s[0])
-    # Products stay out of fused multiply-adds, so the near-tied minima the
-    # search compares round exactly as in NumPy.
-    exact = lax.optimization_barrier
-    ru0 = geometry.dR_dtheta_even + exact(sqrts[:, None, None] * geometry.dR_dtheta_odd)
-    zu0 = geometry.dZ_dtheta_even + exact(sqrts[:, None, None] * geometry.dZ_dtheta_odd)
-    reduced = (
-        geometry.R_even[ns - 1, :ntheta3] + geometry.R_odd[ns - 1, :ntheta3],
-        geometry.Z_even[ns - 1, :ntheta3] + geometry.Z_odd[ns - 1, :ntheta3],
-        geometry.R_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.R_odd[ns12, :ntheta3]),
-        geometry.Z_even[ns12, :ntheta3] + exact(sqrts[ns12] * geometry.Z_odd[ns12, :ntheta3]),
-        0.5 * (ru0[ns - 1, :ntheta3] + ru0[ns12, :ntheta3]),
-        0.5 * (zu0[ns - 1, :ntheta3] + zu0[ns12, :ntheta3]),
-    )
-    full = [jnp.zeros((ntheta1, nzeta), a.dtype).at[:ntheta3].set(a) for a in reduced]
-    if not lasym:  # R(v,-u) = R(2pi-v,u), Z(v,-u) = -Z(2pi-v,u)
-        rows = (ntheta1 - np.arange(ntheta2, ntheta1))[:, None]
-        cols = ((nzeta - np.arange(nzeta)) % nzeta)[None, :]
-        for k, flip in enumerate((False, True, False, True, True, False)):
-            mirrored = reduced[k][rows, cols]
-            full[k] = full[k].at[ntheta2:].set(-mirrored if flip else mirrored)
-    r1b, z1b, r12, z12, ru12, zu12 = full
-    frac = jnp.arange(grid_points, dtype=s.dtype) / float(max(grid_points - 1, 1))
-    planes = np.arange(nzeta if lasym else nzeta // 2 + 1)
-    fixed_z = np.zeros(planes.size, bool) if lasym else (planes == 0) | (planes == nzeta // 2)
-
-    def plane(iv, zero_z):
-        rmin, rmax = jnp.min(r1b[:, iv]), jnp.max(r1b[:, iv])
-        zmin, zmax = jnp.min(z1b[:, iv]), jnp.max(z1b[:, iv])
-        rmid, zmid = 0.5 * (rmax + rmin), 0.5 * (zmax + zmin)
-        rs = (r1b[:, iv] - r12[:, iv]) / ds + geometry.R_even[0, 0, iv]
-        zs = (z1b[:, iv] - z12[:, iv]) / ds + geometry.Z_even[0, 0, iv]
-        tau0 = exact(ru12[:, iv] * zs) - exact(zu12[:, iv] * rs)
-        r_grid = rmin + exact((rmax - rmin) * frac)
-        z_grid = jnp.where(zero_z, 0.0, zmin + exact((zmax - zmin) * frac))
-        tau = signgs * ((tau0[None, None, :] - exact(ru12[:, iv][None, None, :] * z_grid[:, None, None]))
-                        + exact(zu12[:, iv][None, None, :] * r_grid[None, :, None]))
-        min_tau = jnp.min(tau, axis=2)
-        max_tau = jnp.max(min_tau)
-        z_abs = jnp.abs(z_grid)
-
-        def nearest_row(rows):  # first row of smallest |z| among ``rows``
-            smallest = jnp.min(jnp.where(rows, z_abs, jnp.inf))
-            return jnp.argmax(rows & (z_abs == smallest)), jnp.any(rows)
-
-        best = min_tau == max_tau
-        first = jnp.argmax(best.reshape(-1))
-        z_first = z_grid[first // grid_points]
-        row, found = nearest_row(jnp.any(best, axis=1))
-        z_pos = jnp.where(found & (jnp.abs(z_first) > z_abs[row]), z_grid[row], z_first)
-        row, found = nearest_row(jnp.any(min_tau == 0.0, axis=1) & (z_abs < jnp.abs(zmid)))
-        z_zero = jnp.where(found, z_grid[row], zmid)
-        rbest = jnp.where(max_tau > 0.0, r_grid[first % grid_points], rmid)
-        zbest = jnp.where(max_tau > 0.0, z_pos, jnp.where(max_tau == 0.0, z_zero, zmid))
-        return rbest, zbest
-
-    rcom, zcom = jax.vmap(plane)(jnp.asarray(planes), jnp.asarray(fixed_z))
-    if not lasym:
-        mirror = nzeta - np.arange(nzeta // 2 + 1, nzeta)
-        rcom = jnp.concatenate([rcom, rcom[mirror]])
-        zcom = jnp.concatenate([zcom, -zcom[mirror]])
-    cosnv, sinnv, nscale = (np.asarray(t, dtype=float) for t in (trig.cosnv, trig.sinnv, trig.nscale))
-    dzeta = 2.0 / float(nzeta)
-    half = np.ones(nscale.size)
-    half[0] = 0.5
-    if nzeta % 2 == 0 and nzeta // 2 <= nscale.size - 1:
-        half[nzeta // 2] = 0.5
-    return (dzeta * (cosnv.T @ rcom) / nscale * half, -dzeta * (sinnv.T @ rcom) / nscale,
-            dzeta * (cosnv.T @ zcom) / nscale * half, -dzeta * (sinnv.T @ zcom) / nscale)
-
-
 def reguess_initial_axis(
     rt: SolverRuntime, state: SpectralState, *, use_fft: bool = False,
     guess=guess_axis,
@@ -1617,7 +1632,7 @@ def reguess_initial_axis(
     rebuilding the ``profil3d`` state, this updates the setup's axis arrays
     and rebinds the constraint baselines to that state
     (``funct3d.f: iter2 == iter1``).  ``guess`` is the host
-    :func:`~vmex.core.setup.guess_axis`, or :func:`_guess_axis_traced` inside a trace.
+    :func:`~vmex.core.setup.guess_axis`.
     """
     setup = rt.setup
     _, geometry = _geometry_lane(state, rt, use_fft=use_fft)
@@ -1649,6 +1664,18 @@ def reguess_initial_axis(
 
 
 # -- Iteration body (evolve.f + TimeStepControl + the eqsolve.f checks) ----------------------------------------------
+
+
+@functools.partial(jax.jit, static_argnames="use_fft")
+def _eval_pass(args: tuple, rt: SolverRuntime, *, use_fft: bool) -> _EvalResult:
+    """One funct3d pass as a module-level ``jit``, so the body traces it once.
+
+    ``_make_body`` needs the pass's output structure (``jax.eval_shape``) and
+    then the pass itself inside the scan; with a per-call closure both traced
+    the whole force chain.  Keyed on avals, the second use hits the trace cache.
+    """
+    return _evaluate(args[0], args[1], args[2], args[3], args[4], rt, args[5],
+                     use_fft=use_fft)
 
 
 def _make_body(
@@ -1798,8 +1825,7 @@ def _make_body(
             # values the old e2 call passed.  Runtime op sequence per trip is
             # unchanged.
             def eval_lane(args):
-                return _evaluate(args[0], args[1], args[2], args[3], args[4],
-                                 rt, args[5], use_fft=use_fft)
+                return _eval_pass(args, rt, use_fft=use_fft)
 
             args0 = (state_e1, carry.cache, it, carry.iter1, carry.fsqz,
                      carry.fsqr + carry.fsqz)
@@ -1832,7 +1858,7 @@ def _make_body(
 
             (e_final, _, _, ctx), _ = lax.scan(
                 substep,
-                (e_zero, jnp.asarray(True), args0, ctx_zero),
+                (e_zero, running, args0, ctx_zero),
                 jnp.arange(2),
             )
             # When no restart happened trip 1 passed e1 through, so the
@@ -1986,6 +2012,9 @@ def _initial_carry(
     loop-driver initial ``DELT`` (:func:`_loop_driver_config`) — a carry
     VALUE only, so it never keys a lane recompile.
     """
+    if rt.hold_m1:
+        state = hold_m1_family(state, _initial_state(rt.setup), rt.modes,
+                               lasym=bool(rt.resolution.lasym))
     dtype = rt.setup.s_full.dtype
     one = jnp.asarray(1.0, dtype=dtype)
     zeros = (
@@ -2045,6 +2074,9 @@ class VacuumOutput:
     bsubv: np.ndarray
     bsupu: np.ndarray
     bsupv: np.ndarray
+    #: VMEC's DEL-BSQ: mean absolute pressure jump across the edge over the mean
+    #: vacuum pressure, from the last NESTOR update (0 is exact balance).
+    delbsq: float = float("nan")
 
 
 @dataclass(frozen=True)
@@ -2075,6 +2107,7 @@ class SolveResult:
     native_equilibrium: Any = None
     strong_force: Any = None
     polish_report: Any = None
+    position_control: Any = None
 
 
 def _result_from_carry(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
@@ -2198,7 +2231,7 @@ def _while_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """One ``BLOCK_SIZE``-iteration ``lax.scan`` block (CLI lane), structural.
 
@@ -2220,7 +2253,7 @@ def _while_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     return lax.while_loop(lambda c: jnp.logical_not(c.done), body, carry)
 
 
-@functools.partial(jax.jit, donate_argnums=(0,))
+@aot_lane(donate_argnums=(0,))
 def _block_lane_fft(carry: _LoopCarry, rt: SolverRuntime) -> _LoopCarry:
     """Donated CLI block using separable Fourier synthesis."""
     body = _make_body(rt, use_fft=True)
@@ -2285,7 +2318,7 @@ def _prefetch_block_lane(
     key = _lane_signature(lane_name, carry, rt)
     if key in _LANE_EXECUTABLES or key in _USED_LANE_KEYS:
         return True
-    _LANE_EXECUTABLES[key] = lane.lower(carry, rt).compile()
+    _LANE_EXECUTABLES[key] = compile_lane(lane, carry, rt)
     return True
 
 
@@ -2297,10 +2330,25 @@ def _release_used_lane_executables() -> None:
     jit caches, while a just-prefetched — not yet used — executable for the
     NEXT rung survives the release.
     """
+    aot_release()
     for key in list(_LANE_EXECUTABLES):
         if key in _USED_LANE_KEYS:
             del _LANE_EXECUTABLES[key]
     _USED_LANE_KEYS.clear()
+
+
+#: Host predicate ``stop(carry) -> bool`` polled after every CLI block; True
+#: ends the solve as iteration-limited (``more_iter_flag``).  A context
+#: variable, not an argument, because only the implicit seed ladder
+#: (:func:`vmex.core.implicit._host_solve`) sets it, around one host solve.
+STOP_HOOK: contextvars.ContextVar[Callable | None] = contextvars.ContextVar(
+    "vmex_stop_hook", default=None)
+
+#: Set by the implicit (differentiable) solves: runtimes built meanwhile never
+#: release the m=1 constrained Z force and start each stage with that family on
+#: the input's ``profil3d.f`` guess, so the root does not depend on the path.
+HOLD_M1: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "vmex_hold_m1", default=False)
 
 
 def _resolve_use_fft(
@@ -2320,6 +2368,12 @@ def _resolve_use_fft(
         else jax.default_backend()
     )
     return backend != "cpu" or platform.machine().lower() in ("arm64", "aarch64")
+
+
+def _on_gpu(tree: Any) -> bool:
+    """True when the first array leaf of ``tree`` lives on a non-CPU device."""
+    leaf = jax.tree_util.tree_leaves(tree)[0]
+    return next(iter(leaf.devices())).platform != "cpu"
 
 
 def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
@@ -2347,11 +2401,18 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
         residuals=initial_residuals,
     )
 
+    # Silent GPU solves have no per-block host work (rows, stop hook): take
+    # the single-sync while lane (identical iterates; each host sync costs
+    # 20-25% on GPU).  CPU keeps the cheaper-to-compile block lane.
+    if (mode == "cli" and not verbose and STOP_HOOK.get() is None
+            and _on_gpu(state0)):
+        mode = "jit"
     if mode == "jit":
         # The while lanes donate the carry; _initial_carry aliases some leaves
         # (xstore=state, shared cache zeros), so copy to distinct buffers —
         # same rationale as the CLI-lane copy below, values bit-for-bit
         # unchanged.
+        carry, rt = commit_to_single_device((carry, rt))
         carry = _distinct_buffers(carry)
         return (_while_lane_fft if use_fft else _while_lane)(carry, rt)
 
@@ -2379,11 +2440,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
     emit_start = 1
     max_passes = int(rt.max_iterations) + 200
     lane = _block_lane_fft if use_fft else _block_lane
+    stop = STOP_HOOK.get()
     # Prefetched-executable consumption + compile attribution.  The
     # structural key selects a background-compiled standalone executable
-    # when one exists (identical lowering — bit-identical iterations); a
-    # first-time structure without one is compiled on demand by the jitted
-    # lane, and the notice makes that pause attributable on screen.
+    # when one exists (identical lowering — bit-identical iterations).
+    # Otherwise bind the cached lane once, avoiding per-block structure work.
+    # The notice makes a first-time compile attributable on screen.
     executable = None
     if not jax.config.jax_disable_jit:
         key = _lane_signature("block_fft" if use_fft else "block", carry, rt)
@@ -2392,6 +2454,12 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             emit(compile_notice(rt.resolution.ns,
                                 prefetched=executable is not None), end="")
         _USED_LANE_KEYS.add(key)
+        if executable is None:
+            try:
+                with placement_neutral((carry, rt)):
+                    executable = lane.executable(carry, rt)
+            except Exception:
+                pass
     # Committed arguments already fix placement, so keep the caller's
     # default-device context out of the lane's jit key: a construction solve
     # and trial solves run inside a device context then share one executable.
@@ -2404,6 +2472,9 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             try:
                 carry = step(executable, carry)
             except Exception:
+                if any(getattr(leaf, "is_deleted", bool)()
+                       for leaf in jax.tree.leaves(carry)):
+                    raise
                 # Structural/placement drift (argument validation precedes
                 # execution and donation, so the carry is intact): fall back
                 # to the on-demand jitted lane for the rest of the rung.
@@ -2411,11 +2482,17 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
                 carry = step(lane, carry)
         else:
             carry = step(lane, carry)
-        done = bool(carry.done)
-        upto = int(carry.iteration) if done else int(carry.iteration) - 1
+        # One host transfer per block for the three loop scalars.
+        done, iteration, ier = (int(v) for v in jax.device_get(
+            (carry.done, carry.iteration, carry.ier)))
+        if not done and stop is not None and stop(carry):
+            carry = replace(carry, done=jnp.ones_like(carry.done),
+                            ier=jnp.full_like(carry.ier, MORE_ITER_FLAG))
+            done, ier = 1, int(MORE_ITER_FLAG)
+        upto = iteration if done else iteration - 1
         # VMEC2000's irst=4 and first-bad-Jacobian transfers return to
         # eqsolve before printout.f, so the discarded first pass has no row.
-        retry_transfer = done and int(carry.ier) in (
+        retry_transfer = done and ier in (
             AXIS_REGUESS_FLAG, BAD_JACOBIAN_FLAG,
         )
         if verbose and not retry_transfer and _due_rows_pending(
@@ -2564,44 +2641,6 @@ def _axis_retry(ier, ijacob, ns):
     return ((ier == BAD_JACOBIAN_FLAG) | (ier == AXIS_REGUESS_FLAG)) & (ijacob == 0) & (ns >= 3)
 
 
-def _solve_stage_traced(rt: SolverRuntime, state0: SpectralState | None, *,
-                        time_step0: float, use_fft: bool = False) -> _LoopCarry:
-    """:func:`_solve_stage` as one traceable program, for a solve inside ``jax.jit``.
-
-    Runs the ``lax.while_loop`` lane and, on the host driver's condition (a
-    first-iteration bad Jacobian or raw-force axis transfer with
-    ``ijacob == 0`` and ``ns >= 3``), re-guesses the axis with
-    :func:`_guess_axis_traced` and runs the same lane once more with the same
-    state, velocity and residual continuation.  The JAC75 retries stay on the
-    host: they change the static ``lmove_axis``, so a traced solve returns
-    that flag instead.
-    """
-    state0 = _initial_state(rt.setup) if state0 is None else state0
-    zeros = jax.tree.map(jnp.zeros_like, state0)
-    one = jnp.ones((), dtype=rt.setup.s_full.dtype)
-    start = jax.tree.map(jnp.array, _initial_carry(state0, rt, ijacob=0, time_step0=time_step0))
-
-    def trip(loop):
-        _, first, state, runtime, ijacob, xcdot, residuals, _ = loop
-        carry = _run_loop(state, runtime, mode="jit", ijacob=ijacob, verbose=False, emit=None,
-                          time_step0=time_step0, nstep=1, use_fft=use_fft,
-                          initial_xcdot=xcdot, initial_residuals=residuals)
-        axis_transfer = carry.ier == AXIS_REGUESS_FLAG
-        retry = first & _axis_retry(carry.ier, carry.ijacob, runtime.resolution.ns)
-
-        def reguess(_):
-            new_rt, new_state, _axis = reguess_initial_axis(
-                runtime, state, use_fft=use_fft, guess=_guess_axis_traced)
-            return (new_state, new_rt, jnp.ones_like(ijacob),
-                    _select(axis_transfer, carry.xcdot, zeros), (carry.fsqr, carry.fsqz, carry.fsql))
-
-        following = lax.cond(retry, reguess, lambda _: (state, runtime, ijacob, xcdot, residuals), None)
-        return (retry, jnp.zeros((), bool), *following, carry)
-
-    loop = (jnp.ones((), bool), jnp.ones((), bool), state0, rt, start.ijacob, zeros, (one, one, one), start)
-    return lax.while_loop(lambda loop: loop[0], trip, loop)[-1]
-
-
 def _finalize(carry: _LoopCarry, rt: SolverRuntime) -> SolveResult:
     """Map the final carry to a :class:`SolveResult` or a typed exception."""
     ier = int(carry.ier)
@@ -2739,6 +2778,7 @@ def solve(
     precon_type: str | None = None, prec2d_threshold: float | None = None,
     prec2d: Prec2DConfig | None = None,
     use_fft: bool | None = None,
+    lambda_m0_floor: float | None = None,
     jacobian_retries: int = 2,
     polish: bool | str | None = None,
     polish_force_balance: bool | str = False,
@@ -2769,7 +2809,7 @@ def solve(
 
     ``initial_state`` hot-restarts the solve from a previous
     :class:`SpectralState` at the *same* resolution (e.g. ``result.state`` of
-    an earlier solve on a perturbed boundary — VMEC++-style hot restart; use
+    an earlier solve on a perturbed boundary, a hot restart; use
     :func:`vmex.core.multigrid.interpolate_state` first when ``ns``
     differs).  The R/Z *edge row* of the provided state is replaced by the
     input's processed boundary (the edge never evolves in fixed-boundary
@@ -2791,6 +2831,10 @@ def solve(
     (default) to apply the measured small-work-to-CPU policy, or ``None`` to
     follow JAX placement.  The automatic policy never overrides an active
     ``jax.default_device`` context or user-pinned JAX platform.
+
+    ``lambda_m0_floor=None`` (default) keeps VMEC2000's diagonal lambda
+    preconditioner; ``1e-3`` adds the radial ``m = 0`` block
+    (:func:`~vmex.core.preconditioner.lamcal_m0_radial`).
 
     ``use_fft=None`` (default) selects separable FFT only above 512 modes on
     accelerators and ARM CPUs; smaller problems and x86 CPUs retain the dense
@@ -2858,7 +2902,7 @@ def solve(
             tcon0=tcon0, gamma=gamma,
             lconm1=lconm1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
-            use_fft=use_fft_resolved,
+            use_fft=use_fft_resolved, lambda_m0_floor=lambda_m0_floor,
         )
     with device_context(device, rt.resolution):
         if initial_state is not None:

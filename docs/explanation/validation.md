@@ -95,7 +95,7 @@ then a verified download. Tests that do need a live binary are marked
 Parity along the whole trajectory, not only at the endpoint: total force
 residual per iteration for the bundled NFP=4 QH case at `ns=51` through all
 three codes. Regenerate with
-`python benchmarks/make_readme_figures.py --only convergence`.
+`python docs/_static/figures/sources/make_readme_figures.py --only convergence`.
 ```
 
 ### Scalars: a cheap gate that needs no golden bundle
@@ -133,7 +133,7 @@ coefficient by coefficient.
 
 ### Fresh decks, never benchmarked before
 
-`benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json` records six decks that
+A 2026-09-02 run (VMEX commit `8ef81c44`) recorded six decks that
 had never been run on VMEX, solved against a locally built `xvmec2000`
 (sha256 prefix `f7e9034f7d9d7ae5`): `ITERModel`, `estell_24_scaled`,
 `n3are_R7.75B5.7`, `HSX_QHS_vacuum_ns201`, `W7-X_standard_configuration`
@@ -151,9 +151,8 @@ Quote it by its measured maxima, never as "machine precision":
   one on `ITERModel` (1469 against 1470); Jacobian resets identical wherever
   recorded.
 
-`tests/test_performance_docs.py::test_fresh_deck_parity_artifact_is_provenanced_and_cited`
-guards the record's provenance and requires {doc}`/reference/performance`
-to cite it by path.
+The record, with deck and reference-binary hashes, is in git history at that
+commit; {doc}`/reference/performance` quotes its table.
 
 ## Continuous force, native states and WOUT reconstruction
 
@@ -185,7 +184,7 @@ it helps on other configurations.
 
 ![Historical WOUT reconstruction measurements](../_static/figures/readme_strong_force_comparison.webp)
 
-The separate [native DESC record](../../benchmarks/desc_native_vs_lifted_2026-09-03.json)
+A separate native DESC measurement (2026-09-03)
 reports `<|F|>/<|grad p|> = 4.01e-6` on DESC's own shaped-tokamak equilibrium.
 Exporting that state to 129 surfaces and fitting VMEX splines gives pointwise
 normalized L2 `7.13e-2`. Those two norms are different; their quotient is not
@@ -195,7 +194,7 @@ independently refine each native representation and use the same physical
 norm, region, boundary, profiles and flux conventions.
 
 Figure/source hashes remain checked in
-`tests/test_performance_docs.py::test_validation_strong_force_figure_matches_committed_sources`.
+`tests/test_repo_consistency.py::test_strong_force_figure_matches_its_sources`.
 The checks preserve this historical record; they do not rerun the solvers or
 certify a native accuracy ordering.
 
@@ -208,8 +207,9 @@ axis and 3.2e3 to 23 at the edge, with projected stationarity 1.3e-10; the
 written file reproduces the native certificate. The pointwise
 `eps_F = 2|F|/(|J×B|+|grad p|+floor)` is bounded above by 2 by construction
 and cannot rank near-vacuum states, so read the dimensional force with it.
-The polish covers fixed-boundary axisymmetric decks with prescribed pressure
-and iota; a 3-D polish is future work. See the
+The certified polish covers fixed-boundary axisymmetric decks with prescribed pressure
+and iota. The experimental 3-D prescribed-current polish lowers held-out force,
+but has no stationarity certificate or qualified WOUT export. See the
 [method reference](high-order-force-balance.rst).
 
 ## Application record: finite-beta QI diagnostics
@@ -232,6 +232,9 @@ After 10 Newton steps the MRX force residual is 1.4e-8, its Poincare sections fo
 surfaces, and its iota, enclosed current and pressure match the VMEX profiles; `|B|` agrees to
 2e-3 rms for ρ ≥ 0.3. MRX starts from the VMEX field, so this checks consistency, not near-axis
 convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns = 65, 129 and 257.
+These values do not establish the continuum limit, and a matched, independently converged DESC
+reference has not been established. MRX reconstructs pressure from its relaxed field rather than
+imposing VMEX's profile, so this is not a matched-profile equilibrium benchmark.
 
 ![VMEX and MRX on the 2.5% beta QA deck](../_static/figures/readme_vmex_mrx_comparison.webp)
 
@@ -242,6 +245,18 @@ equilibria: Landreman's integer-transform and sheared families (arXiv:2609.26742
 tokamaks, and the non-stellarator-symmetric extensions of Issan et al. (arXiv:2610.07304). Every
 exact case passes force balance and divergence to round-off; the Issan closed forms reproduce the
 paper's volume, beta and transform. Each WOUT is scored by one script for every producer.
+
+The exact nonsymmetric vacuum fields of Sengupta et al. (arXiv:2610.28466) are tested in
+`tests/test_exact_vacuum.py`. Given only the exact boundary and flux at aspect ratio 5.7 (paraboloidal) and 9.5 (ellipsoidal), with
+`ns = 65`, `mpol = 7`, the transform error for `0.2 < s < 0.9` is:
+
+| Member | `ntor = 7` | `ntor = 14` | `ntor = 20` |
+|---|---|---|---|
+| Paraboloidal, `iota = 1/sqrt(5)` | 2.9e-3 | 5.8e-5 | 4.1e-5 |
+| Ellipsoidal, no stellarator symmetry, `iota0 = sqrt(2)/7` | 2.3e-4 | 5.4e-05 | 5.4e-5 |
+
+Next to the axis the error is 3e-4 to 1e-3 and does not fall with `ns`, the usual near-axis limit of
+this discretization.
 
 | Family A (`iota = 2`), VMEX from the exact geometry | ns 65 | ns 129 |
 |---|---|---|
@@ -385,15 +400,14 @@ boundary, and `2e-7` for implicit gradients, which are the loosest because a
 reverse pass accumulates over the whole trajectory. A separate test asserts
 that no `JAX_PLATFORMS` pin is in the environment and that the default
 backend really is the GPU, so a silently-CPU run cannot pass as a GPU lane.
-`benchmarks/device_parity.py` is the standalone audit; its default tolerance
+`tools/device_parity.py` is the standalone audit; its default tolerance
 is `rtol=1e-7`, recorded in every output JSON it writes.
 
 Lane consistency — jit against eager, and the traced against the stepped
 lane — is checked where it matters rather than in one suite: the Boozer
 tables, the setup and geometry chains, the mgrid path and the bootstrap
-state-versus-wout lanes each carry their own comparison. Note that the test
-session disables JIT globally and solver-heavy modules opt back in, so a
-module without that fixture is exercising the interpreted path.
+state-versus-wout lanes each carry their own comparison. The test session runs
+jitted, as users do; those comparisons turn jit off locally for the eager side.
 
 ## What is NOT validated
 
@@ -403,7 +417,7 @@ a claim exists elsewhere.
 - **Free-boundary forward derivatives.** JVPs are `not-available`. The
   reverse derivative of the reconverged free-boundary root is `limited` and
   explicitly experimental, CPU only. Low-memory GPU compilation and failed-trial
-  handling are open promotion gates. `tests/test_capability_docs.py`
+  handling are open promotion gates. `tests/test_repo_consistency.py`
   asserts these statuses, so the claim cannot quietly widen.
 - **Free-boundary roots are anchored, not free.** A converged free-boundary
   solve at `ftol = 1e-12` sat about 1.2e-2 from the root of its projected
@@ -475,12 +489,12 @@ Regenerating the artifacts this page cites:
 ```bash
 python tools/fetch_assets.py --bundle golden-v1     # the VMEC2000 goldens
 python tools/make_golden_digests.py                 # tests/golden_digests.json
-python benchmarks/run_baseline.py                   # benchmarks/baseline.json
-python benchmarks/run_freeboundary_multigrid.py     # the free-boundary ladder
-python benchmarks/run_gpu_matrix.py                 # benchmarks/gpu_baseline.json
-python benchmarks/preconditioner_2d_stiff.py        # the 2D preconditioner run
-python benchmarks/make_strong_force_comparison.py   # the cross-code table
-python benchmarks/device_parity.py --devices cpu,gpu --output parity.json
+python tools/run_baseline.py                        # benchmarks/baseline.json
+python tools/run_freeboundary_multigrid.py          # the free-boundary ladder
+python tools/run_gpu_matrix.py                      # benchmarks/gpu_baseline.json
+python tools/preconditioner_2d_stiff.py             # the 2D preconditioner run
+python docs/_static/figures/sources/make_strong_force_comparison.py  # the cross-code table
+python tools/device_parity.py --devices cpu,gpu --output parity.json
 ```
 
 Figures carry their own provenance in
@@ -490,4 +504,4 @@ figure, and `bytes_verified` says whether the committed pixels were actually
 re-derived and compared. A `command` figure with `bytes_verified` false can
 be rebuilt but its committed bytes predate the current renderer. `python
 tools/update_figure_manifest.py` refreshes the derived fields, and
-`tests/test_figure_provenance.py` fails when a figure and its row disagree.
+`tests/test_repo_consistency.py` fails when a figure and its row disagree.

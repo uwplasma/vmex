@@ -28,6 +28,7 @@ import os
 import pickle
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -45,17 +46,9 @@ from vmex.core.errors import AdjointSolveError
 from vmex.core.input import VmecInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache.pkl"
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _jit_enabled():
-    """conftest disables jit globally; these full solves are ~40x slower
-    interpreted (105-160 s/test in CI) — run them jitted."""
-    prev = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)
-    yield
-    jax.config.update("jax_disable_jit", prev)
+FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache_held_m1.pkl"
+# Host solves as the implicit path runs them: the m=1 constrained family held.
+_held_solve = im._holding_m1(solver.solve)
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +101,7 @@ def _perturb(p0: im.ImplicitParams, field: str, idx, h: float) -> im.ImplicitPar
 
 def _outputs(name: str, inp: VmecInput, cfg, params) -> dict:
     """Host solve at ``params`` -> derived scalars (identical policy always)."""
-    result = solver.solve(
+    result = _held_solve(
         im.input_with_params(inp, params), cfg.resolution,
         ftol=cfg.ftol, max_iterations=cfg.max_iterations, mode="cli",
     )
@@ -180,7 +173,7 @@ def case(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -193,7 +186,7 @@ def solovev(request):
     inp = VmecInput.from_file(str(DATA_DIR / f"input.{name}"))
     cfg = im.make_config(inp, **CASES[name])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     rt = im.runtime_from_params(p0, cfg)
     mask = im._dof_mask(result.state, rt, cfg)
@@ -435,31 +428,103 @@ def test_block_adjoint_is_the_exact_transpose_of_the_block_tangent(solovev):
         for tree in (x_star, p0))
     P = im._dof_projector(cfg, mask)
     z_star, b = P(x_star), P(cotangent)
-    previous = bool(jax.config.jax_disable_jit)
-    jax.config.update("jax_disable_jit", False)  # the suite default is eager
-    try:
-        mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg)
-        raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
-        pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
-        defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
-        gradient = jax.jit(lambda p: jax.vjp(
-            lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
-        system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
-        rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
-        dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
-        dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
-            jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
-        tangent = jax.jvp(
-            lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
-            (z_star, p0), (P(dz), direction))[1]
-    finally:
-        jax.config.update("jax_disable_jit", previous)
+    mu, stats = im._adjoint_block_core(p0, z_star, x_star, mask, b, cfg.adjoint_tol, cfg)
+    raw = im.residual_fn(cfg, x_star, mask, formulation="raw")
+    pullback = jax.vjp(lambda z: raw(z, p0), z_star)[1]
+    defect = _tnorm(jax.tree.map(jnp.subtract, b, P(pullback(mu)[0]))) / _tnorm(b)
+    gradient = jax.jit(lambda p: jax.vjp(
+        lambda q: im.solve_implicit(q, cfg), p)[1](cotangent)[0])(p0)
+    system = im._raw_block_system(p0, cfg, x_star, mask, im._active_state_fields(cfg), 4)
+    rhs = jax.tree.map(jnp.negative, jax.jvp(lambda q: raw(z_star, q), (p0,), (direction,))[1])
+    dz = im._raw_block_apply(system, rhs)  # the band, refined once on the full raw JVP
+    dz = jax.tree.map(jnp.add, dz, im._raw_block_apply(system, jax.tree.map(
+        jnp.subtract, rhs, jax.jvp(lambda z: raw(z, p0), (z_star,), (dz,))[1])))
+    tangent = jax.jvp(
+        lambda z, q: im._assemble(z, im.runtime_from_params(q, cfg), x_star, P, im._edge_mask(cfg)),
+        (z_star, p0), (P(dz), direction))[1]
     assert bool(stats.converged) and defect <= 1e-10
     reverse = sum(float(jnp.vdot(g, t)) for g, t in
                   zip(jax.tree.leaves(gradient), jax.tree.leaves(direction)))
     forward = sum(float(jnp.vdot(c, s)) for c, s in
                   zip(jax.tree.leaves(cotangent), jax.tree.leaves(tangent)))
     assert abs(reverse - forward) <= 1e-10 * abs(forward)
+
+
+def _cancelling_block_system(ns=5, bs=2):
+    """A block-tridiagonal raw Jacobian whose diagonal blocks nearly cancel.
+
+    Each diagonal block is ``[[1, 1], [1, 1 + 1e-9]]``, so ``J^T mu`` with
+    ``mu = (1, -1)`` is 1e-9 against the 2 that the products add up from: the
+    adjoint of an objective that is stationary at the equilibrium (``wb``).
+    Plain arrays stand in for the spectral state.
+    """
+    eye = jnp.eye(bs)
+    near = jnp.array([[1.0, 1.0], [1.0, 1.0 + 1.0e-9]])
+    diagonal = jnp.tile(near, (ns, 1, 1))
+    lower = jnp.zeros((ns, bs, bs)).at[1:].set(1.0e-12 * eye)
+    upper = jnp.zeros((ns, bs, bs)).at[:-1].set(1.0e-12 * eye)
+    ones = jnp.ones((ns, bs))
+    identity = lambda tree: tree  # noqa: E731
+    system = im._RawBlockSystem(
+        im.block_thomas_factor(lower, diagonal, upper), identity, identity, identity,
+        None, None, None, None, lower, diagonal, upper, ones, ones)
+
+    def pullback(mu):
+        return im.block_tridiag_matvec(
+            jnp.zeros_like(upper).at[1:].set(jnp.swapaxes(upper[:-1], -1, -2)),
+            jnp.swapaxes(diagonal, -1, -2),
+            jnp.zeros_like(lower).at[:-1].set(jnp.swapaxes(lower[1:], -1, -2)), mu)
+
+    return system, pullback, jnp.tile(jnp.array([1.0, -1.0]), (ns, 1))
+
+
+def test_block_adjoint_acceptance_stops_at_the_roundoff_of_the_residual():
+    """A block adjoint at round-off is accepted however small its rhs is.
+
+    ``adjoint_tol = 1e-11`` once rejected the adjoint of ``wb`` (nfp2_QA, ns 31:
+    residual 2.8e-15 against ``10 tol ||b|| = 2.8e-16``) and the GCROT fallback
+    then stalled for 30,000 iterations.  The acceptance now has a floor at
+    10 eps ``|| |J|^T |mu| ||``.  A multiplier that solves the wrong system
+    still misses it.
+    """
+    system, exact, mu_true = _cancelling_block_system()
+    b = exact(mu_true)
+
+    def pullback(mu):  # the raw VJP carries round-off of the size of its terms
+        return exact(mu) + 1.0e-16 * jnp.ones_like(mu)
+
+    cfg = SimpleNamespace(adjoint_tol=1.0e-11)
+    mu, residual, tolerance = im._block_adjoint(system, pullback, b, cfg, 1.0e-11)
+    # the rhs is 1e-9 against products of 2: the old relative test could not pass
+    assert float(residual) > im._ADJOINT_RESIDUAL_SLACK * 1.0e-11 * float(im._tree_norm(b))
+    assert float(residual) <= float(tolerance)
+    assert float(tolerance) < 1.0e-12 * float(im._tree_norm(mu))
+    # a looser tolerance is unchanged: the floor only ever raises the bound
+    _, _, loose = im._block_adjoint(system, pullback, b, cfg, 1.0e-2)
+    assert float(loose) == pytest.approx(
+        im._ADJOINT_RESIDUAL_SLACK * 1.0e-2 * float(im._tree_norm(b)))
+
+    def wrong(mu):  # a pullback of a different system than the factored one
+        return 1.01 * pullback(mu)
+
+    _, bad_residual, bad_tolerance = im._block_adjoint(system, wrong, b, cfg, 1.0e-11)
+    assert float(bad_residual) > float(bad_tolerance)
+
+
+def test_adjoint_tolerance_change_reuses_every_executable(solovev):
+    """The adjoint tolerance is a traced argument: a tolerance-only config
+    compares equal, compiles nothing, and still sets the acceptance bound."""
+    _name, inp, cfg, p0, x_star, _rt, mask = solovev
+    other = im._canonical_config(dataclasses.replace(cfg, adjoint_tol=1e-6))
+    assert other is not cfg and other == cfg and hash(other) == hash(cfg)
+    P = im._dof_projector(cfg, mask)
+    b = P(jax.tree.map(jnp.ones_like, x_star))
+    mu, tight = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-11, cfg)
+    compiled = im._adjoint_block_core._cache_size()
+    mu2, loose = im._adjoint_block_core(p0, P(x_star), x_star, mask, b, 1e-6, other)
+    assert im._adjoint_block_core._cache_size() == compiled
+    assert float(loose.tolerance) == pytest.approx(1e5 * float(tight.tolerance))
+    np.testing.assert_array_equal(jax.tree.leaves(mu2)[0], jax.tree.leaves(mu)[0])
 
 
 def test_block_adjoint_certificate_failure_falls_back_to_krylov(monkeypatch, solovev):
@@ -541,6 +606,10 @@ def test_make_config_canonicalizes_equal_content(solovev):
     cfg_a = im.make_config(inp, **CASES[name])
     cfg_b = im.make_config(inp, **CASES[name])
     assert cfg_a is cfg_b
+    # Boundary and profile values reach every lane as traced parameters: a
+    # moved boundary (the next optimizer stage) shares the instance.
+    moved = dataclasses.replace(inp, rbc=inp.rbc * 1.01, phiedge=2.0 * inp.phiedge)
+    assert im.make_config(moved, **CASES[name]) is cfg_a
     cfg_c = im.make_config(inp, ftol=CASES[name]["ftol"] * 0.5,
                            max_iterations=CASES[name]["max_iterations"])
     assert cfg_c is not cfg_a
@@ -651,7 +720,9 @@ def test_adjoint_gmres_preconditioner_value(solovev):
 
     budgets = {}
     for formulation in ("preconditioned", "raw"):
-        A = im.adjoint_matvec(cfg, p0, x_star, mask, formulation=formulation)
+        F = im.residual_fn(cfg, x_star, mask, formulation=formulation)
+        _, vjp_z = jax.vjp(lambda z: F(z, p0), P(x_star))
+        A = lambda v, vjp_z=vjp_z: vjp_z(v)[0]  # noqa: E731
         lam, _ = jax.scipy.sparse.linalg.gmres(
             A, b, tol=1e-13, atol=0.0, restart=30, maxiter=10,
             solve_method="incremental",
@@ -677,6 +748,7 @@ def _assert_stability_gradients(
     include_profiles,
     metric_names=("DMerc",),
     direction_labels=None,
+    h=1.0e-4,
 ):
     name, inp, cfg, p0, _, _, _ = case
     ntor = int(inp.ntor)
@@ -738,7 +810,7 @@ def _assert_stability_gradients(
         for label, tangent in directions:
             ad = _tree_dot(grad, tangent)
             fd, info = im.frozen_path_directional_fd(
-                p0, cfg, metric, tangent, h=1.0e-4
+                p0, cfg, metric, tangent, h=h
             )
             residual = max(info["newton_res"])
             scale = max(abs(ad), abs(fd), 1.0e-12)
@@ -825,7 +897,7 @@ def lasym():
     cfg = im.make_config(inp, ftol=LASYM_CASE["ftol"],
                          max_iterations=LASYM_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)
@@ -1161,7 +1233,7 @@ def lasym_3d():
     cfg = im.make_config(inp, ftol=LASYM3D_CASE["ftol"],
                          max_iterations=LASYM3D_CASE["max_iterations"])
     p0 = im.params_from_input(inp)
-    result = solver.solve(inp, cfg.resolution, ftol=cfg.ftol,
+    result = _held_solve(inp, cfg.resolution, ftol=cfg.ftol,
                           max_iterations=cfg.max_iterations, mode="cli")
     assert result.converged
     rt = im.runtime_from_params(p0, cfg)
@@ -1290,4 +1362,21 @@ def test_lasym_3d_stability_gradients_vs_frozen_path_fd(lasym_3d):
     """LASYM Mercier/Glasser derivatives include the RBS/ZBC families."""
     _assert_stability_gradients(
         lasym_3d, include_profiles=False, metric_names=("DMerc", "D_R"),
-        direction_labels={"RBS(1,1)", "ZBC(1,1)"})
+        direction_labels={"RBS(1,1)", "ZBC(1,1)"},
+        # VMEC2000's atan2 shift turns this deck by pi/2 (rbc + zbs = 0); the
+        # central difference then converges as h^2 (measured DMerc/RBS(1,1)
+        # vs the adjoint: 2.2e-4 at 1e-4, 2.2e-6 at 1e-5), so h = 1e-5.
+        h=1.0e-5)
+
+
+@pytest.mark.parametrize("rfix", [False, True])
+def test_traced_tvolume_rescaling_matches_run_setup(rfix):
+    inp = dataclasses.replace(VmecInput.from_file(str(DATA_DIR / "input.li383_low_res")),
+                              tvolume=4.0, lvolume_rfix=rfix)
+    cfg = im.make_config(inp, ns=7)
+    rt_ref = solver.prepare_runtime(inp, cfg.resolution, ftol=cfg.ftol,
+                                    max_iterations=cfg.max_iterations)
+    rt_p = im.runtime_from_params(im.params_from_input(inp), cfg)
+    for name in ("rcon0", "zcon0"):
+        np.testing.assert_allclose(np.asarray(getattr(rt_ref, name)),
+                                   np.asarray(getattr(rt_p, name)), rtol=0.0, atol=1e-13)

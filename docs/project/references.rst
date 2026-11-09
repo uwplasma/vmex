@@ -112,9 +112,8 @@ Confinement objectives and optimization:
     stellarators with self-consistent bootstrap current and energetic particle
     confinement,” *Physics of Plasmas* 29, 082501 (2022), arXiv:2205.02914,
     doi:10.1063/5.0098166 —
-    the self-consistent bootstrap iteration reproduced in
-    ``benchmarks/*_bootstrap_selfconsistent.py``; the compact finite-beta
-    optimization workflows are ``examples/optimization/*_optimization_bootstrap.py``.
+    the compact finite-beta optimization workflows are
+    ``examples/optimization/*_optimization_bootstrap.py``.
 
 27. R. Jorge, A. Goodman, M. Landreman, J. Rodrigues, and F. Wechsung,
     “Single-stage stellarator optimization: combining coils with fixed
@@ -224,8 +223,8 @@ Numerical implementation:
 
 47. X. S. Li, “An Overview of SuperLU: Algorithms, Implementation, and User
     Interface,” *ACM Transactions on Mathematical Software* 31, 302–325
-    (2005) — globally pivoted sparse factorization used for the equilibrated
-    block-banded radial solve, doi:10.1145/1089014.1089017.
+    (2005) — the sparse factorization the boundary-Schur bulk solve used
+    before its banded LU, doi:10.1145/1089014.1089017.
 
 48. D. Panici, R. Conlin, D. W. Dudt, K. Unalmis, and E. Kolemen, “The DESC
     stellarator code suite. Part 1: Quick and accurate equilibria
@@ -235,3 +234,49 @@ Numerical implementation:
     :math:`\langle|\mathbf F|\rangle / \langle|\nabla p|\rangle` reported
     beside the pointwise certificate, and its vacuum-safe companion that
     divides by the volume-averaged magnetic pressure gradient instead.
+
+49. R. Sanchez, S. P. Hirshman, J. C. Whitson, and A. S. Ware, “COBRA: an
+    optimized code for fast analysis of ideal ballooning stability of
+    three-dimensional magnetic equilibria,” *Journal of Computational
+    Physics* 161, 576 (2000), doi:10.1006/jcph.2000.6514 — the three-point
+    field-line eigenproblem and its Richardson extrapolation in the step,
+    adopted by :mod:`vmex.core.stability`.
+
+50. R. Gaur, S. Buller, M. E. Ruth, M. Landreman, I. G. Abel, and
+    W. D. Dorland, “An adjoint-based method for optimizing MHD equilibria
+    against the infinite-n, ideal ballooning mode,” *Journal of Plasma
+    Physics* 89, 905890518 (2023), arXiv:2302.07673,
+    doi:10.1017/S0022377823000995 — the field-line eigenproblem in the PEST
+    angle and the per-surface hinge objective.
+
+51. R. Gaur et al., “Omnigenous stellarators with improved ideal and kinetic
+    ballooning stability,” *Plasma Physics and Controlled Fusion* 67, 125015
+    (2025), arXiv:2410.04576 — the inertia coefficient used here and the
+    hinge-plus-maximum objective over surfaces, field lines and ballooning
+    parameters that DESC's ``BallooningStability`` implements.
+
+Piecewise omnigenity:
+
+52. J. L. Velasco et al., “Piecewise omnigenous stellarators,” arXiv:2405.07634
+    (2024) — the pwO class and its well-class conditions.
+
+53. I. Calvo, J. L. Velasco, P. Helander, and F. I. Parra, “Piecewise omnigenous
+    stellarators with zero bootstrap current,” *Physical Review E* 112, L023201
+    (2025), arXiv:2505.02546 — the prototypical two-level field and the
+    zero-bootstrap condition.
+
+54. J. L. Velasco, I. Calvo, and J. M. García-Regaña, “Control of the bootstrap
+    current in approximately quasi-axisymmetric magnetic fields,” arXiv:2603.20125
+    (2026) — a quasi-axisymmetric field perturbed into a pwO one.
+
+55. Liu et al., arXiv:2603.12139 (2026) — the squeezed coordinate map with
+    parameters :math:`a, b, c` used by :class:`~vmex.core.pwo.MappedPwOResidual`.
+
+56. K. C. Shaing and J. D. Callen, “Neoclassical flows and transport in
+    nonaxisymmetric toroidal plasmas,” *Physics of Fluids* 26, 3315 (1983);
+    S. Nakajima et al., “Optimization of the bootstrap current in a large helical
+    system with L = 2,” *Nuclear Fusion* 29, 605 (1989) — the geometric factor
+    :math:`G_{\rm bs}` of the :math:`1/\nu` bootstrap current.
+
+57. P. Helander, J. Geiger, and H. Maaßberg, “On the bootstrap current in
+    stellarators and tokamaks,” *Physics of Plasmas* 18, 092505 (2011).

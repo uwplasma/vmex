@@ -3,11 +3,12 @@ Performance records
 
 This page collects the measured wall time, iteration counts and memory of the
 solver and of the force-balance polish.  Every number on it quotes a committed
-record under ``benchmarks/`` and names the VMEX version, commit or date that
-record was measured at; a number without a record is not stated.  Hosts differ
+record under ``benchmarks/``, or a measurement whose record was retired to
+keep the repository small and stays in git history at the named VMEX commit;
+a number without either is not stated.  Hosts differ
 between records, so the quantity that carries across machines is a ratio
 between codes on one host, not an absolute time.  The most current speed
-record is ``benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json`` (VMEX 0.8.1,
+record is the fresh-deck run below (VMEX 0.8.1, commit ``8ef81c44``,
 Apple M4): on six decks VMEX had never been run on, it took 0.50–1.34x the
 VMEC2000 wall time with a warm persistent compilation cache and 0.60–3.13x
 with the cache cleared.
@@ -21,9 +22,7 @@ run through ``vmex`` and the serial Fortran ``xvmec2000`` on an Apple M4 with
 JAX 0.11.1 in float64, at VMEX commit ``8ef81c44``.  Cold is a fresh process
 with the persistent compilation cache removed; warm is a fresh process
 reusing it; each run used a fresh directory.  The record, with reference
-binary and deck hashes, is
-``benchmarks/fresh_decks_vs_vmec2000_2026-09-02.json``, with a per-deck
-narrative in the companion ``.md``.  Iterations are listed as xvmec2000 /
+binary and deck hashes, is in git history at commit ``8ef81c44``.  Iterations are listed as xvmec2000 /
 vmex.
 
 =========================  =============  ================  =============  =============  =============  ===========
@@ -88,7 +87,7 @@ current comparison.
      - VMEC2000
      - vmex cold
      - vmex warm
-     - VMEC++
+     - external C++
    * - li383_low_res
      - 0.86
      - 3.36
@@ -168,9 +167,10 @@ marks an aborted run and ``n/a`` an unsupported configuration.
 
 .. end generated-baseline-table
 
-VMEC++ ran through its Python API in a fresh process on the same host; its
-``failed`` rows aborted during the first iterations.  The record also carries
-each run's iteration count and peak RSS.
+The external column is a C++ VMEC reimplementation, run through its Python
+API in a fresh process on the same host; its ``failed`` rows
+aborted during the first iterations.  The record also carries each run's
+iteration count and peak RSS.
 
 Free-boundary multigrid parity (commit ``b0cc789e``, 2026-07-24)
 ------------------------------------------------------------------
@@ -193,22 +193,22 @@ path) and asserts ``wb`` within 1e-7 relative and ``rmnc/zmns`` and
 
 The figure plots the total force residual ``fsqr + fsqz + fsql`` per
 iteration for ``nfp4_QH_warm_start`` on a single grid at ``ns=51``: 502
-iterations for VMEX and VMEC2000, 501 for VMEC++.  The traces are in
+iterations for VMEX and VMEC2000.  The traces are in
 ``benchmarks/convergence_nfp4_ns51.json``, last written on 2026-07-29 (PR
 #80); host and JAX version were not recorded.
 
 .. figure:: /_static/figures/readme_convergence.webp
-   :alt: force residual vs iteration for VMEX, VMEC2000, and VMEC++
+   :alt: force residual vs iteration for VMEX and VMEC2000
    :align: center
    :width: 95%
 
    Force residual vs iteration on ``nfp4_QH_warm_start`` at ``ns=51``
-   (``benchmarks/make_readme_figures.py --only convergence``).
+   (``docs/_static/figures/sources/make_readme_figures.py --only convergence``).
 
 GPU (VMEX 0.9.1, 2026-09-16)
 ----------------------------
 
-``benchmarks/gpu_a4000_2026-09-16.json`` re-measured the CPU-versus-GPU
+A run of ``tools/run_gpu_matrix.py`` re-measured the CPU-versus-GPU
 sweep on two NVIDIA RTX A4000s with JAX 0.11.1 at the VMEX 0.9.1 commit.
 The GPU won no cell: warm gain ran 0.17x to 0.83x across every shipped deck
 and every point of the synthetic ``ns x mnmax`` scan, including
@@ -218,14 +218,40 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
+Measuring a workload
+--------------------
+
+Device choice depends on resolution, objective, hardware and software versions.
+Time the complete solve, gradient or residual Jacobian used by your optimizer,
+including host callbacks and transfers. Synchronize JAX results before stopping
+wall-clock timers, and check convergence and derivative agreement before
+comparing performance.
+
+Measure three cache states separately: a fresh process with an empty persistent
+cache, a fresh process reusing that cache, and repeated calls in one process.
+Use nearby parameter vectors for warm optimization measurements so the result
+cache cannot satisfy every call. Report VMEX and dependency versions, device,
+precision, resolution, tolerances, iterations and available CPU cores with the
+results. Compilation, cache loading and execution have different costs.
+
+Matched fixed- and free-boundary gradient checks at revision ``d8791437`` found
+lower warm GPU costs on selected workloads, with larger first-call costs.
+These results qualify the tested problems and software stack. Benchmark your
+own objective before choosing a device or CPU thread count; small solves can
+slow down when given more threads.
+
+For independent equilibria, compare process counts and threads per process
+within a fixed core and memory budget. A single equilibrium runs on one device;
+``vmex.parallel`` schedules independent cases. Cross-node scaling of one
+coupled equilibrium remains unqualified.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
 JAX re-scans the whole cache directory on every write: ``put`` globs each
 entry, stats it and reads its access-time sidecar under the directory-wide
 lock, so the cost grows with the number of resident entries.
-``benchmarks/cache_entry_scaling_m4_2026-09-03.json`` (commit ``2d3be2c0``,
-Apple M4, JAX 0.11.1; the record notes other work was running, so its wall
+A cache-scaling measurement (commit ``2d3be2c0``, Apple M4, JAX 0.11.1; the record notes other work was running, so its wall
 times are upper bounds) measures 0.028 ms per resident entry: a write costs
 5.7 ms at 250 entries and 304 ms at 10880.  On one bundled deck a solve took
 7.46 s against an empty cache and 31.3 s against a 10880-entry cache,
@@ -240,6 +266,19 @@ bound, so a large workload keeps its own working set.  Set
 ``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
 trimming.
 
+JAX's own byte bound is left off (``jax_compilation_cache_max_size=-1``).
+With a finite bound JAX also takes a directory lock and re-scans the
+directory on every write, and a cold first value and gradient on
+``input.li383_low_res`` at ``ns=31`` (914 programs, Apple M4, JAX 0.12.0.1)
+took 40.0 s against 22.9 s unbounded (22.2 s with the cache off); a second
+process reloads the cache in 5.6 s against 5.8 s.  VMEX trims the directory
+itself at import: to the entry bound above and to a byte bound that scales with
+the free disk (2 to 20 GiB), oldest entries first.  Without JAX's lock a
+concurrent process can read a half-written entry; JAX then warns and
+compiles that program.  Six concurrent processes on one empty directory
+finished without error.  ``VMEX_COMPILATION_CACHE_MAX_SIZE=<bytes>`` turns
+JAX's bounded cache back on.
+
 JAX never writes a program that contains a host callback to the cache.  The
 fixed-boundary optimization Jacobians (block and per-column GMRES) therefore
 take the host-solved equilibrium as an argument instead of calling the solve
@@ -249,6 +288,21 @@ recompiling.  The reverse-adjoint Jacobian still calls the solve in its graph.
 With jaxlib < 0.10 the cache defaults to off, because those releases crash
 deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
 forces it on.
+
+The solver step and block lanes and the free-boundary vacuum loop and full
+vacuum update are also stored as serialized executables under ``aot/`` in the
+cache directory, so a new process runs them without tracing or lowering.
+Each loads onto the one device its arguments use.  A warm ``cth_like``
+free-boundary solve (36-core x86 host, pinned to 4 loaded cores, JAX 0.12.0.1,
+4 alternated runs) takes 14.8–17.4 s against 16.9–23.2 s before; tracing,
+lowering and loading drop from 4.6–6.1 s to 2.2–2.5 s.  A first free-boundary
+value and gradient in a new process hits the cache for all of its 332
+programs and still spends 51–62 s tracing, lowering and loading them
+(no change outside the noise, 3 runs): those adjoint programs take the
+user's field function as a static argument, which no file can be keyed on.
+The defaults need no change.  Point ``VMEX_COMPILATION_CACHE_DIR`` at
+node-local disk when the home filesystem is slow or shared by many concurrent
+jobs, and set ``VMEX_COMPILATION_CACHE=0`` only when disk is scarce.
 
 High-mode FFT synthesis (commit ``ecfbe31d``, 2026-07-28)
 ---------------------------------------------------------
@@ -274,7 +328,7 @@ with a matrix-free Newton step: a Jacobian-vector-product Hessian applied
 through GMRES.  The default 1D path is unchanged by its presence.  The rows
 come from ``benchmarks/preconditioner_2d_stiff_cases.json`` (commit
 ``8b1c5ffe``, Apple M3 Max, JAX 0.9.2, measured 2026-09-03), and
-``tests/test_figure_provenance.py`` fails when this table drifts from it.
+``tests/test_repo_consistency.py`` fails when this table drifts from it.
 The iteration count falls 5.4x to 10.9x on these three cases.
 
 .. list-table::
@@ -308,7 +362,7 @@ The iteration count falls 5.4x to 10.9x on these three cases.
    :width: 90%
 
    Iterations to converge, 2D block vs 1D radial preconditioner
-   (``benchmarks/make_readme_figures.py --only precond``).
+   (``docs/_static/figures/sources/make_readme_figures.py --only precond``).
 
 It is opt-in on purpose.  Fewer iterations is not fewer seconds: each 2D
 Newton step is a GMRES solve over Hessian-vector products and costs more than
@@ -328,7 +382,7 @@ VMEC2000 1D solve and matches its ``wb`` to 1e-8 relative.
 High-order strong-force kernel (VMEX 0.7.0, 2026-08-28)
 -------------------------------------------------------
 
-``benchmarks/strong_force.py`` measures the independent continuum oracle,
+A dedicated benchmark measured the independent continuum oracle,
 pointwise ``J x B - grad(p)``, and its reverse-mode coefficient gradient.
 The record ``benchmarks/strong_force_m4.json`` (commit ``9481f64a``, arm64
 macOS, JAX 0.11.1) disabled the persistent compilation cache and used
@@ -367,7 +421,9 @@ certificates dominate.  Peak RSS is about 3.5 GB.
 Historical and generated records
 --------------------------------
 
-``benchmarks/baselines/m4/`` holds historical schema-1 workflow records; their
-aggregate warm timing repeats only the first stage, so they do not establish
-complete-workflow performance.  ``benchmarks/INDEX.md`` lists every committed
-record with the script that generates it.
+Each committed record under ``benchmarks/`` carries its own provenance block
+(commit, date, command).  The drivers that regenerate the records shown on
+this page live in ``tools/`` (``run_baseline.py``, ``run_gpu_matrix.py``,
+``run_freeboundary_multigrid.py``, ``preconditioner_2d_stiff.py``,
+``device_parity.py``, ``device_cache_reload.py``, ``trace_cross_code.py``);
+records whose driver was retired name the commit that holds it.

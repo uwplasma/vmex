@@ -75,14 +75,18 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
     carries it, the extra pins that floor, and the instruction is gone -- so
     what has to stay true is that the floor and the API agree.
     """
-    import tomllib
     from importlib.metadata import version
 
     from packaging.version import Version
 
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib
+
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.21.0"], coils
+    assert coils == ["essos>=0.22.0"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()
@@ -113,6 +117,11 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 #: here on purpose.  ``EXECUTED_EXAMPLES`` is the other half of the partition;
 #: between them they must name every shipped example exactly once.
 UNTESTED_EXAMPLES = {
+    "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
+    "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
+    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
+    "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
+    "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
@@ -148,10 +157,13 @@ EXECUTED_EXAMPLES = {
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
     "examples/force_balance_polishing.py",
+    "examples/prescribed_current_polishing.py",
     "examples/free_boundary_beta_scan.py",
     "examples/free_boundary_essos_coils.py",
     "examples/free_boundary_mgrid.py",
     "examples/free_boundary_phiedge.py",
+    "examples/free_boundary_position_control.py",
+    "examples/free_boundary_relax_constraint.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -174,8 +186,10 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QH_optimization_bootstrap.py",
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
+    "examples/optimization/pwO_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
+    "examples/optimization/QI_optimization_bootstrap_er.py",
     "examples/optimization/QI_optimization_jaxopt.py",
     "examples/optimization/QI_optimization_optax.py",
     "examples/optimization/QI_optimization_scipy.py",
@@ -443,6 +457,15 @@ def test_force_balance_polishing_example_refuses_an_uncertified_export() -> None
     for field in ("initial_normalized_l2", "final_normalized_l2",
                   "nonlinear_iterations", "termination_reason"):
         assert field in source
+
+
+@pytest.mark.full  # nightly: discrete solve + prescribed-current polish
+def test_prescribed_current_polishing_example(tmp_path):
+    out = _run_example(EXAMPLES / "prescribed_current_polishing.py", tmp_path, timeout=600)
+    assert "Forward result only" in out
+    for label in ("axis", "bulk", "edge"):
+        match = re.search(label + r" force/pressure-gradient RMS: ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
+        assert match and np.isfinite([float(v) for v in match.groups()]).all(), out
 
 
 @pytest.mark.full  # nightly: ordinary solve + native strong-force polish (~3 min)
@@ -995,6 +1018,15 @@ def test_alpha_optimizer_accepts_only_finite_value_and_gradient(value, gradient)
             functions["value_grad"](np.zeros(1))
 
 
+@pytest.mark.full  # nightly: coarse free-boundary solve plus 1,000 relaxation iterations (~1.5 min)
+def test_free_boundary_relax_constraint(tmp_path):
+    pytest.importorskip("essos.fields")
+    out = _run_example(EXAMPLES / "free_boundary_relax_constraint.py", tmp_path, timeout=1500)
+    rows = dict(re.findall(r"^\s*(converged|relaxed)\s+\S+\s+([0-9.eE+-]+)", out, re.M))
+    assert set(rows) == {"converged", "relaxed"}, out
+    assert float(rows["relaxed"]) < 0.5 * float(rows["converged"]), out  # 3x at ns = 12
+
+
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
 def test_free_boundary_essos_coils(tmp_path):
     # The example needs only ``essos.coils`` (loading) + ``essos.fields.BiotSavart``
@@ -1012,6 +1044,19 @@ def test_free_boundary_essos_coils(tmp_path):
     assert abs(actual - nominal) <= 0.15, (
         f"actual betatotal {actual}% not calibrated to nominal {nominal}%")
     assert fsq < 1e-7, f"free-boundary point should converge, fsq={fsq}"
+
+
+def test_free_boundary_position_control(tmp_path):
+    # Five vertical-field offsets, each without and with control (~1 min).
+    out = _run_example(EXAMPLES / "free_boundary_position_control.py", tmp_path, timeout=600)
+    rows = re.findall(r"^\s*(-?[0-9.]+) \|\s+(\w+)\s+\d+\s+\S+\s+\S+ \|"
+                      r"\s+(\w+)\s+\d+\s+\S+\s+(-?[0-9.]+)\s+(-?[0-9.]+)$", out, re.M)
+    assert len(rows) == 5, out
+    for offset, free, held, shift, bz in rows:
+        assert (free == "NO") == (float(offset) == -40.0), out   # only the deficit defeats it
+        assert held == "yes" and abs(float(shift)) < 1.0, out      # axis within 1 cm
+        assert abs(float(bz) + float(offset)) < 2.0, out           # recovers the offset
+    assert (tmp_path / "output_position_control" / "mgrid_d3d_vertical_deficit.nc").exists()
 
 
 @pytest.mark.full  # nightly: PHIEDGE root solve on the ESSOS QA coils
@@ -1185,6 +1230,16 @@ def test_qi_optimization_example(tmp_path):
     assert (tmp_path / "wout_QI_optimized.nc").exists()
 
 
+@pytest.mark.full
+def test_low_transport_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    pytest.importorskip("neo_jax")
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
+    for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
+                 "pwO_optimized_nfp3_objectives.csv"):
+        assert (tmp_path / name).exists()
+
+
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve
 def test_qa_ballooning_optimization_example(tmp_path):
     """Reduced-budget QA + infinite-n ballooning optimization smoke test."""
@@ -1220,6 +1275,49 @@ def test_qa_turbulence_optimization_examples(tmp_path, kind):
     assert (tmp_path / f"wout_QA_turbulence_{kind}_optimized.nc").exists()
 
 
+@pytest.mark.parametrize("bad", [None, "time", "flux", "wphi", "wg"])
+def test_nonlinear_turbulence_example_saturation_endpoints(bad):
+    """Use the final scan sample and reject every nonfinite endpoint guard."""
+    import time
+    from types import SimpleNamespace
+
+    source = (EXAMPLES / "optimization" / "QA_optimization_turbulence_nonlinear.py").read_text()
+    function = next(node for node in ast.parse(source).body
+                    if isinstance(node, ast.FunctionDef) and node.name == "saturate")
+    endpoint = {key: np.array([0.0, value]) for key, value in
+                (("time", 0.1), ("flux", 7.0), ("wphi", 3.0), ("wg", 5.0))}
+    if bad is not None:
+        endpoint[bad][-1] = np.nan
+    state = object()
+    diagnostics = SimpleNamespace(heat_flux_t=endpoint["flux"], Wphi_t=endpoint["wphi"],
+                                  Wg_t=endpoint["wg"])
+    simulation = SimpleNamespace(run=lambda _: (endpoint["time"], diagnostics, state, None))
+    seen = []
+
+    def gate(times, fluxes, **kwargs):
+        seen.append((times.copy(), fluxes.copy(), kwargs))
+        return dict(saturated=True, mean=7.0, sem=0.0)
+
+    namespace = dict(np=np, time=time, TUBES=[(0.5, 0.0)], grid=None, DT=0.05,
+                     SAMPLE_STEPS=2, MAX_SATURATION_STEPS=4, SATURATION_REL_SEM=0.1,
+                     terms=None, ci_smoke=False, saturation_traces=[],
+                     tube_geometry=lambda *args: None, gk_parameters=lambda _: None,
+                     prepare_nonlinear_explicit_diagnostics=lambda *args, **kwargs: simulation,
+                     saturation_stop_decision=gate, SaturationStopConfig=lambda **kwargs: kwargs)
+    exec(compile(ast.Module(body=[function], type_ignores=[]), "example", "exec"), namespace)
+    equilibrium = SimpleNamespace(state=None, runtime=None)
+    if bad is not None:
+        with pytest.raises(FloatingPointError, match="non-finite diagnostics"):
+            namespace["saturate"](equilibrium, [None], "seed")
+        assert not seen and not namespace["saturation_traces"]
+    else:
+        assert namespace["saturate"](equilibrium, [None], "seed") == [state]
+        times, fluxes, guards = seen[0]
+        assert times == [0.1] and fluxes == [7.0]
+        assert guards["guard"] == [3.0] and guards["free_energy_guard"] == [5.0]
+        assert namespace["saturation_traces"][0][1:3] == (times, fluxes)
+
+
 def test_ballooning_example_scans_the_ballooning_parameter():
     """The example must not optimize a bound taken at a single zeta0.
 
@@ -1240,31 +1338,6 @@ def test_vacuum_qs_examples_expose_trial_pressure_terms():
         assert "(trial_dmerc, 0.0, stability_weights)" in source
         assert "(trial_dr, 0.0, stability_weights)" in source
         assert "weights rise smoothly toward the edge" in source
-
-
-# The self-consistent-bootstrap examples reproduce arXiv:2205.02914 against the
-# Zenodo dataset, which is a large local-only archive (not in CI) — skip when
-# absent.  Nightly-gated: each runs a multi-iteration Picard loop of solves.
-_ZENODO_2205 = Path(os.environ.get(
-    "VMEX_ZENODO_2205_02914",
-    str(Path.home() / "local" /
-        "20220708-01-zenodo_for_QS_optimization_with_self_consistent_bootstrap_current")))
-
-
-@pytest.mark.full
-@pytest.mark.skipif(not _ZENODO_2205.is_dir(),
-                    reason="arXiv:2205.02914 Zenodo dataset not present")
-@pytest.mark.parametrize("case", ["QA", "QH"])
-def test_bootstrap_selfconsistent_examples(case, tmp_path):
-    script = REPO / "benchmarks" / f"{case}_bootstrap_selfconsistent.py"
-    # The guard above accepts the dataset at its default location, but the
-    # script only reads the environment variable, so pass the resolved path.
-    out = _run_example(script, tmp_path, timeout=1200,
-                       VMEX_ZENODO_2205_02914=str(_ZENODO_2205))
-    m = re.search(r"final f_boot = ([0-9.eE+-]+)", out)
-    assert m is not None and float(m.group(1)) < 5e-2, f"{case} f_boot: {out[-400:]}"
-    assert (tmp_path / f"output_{case}_bootstrap_selfconsistent"
-            / f"wout_{case}_bootstrap_selfconsistent.nc").exists()
 
 
 @pytest.mark.full  # nightly: Picard seed + one exact finite-beta optimization stage
@@ -1289,6 +1362,7 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
     ("QA_optimization_low_bootstrap.py", "QA_low_bootstrap_optimized", None),
     ("optimize_bootstrap_current.py", "bootstrap_current_optimized", "booz_xform_jax"),
     ("QI_optimization_bootstrap_dkx.py", "QI_bootstrap_dkx_optimized", "dkx"),
+    ("QI_optimization_bootstrap_er.py", "QI_bootstrap_er_optimized", "dkx"),
 ])
 def test_low_bootstrap_optimization_examples(script_name, output, dependency, tmp_path):
     if dependency == "dkx":
@@ -1306,6 +1380,9 @@ def test_low_bootstrap_optimization_examples(script_name, output, dependency, tm
         assert (tmp_path / f"{output}_boozer_modB.png").exists()
     if dependency == "dkx":
         assert "Redl" in out and "DKX" in out
+    if script_name == "QI_optimization_bootstrap_er.py":
+        # the example asserts its own consistency limit; the report line is the evidence
+        assert re.search(r"<j\.B> inconsistency \(rms, VMEX vs DKX\): [0-9.]+", out)
 
 
 @pytest.mark.full  # nightly: optional optimizer interoperability, cold JAX compilation
@@ -1402,6 +1479,40 @@ def test_fixed_boundary_single_stage_optimization(tmp_path):
     surface_vtk = (tmp_path / "surface_single_stage_optimized.vts").read_bytes()
     assert b'Name="B_BiotSavart"' in surface_vtk
     assert b'Name="B_dot_n_over_B"' in surface_vtk
+
+
+def test_finite_beta_single_stage_seed_flux_matches_cartesian_stokes():
+    """Compare the production +phi area integral with an independent A.dl integral."""
+    pytest.importorskip("essos")
+    from dataclasses import replace
+    from essos.coils import Coils, CreateEquallySpacedCurves
+    from vmex import VmecInput
+    from vmex.core.single_stage import toroidal_flux
+
+    inp = VmecInput.from_file(EXAMPLES / "data" / "input.minimal_seed_nfp2")
+    rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+    rbc[inp.ntor, 1] = zbs[inp.ntor, 1] = 0.195
+    rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = 0.10, -0.10
+    inp = replace(inp, rbc=rbc, zbs=zbs)
+    coils = Coils(CreateEquallySpacedCurves(
+        3, 2, 1.0, 0.5, n_segments=24, nfp=2, stellsym=True), np.full(3, 2.7e5))
+    flux = toroidal_flux(inp, coils)
+    theta = np.arange(512) * 2 * np.pi / 512
+    m = np.arange(inp.rbc.shape[1])
+    phase = np.outer(theta, m)
+    rc, zs = inp.rbc.sum(axis=0), inp.zbs.sum(axis=0)
+    r, z = np.cos(phase) @ rc, np.sin(phase) @ zs
+    dr, dz = -np.sin(phase) @ (m * rc), np.cos(phase) @ (m * zs)
+    points, tangent = np.stack((r, np.zeros_like(r), z), axis=-1), np.stack(
+        (dr, np.zeros_like(dr), dz), axis=-1)
+    gamma, dash, current = map(np.asarray, (coils.gamma, coils.gamma_dash, coils.currents))
+    distance = np.linalg.norm(points[:, None, None, :] - gamma[None, :, :, :], axis=-1)
+    potential = 1e-7 * np.mean(np.sum(
+        current[None, :, None, None] * dash[None, :, :, :] / distance[..., None], axis=1), axis=1)
+    # Increasing theta has normal -Y. Minus A.dl measures +phi flux (+Y at phi=0).
+    flux_plus_phi = -float(np.sum(potential * tangent) * 2 * np.pi / theta.size)
+    assert flux_plus_phi > 1e-6
+    assert flux == pytest.approx(flux_plus_phi, rel=1e-9)
 
 
 @pytest.mark.full  # nightly: one finite-beta VMEX + VCJ + ESSOS graph
@@ -1571,7 +1682,7 @@ def test_vmex_mrx_comparison_example(tmp_path):
     """
     out = _run_example(EXAMPLES / "vmex_mrx_comparison.py", tmp_path, timeout=1200)
     if "MRX is not installed" in out:
-        assert "pip install mrx" in out
+        assert 'pip install "git+https://github.com/ToBlick/mrx@' in out
         return
     assert "VMEX: iota axis/edge" in out
     assert "force residual" in out and "|B| difference" in out
