@@ -218,6 +218,33 @@ throughput crossover does not transfer.  The placement policy and how to
 measure on your own hardware are in :doc:`/howto/run-on-gpu` and
 :doc:`/explanation/architecture`.
 
+Measuring a workload
+--------------------
+
+Device choice depends on resolution, objective, hardware and software versions.
+Time the complete solve, gradient or residual Jacobian used by your optimizer,
+including host callbacks and transfers. Synchronize JAX results before stopping
+wall-clock timers, and check convergence and derivative agreement before
+comparing performance.
+
+Measure three cache states separately: a fresh process with an empty persistent
+cache, a fresh process reusing that cache, and repeated calls in one process.
+Use nearby parameter vectors for warm optimization measurements so the result
+cache cannot satisfy every call. Report VMEX and dependency versions, device,
+precision, resolution, tolerances, iterations and available CPU cores with the
+results. Compilation, cache loading and execution have different costs.
+
+Matched fixed- and free-boundary gradient checks at revision ``d8791437`` found
+lower warm GPU costs on selected workloads, with larger first-call costs.
+These results qualify the tested problems and software stack. Benchmark your
+own objective before choosing a device or CPU thread count; small solves can
+slow down when given more threads.
+
+For independent equilibria, compare process counts and threads per process
+within a fixed core and memory budget. A single equilibrium runs on one device;
+``vmex.parallel`` schedules independent cases. Cross-node scaling of one
+coupled equilibrium remains unqualified.
+
 Persistent compilation cache (2026-09-03)
 -----------------------------------------
 
@@ -239,6 +266,19 @@ bound, so a large workload keeps its own working set.  Set
 ``VMEX_CACHE_MAX_ENTRIES`` to change the bound, or to ``0`` to disable
 trimming.
 
+JAX's own byte bound is left off (``jax_compilation_cache_max_size=-1``).
+With a finite bound JAX also takes a directory lock and re-scans the
+directory on every write, and a cold first value and gradient on
+``input.li383_low_res`` at ``ns=31`` (914 programs, Apple M4, JAX 0.12.0.1)
+took 40.0 s against 22.9 s unbounded (22.2 s with the cache off); a second
+process reloads the cache in 5.6 s against 5.8 s.  VMEX trims the directory
+itself at import: to the entry bound above and to a byte bound that scales with
+the free disk (2 to 20 GiB), oldest entries first.  Without JAX's lock a
+concurrent process can read a half-written entry; JAX then warns and
+compiles that program.  Six concurrent processes on one empty directory
+finished without error.  ``VMEX_COMPILATION_CACHE_MAX_SIZE=<bytes>`` turns
+JAX's bounded cache back on.
+
 JAX never writes a program that contains a host callback to the cache.  The
 fixed-boundary optimization Jacobians (block and per-column GMRES) therefore
 take the host-solved equilibrium as an argument instead of calling the solve
@@ -248,6 +288,21 @@ recompiling.  The reverse-adjoint Jacobian still calls the solve in its graph.
 With jaxlib < 0.10 the cache defaults to off, because those releases crash
 deserializing large cached CPU executables; ``VMEX_COMPILATION_CACHE=1``
 forces it on.
+
+The solver step and block lanes and the free-boundary vacuum loop and full
+vacuum update are also stored as serialized executables under ``aot/`` in the
+cache directory, so a new process runs them without tracing or lowering.
+Each loads onto the one device its arguments use.  A warm ``cth_like``
+free-boundary solve (36-core x86 host, pinned to 4 loaded cores, JAX 0.12.0.1,
+4 alternated runs) takes 14.8–17.4 s against 16.9–23.2 s before; tracing,
+lowering and loading drop from 4.6–6.1 s to 2.2–2.5 s.  A first free-boundary
+value and gradient in a new process hits the cache for all of its 332
+programs and still spends 51–62 s tracing, lowering and loading them
+(no change outside the noise, 3 runs): those adjoint programs take the
+user's field function as a static argument, which no file can be keyed on.
+The defaults need no change.  Point ``VMEX_COMPILATION_CACHE_DIR`` at
+node-local disk when the home filesystem is slow or shared by many concurrent
+jobs, and set ``VMEX_COMPILATION_CACHE=0`` only when disk is scarce.
 
 High-mode FFT synthesis (commit ``ecfbe31d``, 2026-07-28)
 ---------------------------------------------------------

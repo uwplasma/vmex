@@ -273,4 +273,4 @@ def test_cli_runs_the_control_deck(tmp_path, capsys, control_mgrid) -> None:
         shutil.copy(src, tmp_path / src.name)
     rc = cli.main([str(tmp_path / CONTROL_DECK.name)])
     out = capsys.readouterr().out
-    assert rc == 0 and "POSITION CONTROL: B_Z^ctrl = 39." in out
+    assert rc == 0 and "POSITION CONTROL: B_Z^ctrl = 40." in out

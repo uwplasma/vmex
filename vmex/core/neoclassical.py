@@ -8,6 +8,8 @@ import numpy as np
 
 __all__ = [
     "diagnostic_neo_config",
+    "screen_transport",
+    "transport_improves",
     "epsilon_effective_from_boozer",
     "epsilon_effective_from_wout",
 ]
@@ -117,3 +119,38 @@ def epsilon_effective_from_wout(
     bx.run()
     booz = _neo_boozer_data(bx, indices)
     return epsilon_effective_from_boozer(booz, config=config)
+
+
+def screen_transport(wout, surfaces, *, mboz=24, nboz=24, config=None):
+    """Matched forward NEO screen; not a converged transport calculation."""
+    from booz_xform_jax import Booz_xform
+    NeoConfig, run_neo = _neo_imports()
+
+    bx = Booz_xform(verbose=0, mboz=mboz, nboz=nboz)
+    bx.read_wout_data(wout)
+    indices = [int(np.argmin(abs(np.asarray(bx.s_in)-s))) for s in surfaces]
+    if not np.allclose(np.asarray(bx.s_in)[indices], surfaces, rtol=0, atol=1e-12):
+        raise ValueError("The NEO screen requires the requested half-mesh radii")
+    bx.compute_surfs = indices
+    bx.run(jit=True)
+    config = config if config is not None else NeoConfig(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
+                       nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
+                       max_rational_field_periods=100000, rational_surface_policy="error")
+    results = run_neo(_neo_boozer_data(bx, indices), config=config, use_jax=True,
+                      progress=False, jax_surface_scan=False)
+    values = []
+    for result in results:
+        diag, value = result.diagnostics, float(result.epsilon_effective)
+        if (not np.isfinite(value) or value <= 0 or not diag.get("rational_correction_valid")
+                or diag.get("approximation_used") or diag.get("rational_work_limit_exceeded")):
+            raise ValueError(f"Invalid NEO screen at s={float(result.s):.6g}, Q={value}; keep the incumbent")
+        values.append(value)
+    return np.asarray(values)
+
+
+def transport_improves(baseline, trial):
+    """Require a resolved mean gain and no radial tradeoff in the coarse screen."""
+    a, b = np.asarray(baseline), np.asarray(trial)
+    return bool(a.ndim == b.ndim == 1 and a.shape == b.shape and a.size > 0 and np.isfinite(a).all()
+                and np.isfinite(b).all() and np.all(a > 0) and np.all(b > 0)
+                and np.all(b <= a) and b.mean() < .99*a.mean())

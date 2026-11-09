@@ -162,7 +162,10 @@ CPU, reusing its LU factor between full updates. High-level optimization pins
 implicit-gradient work to the CPU when VMEX owns placement
 (:func:`~vmex.core.device.resolve_implicit_device`), because the gradient graph
 is launch-bound on an accelerator; low-level :func:`~vmex.core.implicit.run`
-follows JAX placement unless given ``device="auto"``. Mirror solves, whose
+follows JAX placement unless given ``device="auto"``. Free-boundary implicit
+solves are the exception: above the forward-solve size rule ``"auto"`` runs eager
+gradients on the GPU, measured faster at the same accuracy, and reruns on the CPU
+if the GPU runs out of memory. Mirror solves, whose
 SciPy control loop calls JAX repeatedly, default to the CPU
 (:func:`~vmex.core.device.resolve_mirror_device`). Explicit devices and JAX
 placement contexts are honored on all three paths.
@@ -230,10 +233,10 @@ callbacks. ``vmap`` over the host callback cannot handle ensembles of
 different shapes and degenerates to a vectorized host loop for equal shapes.
 
 **Multi-GPU.** JAX's multi-device model is explicit sharding; it does not turn
-a host callback or an unsharded solve into a multi-GPU program. Placing
-independent ensemble members on distinct devices works today through explicit
-``device=`` arguments. Sharding one large traced solve (``mode="jit"``) across
-devices with ``jax.sharding`` is future work and has not been measured.
+a host callback or an unsharded solve into a multi-GPU program. One solve uses
+one device. Independent cases can each take their own explicit ``device=``, but
+VMEX assigns none itself and has no measured multi-GPU scaling figure. Sharding
+one large traced solve (``mode="jit"``) with ``jax.sharding`` is not implemented.
 
 Naming conventions
 ------------------

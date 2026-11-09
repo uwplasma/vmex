@@ -8,6 +8,8 @@ alongside the boundary, with the Redl mismatch as a residual row. Mercier and
 resistive-interchange rows act on the dimensionless criteria
 PHIEDGE**2 DMerc and PHIEDGE**2 D_R over the window s >= STABILITY_MIN_S, and
 the reported extrema are taken over that same window on every radial grid.
+A hinge keeps the outer radial cells from being pinched flat: without it the
+optimizer drives their min/max Jacobian ratio from about 0.5 to 0.2.
 
 The quasi-helical class shifts the Redl isomorphism: both the Picard loop and
 the mismatch residual take helicity -1 here, where the QA script takes 0.
@@ -54,6 +56,7 @@ N_CURRENT_SPLINE = [6, 8]
 
 # Targets:
 ASPECT_TARGET = 6.0
+EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 
 # Stability rows. VMEC's DMerc and D_R are per unit toroidal flux squared, so
 # PHIEDGE**2 * DMerc is the dimensionless criterion in s, O(1e-2) here; the
@@ -185,6 +188,7 @@ objective_function_terms = [
     (qs, 0.0, 1.0), (bootstrap, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
+    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
 ]
 
 report = opt.EquilibriumReporter(

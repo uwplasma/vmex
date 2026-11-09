@@ -7,8 +7,8 @@ first call compiles through the ordinary jitted lane, serializes the
 executable next to the persistent cache (``<cache>/aot``), and later
 processes deserialize it directly, with no trace, lower or key hash.
 
-Entries are keyed on the lane name, a hash of the vmex sources, the JAX
-version, the backend and the call structure (pytree definition, leaf shapes,
+Entries are keyed on the lane name, VMEX and solver dependency source hashes,
+JAX/JAXlib and target compiler versions, the backend and call structure (pytree definition, leaf shapes,
 dtypes, weak types, commitment, static arguments).  The lowering is the one
 the jitted lane would build, so results are bit-identical.  Any miss, load
 error or argument mismatch falls back to the jitted lane; tracers (calls
@@ -23,10 +23,13 @@ import os
 import pickle
 import tempfile
 import threading
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Callable
 
 import jax
+import jaxlib
+import numpy as np
 from jax.experimental import serialize_executable as _se
 
 _LANES: list = []               #: every AotLane, for :func:`release`
@@ -54,15 +57,26 @@ def _compile(lower: Callable[[], Any]) -> Any:
             cc.reset_cache()
 
 
-def _source_hash() -> str:
-    """Digest of the vmex sources (any edit invalidates every entry)."""
+def _source_hash() -> str | None:
+    """Per-process source digest; restart after installed or editable dependency changes."""
     global _SOURCE_HASH
     if _SOURCE_HASH is None:
         h = hashlib.sha256()
-        root = Path(__file__).resolve().parents[1]
-        for path in sorted(root.rglob("*.py")):
-            h.update(path.relative_to(root).as_posix().encode())
-            h.update(path.read_bytes())
+        roots = [("vmex", Path(__file__).resolve().parents[1])]
+        # SOLVAX runs in force/preconditioner lanes; optional ESSOS fields run
+        # inside the free-boundary vacuum lane. Do not import optional packages.
+        for package in ("solvax", "essos"):
+            try:
+                spec = find_spec(package)
+            except (ImportError, ValueError):
+                return None  # an unidentifiable dependency cannot safely reload
+            if spec is not None:
+                roots.extend((package, Path(root)) for root in spec.submodule_search_locations or ())
+        for package, root in roots:
+            h.update(package.encode())
+            for path in sorted(root.rglob("*.py")):
+                h.update(path.relative_to(root).as_posix().encode())
+                h.update(path.read_bytes())
         _SOURCE_HASH = h.hexdigest()[:16]
     return _SOURCE_HASH
 
@@ -78,8 +92,40 @@ def _directory() -> Path | None:
     return Path(base) / "aot" if base else None
 
 
-def _structure(args: tuple, static: dict) -> str | None:
-    """Exact call-structure string, or None when it is not safely hashable."""
+def _initialize_lapack() -> None:
+    """Bind the CPU LAPACK kernels, which JAX otherwise does only while lowering.
+
+    A loaded executable skips lowering, so its first LU or solve would call
+    an unbound kernel and crash the process.
+    """
+    from jaxlib import lapack
+    lapack._lapack.initialize()
+
+
+def _device(leaves: list) -> Any:
+    """The one device ``jax.jit`` runs these leaves on, or None (several).
+
+    Committed arrays fix it; otherwise the default device (a
+    ``jax.default_device`` context or ``jax.config``), else the default
+    backend's first device.  A blob loads onto exactly this device: left to
+    itself the loader targets every device of the backend, and on a host with
+    several (GPUs, or XLA:CPU split into one device per core) the executable
+    then rejects every call.
+    """
+    found = {d for leaf in leaves if getattr(leaf, "committed", False)
+             for d in leaf.devices()}
+    if len(found) > 1:
+        return None
+    if found:
+        return found.pop()
+    default = jax.config.jax_default_device
+    if default is None or isinstance(default, str):
+        return jax.devices(default)[0]
+    return default
+
+
+def _structure(args: tuple, static: dict) -> tuple[str, Any] | None:
+    """Exact call-structure string and target device, or None when not safely hashable."""
     leaves, treedef = jax.tree_util.tree_flatten(args)
     parts = [str(treedef), repr(sorted(static.items()))]
     for leaf in leaves:
@@ -88,9 +134,23 @@ def _structure(args: tuple, static: dict) -> str | None:
         aval = jax.api_util.shaped_abstractify(leaf)
         parts.append(f"{aval.dtype}{aval.shape}{int(aval.weak_type)}"
                      f"{int(getattr(leaf, 'committed', True))}")
+    device = _device(leaves)
+    if device is None:
+        return None
+    parts.append(f"{device.platform}:{device.id}")
     text = "|".join(parts)
     # Elided arrays or object ids in a repr would make distinct calls collide.
-    return None if ("..." in text or " at 0x" in text) else text
+    return None if ("..." in text or " at 0x" in text) else (text, device)
+
+
+class _Flat:
+    """Run a leaf-argument executable on the lane's structured arguments."""
+
+    def __init__(self, compiled: Any) -> None:
+        self.compiled = compiled
+
+    def __call__(self, *args: Any) -> Any:
+        return self.compiled(*jax.tree_util.tree_leaves(args))
 
 
 class AotLane:
@@ -99,6 +159,8 @@ class AotLane:
     def __init__(self, fn: Callable, *, identity: str = "", **jit_kwargs: Any) -> None:
         """``identity`` names whatever ``fn`` closes over (module-level lanes: none)."""
         self.jit = jax.jit(fn, **jit_kwargs)
+        self.fn = fn
+        self.donate = tuple(jit_kwargs.get("donate_argnums") or ())
         self.name = fn.__name__
         self.identity = identity
         self.__doc__ = fn.__doc__
@@ -125,29 +187,58 @@ class AotLane:
         the jitted lane.
         """
         directory = _directory()
-        text = None if directory is None else _structure(args, static)
-        if text is None:
+        found = None if directory is None else _structure(args, static)
+        if found is None:
             return None
-        found = self._memory.get(text)
-        if found is not None:
-            return found
+        text, device = found
+        hit = self._memory.get(text)
+        if hit is not None:
+            return hit
+        source_hash = _source_hash()
+        if source_hash is None:
+            return None
         digest = hashlib.sha256("\n".join(
-            (self.name, self.identity, _source_hash(), jax.__version__,
+            (self.name, self.identity, source_hash, jax.__version__, jaxlib.__version__,
+             str(getattr(device.client, "platform_version", "")),
              jax.default_backend(), os.environ.get("XLA_FLAGS", ""),
              text)).encode()).hexdigest()[:32]
         path = directory / f"{self.name}-{digest}.aot"
         compiled = None
         try:
+            _initialize_lapack()
             payload, in_tree, out_tree = pickle.loads(path.read_bytes())
-            compiled = _se.deserialize_and_load(payload, in_tree, out_tree)
+            compiled = _se.deserialize_and_load(
+                payload, in_tree, out_tree, backend=device.client,
+                execution_devices=[device])
             os.utime(path)
         except Exception:                        # absent, stale or corrupt
             compiled = None
         if compiled is None:
-            compiled = _compile(lambda: self.jit.lower(*args, **static))
+            compiled = _compile(lambda: self._flat(args, static).lower(
+                *jax.tree_util.tree_leaves(args)))
             self._store(directory, path, compiled)
+        compiled = _Flat(compiled)
         self._memory[text] = compiled
         return compiled
+
+    def _flat(self, args: tuple, static: dict) -> Any:
+        """The lane jitted on the leaves of ``args``.
+
+        Lowering a structured call unflattens the argument pytrees around
+        placeholder ``ArgInfo`` leaves, which a pytree computing in its
+        unflatten (an ESSOS field's coils) cannot survive; the leaf lowering
+        is the same program.
+        """
+        treedef = jax.tree_util.tree_structure(args)
+        sizes = [len(jax.tree_util.tree_leaves(a)) for a in args]
+        starts = np.cumsum([0, *sizes])
+        donate = tuple(j for i in self.donate for j in range(int(starts[i]), int(starts[i + 1])))
+
+        def flat(*leaves):
+            return self.fn(*jax.tree_util.tree_unflatten(treedef, leaves), **static)
+
+        flat.__name__ = self.name
+        return jax.jit(flat, donate_argnums=donate)
 
     @staticmethod
     def _store(directory: Path, path: Path, compiled: Any) -> None:

@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from scipy.optimize import OptimizeResult
 
 from vmex.core.monitoring import EquilibriumReporter, OptimizationMonitor
@@ -496,3 +497,107 @@ def test_trace_prints_one_line_per_evaluation():
         silent.cache_evaluation(np.array([float(index)]), cost, np.array([cost]))
     assert "trial" not in quiet.getvalue()
 
+
+
+def test_feasible_candidate_checkpoint_survives_bad_trials_and_screen_failure(tmp_path, monkeypatch):
+    import vmex as vj
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    written = []
+    monkeypatch.setattr(vj, "write_wout", lambda path, w: written.append(w))
+
+    def equilibrium(x):
+        if x[0] == 4:
+            raise RuntimeError("decision vector did not produce a usable VMEC equilibrium")
+        return SimpleNamespace(wout=float(x[0]), x=x)
+
+    problem = SimpleNamespace(residual=lambda x: x.copy(), equilibrium_from_x=equilibrium,
+        input_from_x=lambda x: SimpleNamespace(to_indata=lambda path: Path(path).write_text(str(x[0]))))
+    def inspect(eq):
+        return eq.x, dict(raw=float(eq.x[0]), feasible=bool(eq.x[0] >= 2))
+
+    monitor = FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
+    with np.testing.assert_raises_regex(ValueError, "invalid NEO"):
+        with monitor:
+            for value in (3., 2., 1., 4., 2.):
+                monitor(np.array([value]))
+            raise ValueError("invalid NEO")
+    assert written == [3., 2.]
+    assert (tmp_path / "input.trial").read_text() == "2.0"
+    assert monitor.report["selected_evaluation"] == 1
+    assert len(monitor.report["evaluations"]) == 4  # repeated point is cached
+    assert monitor.report["status"] == "failed"
+    assert monitor.report["error"] == "invalid NEO"
+    with np.testing.assert_raises(StopIteration):
+        monitor.callback(2)(OptimizeResult(nfev=5, fun=np.array([2.])))
+    assert monitor.report["iterations"][0]["mode"] == 2
+    with np.testing.assert_raises_regex(ValueError, "new output directory"):
+        FeasibleCandidateMonitor(problem, inspect, tmp_path, maxiter=1)
+
+
+def test_candidate_monitor_rejects_nonfinite_score_before_writing(tmp_path):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    problem = SimpleNamespace(residual=lambda x: np.array([1.]), equilibrium_from_x=lambda x: None)
+    monitor = FeasibleCandidateMonitor(problem,
+        lambda eq: (np.array([1.]), {"feasible": True, "raw": float("nan")}), tmp_path, maxiter=1)
+    with np.testing.assert_raises_regex(ValueError, "score must be finite"):
+        with monitor:
+            monitor(np.array([0.]))
+    assert monitor.best is None and not (tmp_path / "input.trial").exists()
+    assert monitor.report["status"] == "failed"
+
+
+@pytest.mark.parametrize("maxiter", [0, -1, 1.5])
+def test_candidate_monitor_requires_a_positive_integer_budget(tmp_path, maxiter):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    with pytest.raises(ValueError, match="positive integer"):
+        FeasibleCandidateMonitor(None, None, tmp_path, maxiter=maxiter)
+    assert not (tmp_path / "summary.json").exists()
+
+
+@pytest.mark.parametrize("residual", [np.array([np.nan]), np.array([np.inf]), np.array([1.e308])])
+def test_candidate_monitor_rejects_nonfinite_residual_or_overflowing_cost(tmp_path, residual):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    def unexpected_equilibrium(_x):
+        pytest.fail("A nonfinite cost must be rejected before exporting an equilibrium")
+
+    problem = SimpleNamespace(residual=lambda x: residual, equilibrium_from_x=unexpected_equilibrium)
+    monitor = FeasibleCandidateMonitor(problem, None, tmp_path, maxiter=1)
+    with pytest.raises(ValueError, match="residual and cost must be finite"), np.errstate(over="ignore"):
+        with monitor:
+            monitor(np.array([0.]))
+    assert monitor.best is None and monitor.report["evaluations"] == []
+    assert monitor.report["status"] == "failed"
+
+
+def test_candidate_monitor_does_not_hide_unexpected_solver_errors(tmp_path):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    def equilibrium(_x):
+        raise RuntimeError("backend interrupted")
+
+    problem = SimpleNamespace(residual=lambda x: np.array([1.]), equilibrium_from_x=equilibrium)
+    monitor = FeasibleCandidateMonitor(problem, None, tmp_path, maxiter=1)
+    with pytest.raises(RuntimeError, match="backend interrupted"):
+        with monitor:
+            monitor(np.array([0.]))
+    assert monitor.report["status"] == "failed"
+    assert monitor.report["error"] == "backend interrupted"
+    assert monitor.report["evaluations"] == []
+
+
+@pytest.mark.parametrize("recomputed", [np.array([2.]), np.array([np.nan])])
+def test_candidate_monitor_rejects_an_export_that_does_not_reproduce_its_residual(tmp_path, recomputed):
+    from vmex.core.monitoring import FeasibleCandidateMonitor
+
+    problem = SimpleNamespace(residual=lambda x: np.array([1.]), equilibrium_from_x=lambda x: None)
+    monitor = FeasibleCandidateMonitor(problem,
+        lambda eq: (recomputed, {"feasible": True, "raw": 0.}), tmp_path, maxiter=1)
+    with pytest.raises(RuntimeError, match="does not reproduce"):
+        with monitor:
+            monitor(np.array([0.]))
+    assert monitor.best is None and not (tmp_path / "wout_trial.nc").exists()
+    assert monitor.report["status"] == "failed"
