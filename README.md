@@ -249,6 +249,13 @@ Finite-beta QA seed (`input.nfp2_QA_finite_beta`, ns = 71)
 Details and the optimization recipe: [stability theory](docs/explanation/confinement.rst) and
 [objectives](docs/reference/objectives.rst).
 
+## Global finite-n stability with AGNI
+
+The optional [AGNI](https://github.com/rahulgaur104/AGNI) coupling (`pip install "vmex[agni]"`, needs `Basis(restrict=True)` from AGNI#117) returns the largest `gamma2` per toroidal-mode family
+through `vmex.core.agni.make_agni_map` and `VmecProblem.from_loss`; `examples/finite_n_stability.py` and `QI_optimization_finite_n.py` lower it
+without stabilizing the NFP = 4 QI deck. Represented-space rates rise with bandwidth and certify nothing about the continuum; the collocation
+grids, normalization and limits are in [finite-n stability with AGNI](docs/explanation/finite-n-stability.md).
+
 ## What you can build
 
 Every figure below has a generator beside it, using repository decks or retained result data.

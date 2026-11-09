@@ -327,7 +327,7 @@ def make_agni_map(
         if weight is not None:
             public["density"] = weight
         eq = EquilibriumData(
-            n_rho=shape[0], n_theta=shape[1], n_zeta=shape[2], Psi=Psi,
+            n_rho=shape[0], n_theta=shape[1], n_zeta=shape[2],
             a=_minor_radius(hs, radius_quadrature), NFP=nfp,
             psi_r=rho * Psi / jnp.pi, psi_rr=jnp.full_like(rho, 1.0) * Psi / jnp.pi,
             validate=False, **public,
