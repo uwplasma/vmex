@@ -1002,7 +1002,10 @@ def test_equal_end_axisymmetric_mirror_is_independent_of_cut_location() -> None:
         center = int(np.argmin(np.abs(discretization.grid.z)))
         center_radius.append(float(result.state.radius_scale[-1, 0, center]))
         center_axis_field.append(float(jnp.sqrt(result.energy.b_squared[0, 0, center])))
-        assert result.final_linear_residual < 2.0e-9
+        # The last Newton step's GMRES stops at rtol = min(1e-8, 0.1 |F|), so
+        # this is a solver-path number: 1.0e-9 on macOS, 3.0e-9 on the weekly
+        # Linux runner.  The accuracy is the variational and force asserts.
+        assert result.final_linear_residual < 1.0e-8
         assert float(result.variational.maximum) <= config.ftol
         assert float(result.staggered_weak_force.maximum) <= config.ftol
         # Minor-radius norm: the former device-length bounds of 6.0e-3 and

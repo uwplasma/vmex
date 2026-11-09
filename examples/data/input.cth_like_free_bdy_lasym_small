@@ -22,11 +22,12 @@
   NVACSKIP = 9,
   LASYM = T,
 
-! Coil currents. (HF, TVF)
-! The bundled synthetic mgrid is scaled down from the full CTH-like grid.  Keep
-! the sign and magnitude matched to CURTOR so VMEC2000 turns on the vacuum solve
+! Coil currents. The bundled synthetic mgrid is scaled down from the full
+! CTH-like grid and has ONE coil group, so EXTCUR has one entry (a second entry
+! would be silently dropped by VMEC2000 and is an error in VMEX).  Keep the
+! sign and magnitude matched to CURTOR so VMEC2000 turns on the vacuum solve
 ! instead of aborting with an I_TOR mismatch.
-  EXTCUR = -12.0, -2.55,
+  EXTCUR = -12.0,
 
 ! Fitting parameters.
   GAMMA = 0.0,

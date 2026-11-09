@@ -27,6 +27,46 @@ normalizations are applied on construction (the :mod:`vmex.core.input`
 docstring has the exact rules).  Unknown names and active unsupported
 physics fail before setup.
 
+VMEC++ JSON inputs are read key by key.  Every
+key is either implemented or raises an error that names it:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Keys
+     - Status
+   * - ``lasym``, ``nfp``, ``mpol``, ``ntor``, ``ntheta``, ``nzeta``,
+       ``ns_array``, ``ftol_array``, ``niter_array``, ``nstep``, ``delt``,
+       ``tcon0``, ``lforbal``, ``phiedge``, ``ncurr``, ``curtor``, ``bloat``,
+       ``gamma``, ``pres_scale``, ``spres_ped``, ``*_type``, ``am*``, ``ai*``,
+       ``ac*``, ``aphi``, ``raxis_c``, ``zaxis_s``, ``raxis_s``, ``zaxis_c``,
+       ``rbc``, ``zbs``, ``rbs``, ``zbc``, ``lfreeb``, ``mgrid_file``,
+       ``extcur``, ``nvacskip``, ``free_boundary_method`` (``nestor``)
+     - Implemented; same meaning as the INDATA name.
+   * - ``backup_evaluated_state``, ``return_outputs_even_if_not_converged``
+     - Accepted with any value; VMEX always returns its final state.
+   * - ``lgiveup``, ``fgiveup``
+     - Implemented (also INDATA ``LGIVEUP``/``FGIVEUP``): the ladder ends after
+       a stage that leaves a residual above ``fgiveup * ftol``, as in VMEC2000.
+   * - ``lambda_precondition_checkerboard_terms``
+     - Implemented: a value ``>= 0`` is the radial ``m = 0`` lambda floor
+       (``VmecInput.lambda_m0_floor``, 3-D decks); a negative value keeps the
+       diagonal preconditioner.
+   * - ``mpol_geometry``, ``ntor_geometry``
+     - Implemented when ``< 0`` or at least ``mpol``/``ntor``; a smaller value
+       (R and Z at reduced resolution, lambda at full resolution) raises, since
+       VMEX uses one resolution for both.
+   * - ``signgs``, ``iteration_style``, ``lbsubs``, ``vacuum_mpol``,
+       ``vacuum_ntor``, ``lambda_preconditioner_scale``, ``always_fix_m1_gauge``
+     - Default only (``-1``, ``vmec_8_52``, ``false``, ``0``, ``0.5``,
+       ``false``); other values raise ``UnsupportedInputModeError``.  VMEX
+       fixes the Jacobian sign at ``-1`` (the boundary is flipped), has only
+       the VMEC 8.52 iteration and lambda damping, computes the wout ``B_s``
+       one way, ties the NESTOR resolution to ``mpol + 1``/``ntor``, and zeroes
+       the constrained m = 1 force by the VMEC 8.52 rule.
+   * - ``free_boundary_method`` other than ``nestor``, any unknown key
+     - Raises an error naming the key.
+
 ``VmecInput`` has value semantics: its arrays are owned and read-only, so an
 in-place edit cannot invalidate a compiled solve.  Copy the array, edit it,
 and build the new deck with ``dataclasses.replace``.
@@ -358,8 +398,7 @@ Profiles
      - Profile-argument expansion factor of ``pmass`` and ``pcurr``;
        ``piota`` ignores it, as in VMEC2000.  ``BLOAT != 1`` with
        ``NCURR != 1`` is rejected, as VMEC2000 does (ier_flag 3).
-       Deliberate difference: VMEC2000 also multiplies ``PHIEDGE`` by
-       ``BLOAT`` (``readin.f``); VMEX uses ``PHIEDGE`` as written.
+       The enclosed flux is ``PHIEDGE*BLOAT``, as in ``readin.f``.
    * - ``NCURR``
      - 0
      - implemented
@@ -428,8 +467,17 @@ Axis and boundary
      - Asymmetric boundary partners (``LASYM = T``).
    * - ``TVOLUME`` / ``LVOLUME_RFIX``
      - —
-     - rejected when active
-     - Target-volume rescaling (``RESCALE_BOUNDARY``) is not ported.
+     - implemented
+     - Rescale the boundary to enclose ``TVOLUME`` [m^3] before the solve;
+       ``LVOLUME_RFIX = T`` holds the ``m = 0`` harmonics and scales only the
+       minor radius.  VMEX solves the volume exactly where VMEC2000 uses a
+       Pappus estimate, and the rescaling is differentiable, so an optimizer
+       cannot trade plasma size for beta.  ``vmex.boundary_volume`` gives
+       the seed volume; the finite-beta optimization examples hold it.  As in
+       VMEC2000 the rescaling is ignored for free-boundary runs, where the coils
+       set the size.  The overall scale of the rescaled harmonics becomes a null
+       direction of the raw boundary coefficients; ``scale_input`` scales the
+       target by ``r_scale**3``.
 
 Free boundary
 ~~~~~~~~~~~~~
@@ -456,7 +504,9 @@ Free boundary
    * - ``EXTCUR``
      - —
      - implemented
-     - External coil-group currents [A].
+     - External coil-group currents [A].  Missing entries are zero, as in
+       VMEC2000; a nonzero entry beyond the mgrid's coil groups stops the run
+       (VMEC2000 drops it silently).
    * - ``NVACSKIP``
      - 1
      - implemented
