@@ -8,6 +8,7 @@ graded replacement to known answers there, check the per-point switch of
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 
 import numpy as np
@@ -114,3 +115,31 @@ def test_graded_quadrature_is_traceable_and_differentiable_in_the_surface():
     numeric = (float(value(surface.B_total + step * direction))
                - float(value(surface.B_total - step * direction))) / (2 * step)
     assert abs(autodiff - numeric) <= 1e-6 * abs(numeric), (autodiff, numeric)
+
+
+def test_auto_resolves_identically_eager_and_traced_and_pulls_back_the_returned_map():
+    """Near the surface eager, jitted and differentiated ``auto`` evaluate one map."""
+    surface = _two_source_torus(16, 16)
+    scaled = lambda params: replace(surface, B_total=params[0] * surface.B_total)  # noqa: E731
+    points = jnp.asarray(np.concatenate([_torus_points(0.01, count=2, seed=5),
+                                         _torus_points(0.15, count=1, seed=6)]))
+    parameters = jnp.array([1.0])
+    original = VmecExtender.from_parameterized_surface_data(
+        scaled, parameters, accuracy_check="off", graded_nodes=(24, 48))
+    field = original.set_points(points)
+    copied = copy.copy(field)
+    for order, name in enumerate(("B", "gradB", "gradgradB", "gradgradgradB")):
+        eager = getattr(field, name)()
+        np.testing.assert_allclose(jax.jit(getattr(field, name))(points), eager,
+                                   rtol=1e-10, atol=1e-12)
+        np.testing.assert_allclose(getattr(copied, name)(), eager, rtol=1e-10, atol=1e-12)
+        weights = jnp.cos(jnp.arange(eager.size)).reshape(eager.shape)
+        pullback = np.asarray(getattr(field, name + "_vjp")(weights)).ravel()[0]
+
+        def scalar(p, name=name, weights=weights):
+            rebuilt = VmecExtender.from_surface_data(
+                scaled(p), accuracy_check="off", graded_nodes=(24, 48)).set_points(points)
+            return float(jnp.vdot(getattr(rebuilt, name)(), weights))
+        step = 1e-5
+        numeric = (scalar(parameters + step) - scalar(parameters - step)) / (2 * step)
+        assert abs(pullback - numeric) <= 1e-6 * max(abs(numeric), 1.0), (order, pullback, numeric)

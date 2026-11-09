@@ -876,8 +876,9 @@ class RedlBootstrapMismatch:
 class BootstrapPicardResult:
     """Outcome of :func:`self_consistent_bootstrap`.
 
-    ``input`` carries the final ``AC``/``CURTOR`` (``ncurr=1``,
-    ``pcurr_type="power_series"``); ``equilibrium`` is the last solved
+    ``input`` is the deck used for ``equilibrium``, with its final
+    ``AC``/``CURTOR``; refits use ``ncurr=1``, ``pcurr_type="power_series"``.
+    ``equilibrium`` is the last solved
     :class:`~vmex.core.optimize.Equilibrium`; ``history`` is one dict per
     iteration (``curtor``, ``delta``, ``f_boot``).  ``delta`` is the
     self-consistency error ``max|I'_Redl - I'_applied| / max|I'_Redl|``
@@ -921,6 +922,8 @@ def self_consistent_bootstrap(
     degree: int = 12,
     s_eval=None,
     solve_kwargs: dict | None = None,
+    current_model=None,
+    initial_state=None,
     verbose: bool = False,
 ) -> BootstrapPicardResult:
     """Fixed-boundary Picard iteration to a bootstrap-consistent current profile.
@@ -951,10 +954,17 @@ def self_consistent_bootstrap(
     stable.  ``degree`` is clipped to ``ns - 2``.  The first solve uses
     ``inp``'s own current settings (any ``pcurr_type``); every refit
     switches to ``ncurr=1`` + ``power_series``.
+
+    ``current_model(equilibrium, s_eval, jr)`` replaces the Redl ``<J.B>``
+    ``jr`` [A T/m^2] on ``s_eval`` in step 2, e.g. by a kinetic calculation
+    on the solved equilibrium; the loop then converges to that current.
+    ``initial_state`` hot-starts the first solve.
     """
     from . import optimize as opt
 
     solve_kwargs = dict(solve_kwargs or {})
+    if n_iter < 1:
+        raise ValueError("n_iter must be positive")
     if s_eval is None:
         s_eval = np.linspace(0.02, 0.98, 49)
     s_eval = np.atleast_1d(np.asarray(s_eval, dtype=float))
@@ -965,7 +975,7 @@ def self_consistent_bootstrap(
     mismatch = RedlBootstrapMismatch(profiles, helicity_n,
                                      surfaces=np.clip(s_eval, 0.05, 0.95))
     history: list[dict] = []
-    state = None
+    state = initial_state
     dIds_applied = None   # I'(s_full) currently driving the equilibrium
     eq = None
     converged = False
@@ -988,6 +998,8 @@ def self_consistent_bootstrap(
 
         geom = redl_geometry_from_wout(w, s_eval)
         jr, _ = j_dot_B_redl(profiles, geom, helicity_n)
+        if current_model is not None:
+            jr = current_model(eq, s_eval, jr)
         jr_full = np.interp(s_full, np.concatenate([[0.0], s_eval, [1.0]]),
                             np.concatenate([[0.0], np.asarray(jr), [0.0]]))
         fsa_B2_full = np.interp(s_full, s_eval, np.asarray(geom.fsa_B2))
@@ -1020,6 +1032,8 @@ def self_consistent_bootstrap(
         if delta <= float(tol):
             converged = True
             break
+        if it + 1 == int(n_iter):
+            break  # Return the solved deck, not an unevaluated next iterate.
 
         dIds_use = (dIds_new if dIds_applied is None
                     else (1.0 - relax) * dIds_applied + relax * dIds_new)

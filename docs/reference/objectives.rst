@@ -515,7 +515,9 @@ The complete runnable workflows are
 ``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
 row on the Redl ``<J.B>`` itself (target 0), and
 ``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
-kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``).  Their
+kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``);
+``QI_optimization_bootstrap_er.py`` evaluates it at the ambipolar ``E_r``
+(``ambipolar=True``).  Their
 setup has two distinct steps:
 
 1. ``KineticProfiles`` describes the density and temperature seen by the
@@ -719,6 +721,10 @@ Which objectives differentiate how
      - yes
      - yes
      - signed radial action slope with matched well identity
+   * - :class:`~vmex.core.maxj.DriftConfinementResidual`
+     - yes
+     - yes
+     - hinge on the smooth maximum radius of bounce-averaged drift orbits
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes

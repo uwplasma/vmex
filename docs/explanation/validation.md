@@ -207,8 +207,9 @@ axis and 3.2e3 to 23 at the edge, with projected stationarity 1.3e-10; the
 written file reproduces the native certificate. The pointwise
 `eps_F = 2|F|/(|J×B|+|grad p|+floor)` is bounded above by 2 by construction
 and cannot rank near-vacuum states, so read the dimensional force with it.
-The polish covers fixed-boundary axisymmetric decks with prescribed pressure
-and iota; a 3-D polish is future work. See the
+The certified polish covers fixed-boundary axisymmetric decks with prescribed pressure
+and iota. The experimental 3-D prescribed-current polish lowers held-out force,
+but has no stationarity certificate or qualified WOUT export. See the
 [method reference](high-order-force-balance.rst).
 
 ## Application record: finite-beta QI diagnostics
@@ -231,6 +232,9 @@ After 10 Newton steps the MRX force residual is 1.4e-8, its Poincare sections fo
 surfaces, and its iota, enclosed current and pressure match the VMEX profiles; `|B|` agrees to
 2e-3 rms for ρ ≥ 0.3. MRX starts from the VMEX field, so this checks consistency, not near-axis
 convergence: on this deck VMEX iota at ρ = 0.1 is 0.188, 0.176 and 0.166 for ns = 65, 129 and 257.
+These values do not establish the continuum limit, and a matched, independently converged DESC
+reference has not been established. MRX reconstructs pressure from its relaxed field rather than
+imposing VMEX's profile, so this is not a matched-profile equilibrium benchmark.
 
 ![VMEX and MRX on the 2.5% beta QA deck](../_static/figures/readme_vmex_mrx_comparison.webp)
 

@@ -96,6 +96,8 @@ The two stability indices and $V''(s)$ use separate scales whose zero levels
 are aligned; $V''(s)<0$ denotes a magnetic well. Their legend sits below the
 panel so it cannot hide a curve.
 
+The $J$ panel draws unfilled $J$ contours with a colorbar. Dashed curves are bounce-averaged drift surfaces of the same pitch, launched at several radii and integrated by {func}`~vmex.core.maxj.drift_orbits`: they follow the $J$ contours, so circles mean the particles stay on flux surfaces, and a dashed curve reaching $s=1$ is a lost orbit (Sengupta, Bhattacharjee and Buller, arXiv:2608.20042 (2026), Eq. (4)). `examples/drift_surfaces.py` computes the same orbits from Python with {func}`~vmex.core.maxj.drift_surfaces_from_boozer`.
+
 `*_stability.png` first separates `DMerc` into shear, well, current, and
 geodesic terms. Its second panel rescales the WOUT pressure profile and plots
 the worst frozen-equilibrium margins, $\min_s D_{Merc}$ and $-\max_s D_R$,
