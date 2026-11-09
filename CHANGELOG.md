@@ -4,11 +4,15 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- Add a differentiable Boozer reference-well heat objective with pitch diffusion and tangential precession.
-  Continuous-pitch bounds and analytic Maxwell moments enclose the Lorentz response; shared assembly preserves validated values and derivatives, with geometry and model errors separate.
+- Add a differentiable Boozer reference-well heat objective with pitch diffusion and tangential precession. Continuous-pitch bounds and analytic Maxwell moments enclose the Lorentz response; shared assembly preserves validated values and derivatives, with geometry and model errors separate.
 - Add conserving collision-form and signed-response bounds with local moments, continuous inverse majorants and differentiable constraint charts for full Coulomb collision models.
-- Add a full-Coulomb stellarator heat objective with scalar and correlated feasible flows, stable residual norms, bounded angular-integration remainder and SI Boozer adapter.
-  Extend the existing optimization example with constrained SLSQP, bounded continuation with residual checks, endpoint derivative checks and supplied-boundary validation; the single-species model retains passing/trapped particles and incompressible electric precession.
+- Add a full-Coulomb stellarator heat objective with scalar and correlated feasible flows, stable residual norms, bounded angular-integration remainder and SI Boozer adapter. Extend the existing optimization example with constrained SLSQP, bounded continuation with residual checks, endpoint derivative checks and supplied-boundary validation; the single-species model retains passing/trapped particles and incompressible electric precession.
+
+## 0.14.0 - 2026-11-09
+
+- **pwO bootstrap control.** `pwO_optimization.py` gains `BOOTSTRAP_TERM = "band"`, which flattens |B| across the unmapped B_max band (DKX current -135 to -5 kA at NFP 3), and optional DKX stages at the end; `BootstrapFiniteNuResidual` reports the equivalent-ripple spread as a diagnostic.
+- **Solver speed.** Block factorizations are reused across solves, with cyclic reduction for GPU block factors; cached executables are shared across solver blocks and invalidated after dependency updates.
+- Fixes: native Boozer iota for multiple field periods, bounce-drift derivatives and arc-length weights, the interior lambda axis lift, held m=1 family in implicit solves and derivatives, `near_surface="auto"` eager versus traced.
 
 ## 0.13.0 - 2026-11-03
 
@@ -177,24 +181,6 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 - Native axisymmetric polish; the `--polish-*` flags and the old directives
   are removed (#448, #465).
 
-## 0.11.3 - 2026-09-27
-
-- `vmex --trace` at ARIES-CS size in Boozer coordinates (ESSOS 0.19), with
-  volume births, `--collisional` and summary figures; `--scale` targets the
-  ARIES-CS `volavgB = 5.8646 T`, `Aminor_p = 1.7044 m`.
-- `vmex.solve_phiedge` and `vmex.phiedge_root` match a free-boundary target
-  through PHIEDGE, with its implicit derivative.
-- Fixes: GPU-host implicit solves rehome the forward state beside the
-  parameters; long CPU runs release executables before `vm.max_map_count`.
-
-## 0.11.2 - 2026-09-24
-
-A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
-`VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
-(#449). On clusters, a shared cache path was read by nodes with different CPU
-features; XLA rejected the other node's executables ("Target machine feature
-... is not supported on the host machine") and recompiled on every run.
-
-## 0.11.1 and earlier
+## 0.11.3 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).
