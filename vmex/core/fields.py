@@ -98,7 +98,7 @@ class MagneticFields:
     """Half-mesh magnetic field state (VMEC2000: ``bcovar.f``).
 
     - ``bsupu/bsupv`` (VMEC ``bsupu, bsupv``): contravariant components
-      ``B^u = phipog*(chip + lamscale*d(lambda)/dzeta)`` and
+      ``B^u = phipog*(chip - lamscale*d(lambda)/dzeta)`` and
       ``B^v = phipog*(phip + lamscale*d(lambda)/dtheta)`` with
       ``phipog = 1/sqrt(g)`` on the half mesh (zeroed on axis).
     - ``bsubu/bsubv`` (``bsubu, bsubv``): covariant components

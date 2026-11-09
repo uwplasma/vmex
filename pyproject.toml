@@ -6,10 +6,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.12.0"
+version = "0.13.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [{name = "Rogerio Jorge", email = "rogerio.jorge@wisc.edu"}]
 license = "MIT"
 keywords = ["vmec", "stellarator", "mhd", "jax", "optimization"]
@@ -17,6 +17,7 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -28,36 +29,31 @@ dependencies = [
   # 0.9.2 is the oldest JAX a CI lane tests (ci.yml jax-compatibility).
   # vmex/__init__.py refuses older jax/jaxlib/scipy at import with the same
   # floors.  jaxlib 0.9.x crashes loading large cached executables, so
-  # vmex/_compat.py keeps the persistent cache off below 0.10.
-  "jax>=0.9.2",
-  "jaxlib>=0.9.2",
+  # vmex/_compat.py keeps the persistent cache off below 0.10.  JAX 0.7 needs
+  # Python 3.11, so Python 3.10 resolves to JAX 0.6.2, its last release.
+  "jax>=0.9.2; python_version >= '3.11'",
+  "jaxlib>=0.9.2; python_version >= '3.11'",
+  "jax>=0.6.2; python_version < '3.11'",
+  "jaxlib>=0.6.2; python_version < '3.11'",
   # 1.16 added least_squares(callback=), which the optimization examples pass;
-  # SciPy 1.16 needs Python 3.11, hence requires-python.
-  "scipy>=1.16",
+  # SciPy 1.16 needs Python 3.11, so Python 3.10 keeps SciPy 1.15 and those
+  # examples need a newer interpreter.
+  "scipy>=1.16; python_version >= '3.11'",
+  "scipy>=1.15; python_version < '3.11'",
   "netCDF4",
   # 1.7.5 ships macOS 15 wheels only; drop once older-macOS wheels appear.
   "netCDF4<1.7.5; sys_platform == 'darwin'",
   "h5py",
   "matplotlib",
   "packaging",
+  # tomllib is in the standard library from Python 3.11.
+  "tomli; python_version < '3.11'",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
   # Boozer spectra and differentiable geometry, including asymmetric fields.
-  "booz_xform_jax>=0.4.3",
-  # 0.21.0 is the first release whose tridiagonal_solve/tridiagonal_solve_checked
-  # (the radial preconditioner's solves) run their Thomas sweeps through the
-  # accelerator-batched scan (unroll=2 off CPU; the CPU sweep is unchanged).
-  # Every other solvax API vmex calls (least-squares polishing, continuation,
-  # GMRES/GCROT, block Thomas, SpluFactorization, chunk_map) has the same
-  # signature from 0.20.0 through 0.24.0; 0.22-0.24 add only APIs vmex does
-  # not call. 0.27.0 is the floor because it is the first to declare
-  # equinox>=0.13.3: with the bare requirement of <= 0.26.0, pip kept an
-  # installed equinox 0.11.x and `import solvax` failed under jax >= 0.10
-  # (batching.NotMapped). The same holds for every uwplasma floor below: each
-  # is the first release that declares floors for what it imports, so
-  # installing into an environment with older packages upgrades them
-  # (nightly.yml "stale" lane).
-  "solvax>=0.27.0",
+  "booz_xform_jax>=0.5.1",
+  # Checked tridiagonal solves support broadcast bands and preserve pivot diagnostics.
+  "solvax>=0.35.1",
 ]
 
 [project.scripts]
@@ -78,23 +74,14 @@ optimizers = [
 ]
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
-# 1.0.6 is the first release that keeps the sine Boozer spectra, so LASYM
-# equilibria get an effective ripple (NEO_JAX #7).
+# 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
-  "neo-jax>=1.0.6",
-  "dkx>=2.8.0",
+  "neo-jax>=1.1.1",
+  "dkx>=2.13.0",
 ]
-# Differentiable virtual casing on a specified boundary; this is not a NESTOR
-# equilibrium adjoint. 0.0.9 is the first release that declares its jax and
-# jaxlib floors (virtual_casing_jax #17). 0.0.8 kept the a-priori
-# (per-derivative-order) error estimate finite for targets far from the
-# surface; 0.0.7 returned NaN there, with hundreds of NumPy warnings, and the
-# eager derivative accuracy check of VmecExtender reported an error "up to
-# inf" where the field is exact. The other APIs vmex calls (ExteriorFieldConfig, VirtualCasingExteriorField,
-# VmecSurfaceFieldData, error_estimate's kst_error_estimate/
-# boundary_series_from_gamma/density_magnitude_from_surface) are unchanged.
+# Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.9",
+    "virtual-casing-jax>=0.0.12",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -107,7 +94,7 @@ freeb = [
 # eigen-objectives in forward mode (the implicit least-squares Jacobian);
 # 2.5.0 is the release `vmex --turbulence` is built and timed against.
 turbulence = [
-  "gkx>=2.5.0",
+  "gkx>=2.6.0",
   # gkx's own jax floor.
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
@@ -120,7 +107,7 @@ turbulence = [
 # 0.21.0: Boozer |B| from an angle table and stopped particles dropped across
 # devices, which `vmex --trace` relies on for its speed (ESSOS #165).
 coils = [
-  "essos>=0.21.0",
+  "essos>=0.22.0",
 ]
 # Finite-n ideal-MHD stability through AGNI: ``vmex.core.agni`` maps a converged
 # state to an ``agnimhd.EquilibriumData``. It needs ``Basis(restrict=True)``,
@@ -174,7 +161,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.8
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.12
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is

@@ -3,7 +3,7 @@
 
 Fast-ion refinement of the finite-beta Landreman--Buller--Drevlak QA: one
 scalar objective adds the quasisymmetry ratio residual (the differentiable
-proxy that controls effective ripple), the derivative-safe ``GammaCSmooth``
+proxy that controls effective ripple), the smooth ``GammaCSmooth``
 surrogate, and the outer-volume maximum-J residual at fixed physical pitch.
 Each confinement term is normalized by its seed value so the weights are
 dimensionless preferences, one L-BFGS-B call drives the boundary through one

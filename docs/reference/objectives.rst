@@ -124,6 +124,9 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.max_elongation` — equivalent-ellipse boundary
   elongation from Fourier-exact area and perimeter line integrals over one
   field period;
+- :func:`~vmex.core.optimize.min_boundary_curvature_radius` — the smallest
+  poloidal radius of curvature of the boundary cross-sections, in metres; a
+  floor keeps out tips sharper than coils can hold;
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
   measure (positive = well, stabilizing).
 
@@ -303,10 +306,14 @@ certification grid.
    resolved value against the wout/Boozer implementation.  See
    :ref:`confinement-qi-fidelity`.
 
-For a direct action-based target, supply physical pitch values explicitly and
-compose the QI and maximum-J terms like any other residuals.  This objective
-is a complementary orbit diagnostic, not a drop-in normalization-equivalent
-replacement for the Goodman residual:
+For an action-based target, supply physical pitch values explicitly and
+compose the QI and maximum-J terms like any other residuals.
+``JInvariantQIResidual`` pools the actions of all complete wells at each
+surface and pitch, without matching well families across field lines. Its
+value can be positive in an :math:`\alpha`-independent field with distinct
+well actions; it does not by itself quantify within-family omnigenity or
+radial drift. It is a complementary orbit diagnostic, not a normalization-
+equivalent replacement for the Goodman residual:
 
 .. code-block:: python
 
@@ -320,6 +327,15 @@ replacement for the Goodman residual:
    result = opt.least_squares(
        [(qi_action, 0.0, 1.0), (maximum_j, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit")
+
+For local within-well label dependence,
+:func:`~vmex.core.qi.j_invariant_alpha_derivative_from_boozer` differentiates
+each action at fixed physical pitch, including moving turning points and the
+line element. Supply explicit ``alpha`` labels and the bounce-kernel inputs.
+It returns ``action_alpha_derivative`` without matching or weighting wells;
+unequal label-independent actions have zero derivative. Invalid wells give
+NaN; complete interior wells remain usable in a cut trace. See the function
+for topology, interpolation-cell, separatrix, and convergence limits.
 
 The two classes do not impose a shared weight. ``MaximumJResidual`` evaluates
 the outward slope ``dJ/ds`` at common pitch using matched wells;
@@ -336,6 +352,73 @@ When both terms use the same surfaces and pitch,
 :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual` concatenates their
 cost-weighted rows after one shared Boozer transform.
 
+The constructed-QI interpolation fixes the first well wall at its prescribed
+maximum field. This removes roundoff amplification at nearly coincident nodes
+and preserves its derivative. Existing ``ConstructedQIResidual`` optimizers
+use the correction without script changes; it does not change the QI target.
+
+.. _objectives-mapped-pwo:
+
+Mapped-field contour variance
+-----------------------------
+
+:class:`~vmex.core.pwo.MappedPwOResidual` evaluates a live Boozer spectrum on
+fixed mapped coordinates and returns flattened least-squares rows. Its default
+normalization uses the live Boozer mean field on each surface::
+
+   from vmex.core.pwo import MappedPwOResidual
+
+   mapped = MappedPwOResidual(
+       [0.25, 0.5, 0.75],
+       a=0.3, b=0.0, c=-2.0, eta_min=2.8, ngamma=32, neta=32)
+
+``total`` is the sum of squared rows: the surface-weighted gamma variance
+divided by live ``B00**2``, averaged over eta. This is invariant under field
+rescaling and includes derivatives of the normalization. Supplying ``b_ref``
+selects an explicit fixed positive field reference in tesla instead. Surface weights are normalized to sum to one; this is a coordinate
+average, without a physical-area Jacobian factor.
+
+``compute_state`` also returns the mapped field, branch means, Jacobian,
+conservative Jacobian lower bound, toroidal-span upper bound and sampled
+area fraction. The map rejects uncertified nonfolding domains, nonpositive
+reference fields and nonpositive mapped fields. Full-surface field bounds,
+geometry and transport remain separate checks. ``diagnostics_state`` reuses
+the transform for sampled full-surface extrema; ``physical_metrics`` checks
+these limits, signed iota, aspect ratio, oriented Jacobian and solver residuals.
+The signed transform is live;
+freeze the map parameters, cut and quadrature, not iota or the default field scale.
+See :ref:`confinement-mapped-pwo` for the formula and its relation to bounce
+action.
+
+**Map validity.** ``limit_map=True`` clips ``(a, b, c, eta_min)`` on each surface
+to the closest one-to-one map for the live ``iota``, so every parameter value
+gives a valid residual. Without it, an invalid map makes the rows non-finite.
+
+**Free map.** :class:`~vmex.core.pwo.FreeMapProblem` wraps a boundary stage whose
+first residual rows are ``mapped.spectrum_state`` and adds the map parameters
+to the least-squares variables. The map does not change the equilibrium, so its
+Jacobian columns come from the kernel alone. Parameters move through a sigmoid
+inside ``FreeMapProblem.MAP_BOUNDS``, and a penalty keeps the mapped area
+fraction above ``area_floor``, so the fit cannot shrink the map to nothing.
+``values(x)`` returns the optimized parameters.
+
+**Constraints that the variance does not see.** Each is a function of the state used
+with :class:`~vmex.core.optimize.Hinge`, which turns a metric into a residual that is
+zero inside ``[floor, ceiling]`` and the distance outside, as in
+``(opt.Hinge(opt.min_abs_iota, floor=0.42), 0.0, 100.0)``.
+
+- ``opt.edge_jacobian_ratio`` returns the min/max Jacobian ratio in each of
+  the outermost three radial cells. A pinched outer cell passes on the
+  optimizer's grid but flips the Jacobian sign when the boundary is re-solved on
+  a finer ``ns``, so the final solve fails. A floor of 0.25 prevents this.
+- ``opt.axis_excursion`` returns the RMS size of the magnetic axis' helical
+  harmonics in metres. A ceiling keeps the axis from winding away from a circle
+  as the boundary gains helicity.
+
+``examples/optimization/pwO_optimization.py`` combines these with the aspect
+ratio, an ``|iota|`` floor, a mirror-ratio ceiling and an optional magnetic well; see
+:ref:`optimization-low-transport`.
+
 Fast-ion confinement (Gamma_c)
 ------------------------------
 
@@ -349,13 +432,14 @@ scaling, and ``Gamma_c`` is a proxy rather than a loss law: Velasco et al.
 ``|gamma_c*|`` variant (eq. 21) more linearly, and validate ``Gamma_alpha``
 as the predictor.  **Use it as the reported value,
 never as the gradient objective**: its discretized boundary derivative is
-exact yet flips sign under grid refinement (the measured ladder is pinned
+approximate and can flip sign under grid refinement (the measured ladder is pinned
 in ``tests/test_gammac.py``).  For optimization use
 :class:`~vmex.core.gammac.GammaCSmooth` — the same wells and bounce
 quadrature with the two branch-noise structures regularized (separatrix
-kernel floor + superbanana corner floor), whose derivative holds sign and
-magnitude on the same refinement ladder — and recompute the hard value on
-the accepted result.  Physics, formula, and the numerical policy are on
+kernel floor + superbanana corner floor). Its normalized pitch-grid shape
+derivatives remain approximate: check actual forward descent and sampling
+refinement for each configuration, then recompute the hard value on the
+accepted result. Physics, formula, and the numerical policy are on
 :doc:`/explanation/confinement`:
 
 .. code-block:: python
@@ -431,7 +515,9 @@ The complete runnable workflows are
 ``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
 row on the Redl ``<J.B>`` itself (target 0), and
 ``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
-kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``).  Their
+kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``);
+``QI_optimization_bootstrap_er.py`` evaluates it at the ambipolar ``E_r``
+(``ambipolar=True``).  Their
 setup has two distinct steps:
 
 1. ``KineticProfiles`` describes the density and temperature seen by the
@@ -512,7 +598,7 @@ objective, a JAX port of the COBRA eigenproblem in the Gaur
 *et al.* formulation (*Plasma Phys. Control. Fusion* **67**, 125015 (2025),
 arXiv:2410.04576), with field-line coefficients per simsopt's
 COBRA-validated ``vmec_fieldlines`` conventions and a batched
-symmetric-tridiagonal ``eigvalsh`` solve:
+banded symmetric-tridiagonal solve (bisection for the top root, Hellmann--Feynman first derivative):
 
 - :func:`~vmex.core.stability.ballooning_lambda` — the most-unstable
   eigenvalue per (surface, field line, ballooning parameter); ``λ > 0`` is
@@ -630,15 +716,19 @@ Which objectives differentiate how
    * - :class:`~vmex.core.qi.JInvariantQIResidual`
      - yes
      - yes
-     - physical-pitch action variation over complete wells
+     - pooled physical-pitch action dispersion over complete wells
    * - :class:`~vmex.core.maxj.MaximumJResidual`
      - yes
      - yes
      - signed radial action slope with matched well identity
+   * - :class:`~vmex.core.maxj.DriftConfinementResidual`
+     - yes
+     - yes
+     - hinge on the smooth maximum radius of bounce-averaged drift orbits
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
-     - shared-transform J-invariance and maximum-J rows
+     - shared-transform pooled action dispersion and maximum-J rows
    * - :class:`~vmex.core.gammac.GammaC`
      - yes
      - yes
@@ -646,7 +736,7 @@ Which objectives differentiate how
    * - :class:`~vmex.core.gammac.GammaCSmooth`
      - yes
      - yes
-     - refinement-stable derivative via separatrix and corner floors
+     - smooth drift surrogate; approximate pitch-grid shape derivatives
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes
@@ -663,6 +753,14 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable ``L_grad_B`` lane (soft-min via ``softmin_k``)
+   * - :func:`~vmex.core.optimize.l_grad_b_excess_state`
+     - yes
+     - yes
+     - one-sided pointwise rows for a minimum gradient scale length
+   * - :func:`~vmex.core.optimize.weighted_magnetic_well`
+     - yes
+     - yes
+     - volume-derivative well between two user-chosen radial regions
    * - :func:`~vmex.core.optimize.d_merc_state`,
        :func:`~vmex.core.optimize.mercier_stability_residual`
      - yes
