@@ -16,7 +16,7 @@ import jax.numpy as jnp
 from .omnigenity import boozer_spectrum_state
 
 __all__ = ["squeezed_pwo_coordinates", "mapped_pwo_residual_from_boozer", "MappedPwOResidual",
-           "one_field_period", "qa_precursor", "transport_backtrack"]
+           "FreeMapProblem", "one_field_period", "qa_precursor", "transport_backtrack"]
 
 
 def _require(condition, message):
@@ -104,9 +104,29 @@ def _finish(residual, B, valid, weight):
             "mirror": (high-low)/(high+low), "B_min": low, "B_max": high}
 
 
+def _limited_map(a, b, c, eta_min, gamma, iota, nfp, neta, span_margin=.95, jacobian_margin=.1):
+    """Clip (a, b, c, eta_min) per surface to a one-to-one map: zeta(eta) and its span are linear in a."""
+    b, c = jnp.clip(b, -1., 1.), jnp.minimum(c, -.5)
+    # eta_min at which the distance alone takes 85% of the half period.
+    lin, gap = 1+c*jnp.pi, .15*jnp.pi
+    eta_min = jnp.clip(eta_min, (lin-jnp.sqrt(lin*lin-4*c*gap))/(2*c), jnp.pi-1e-3)
+    eta = eta_min+(2*jnp.pi-2*eta_min)*(jnp.arange(neta)[None, None, :]+.5)/neta
+
+    def zeta(a_value, eta_value):
+        return squeezed_pwo_coordinates(gamma, eta_value, iota=iota, nfp=nfp, a=a_value, b=b, c=c)
+
+    ends = jnp.concatenate((eta_min, 2*jnp.pi-eta_min), axis=2)
+    span0, span1 = ((q["zeta"][:, :, 1:]-q["zeta"][:, :, :1]) for q in (zeta(0., ends), zeta(1., ends)))
+    a_span = jnp.min((span_margin*2*jnp.pi/nfp-span0)/jnp.maximum(span1-span0, 1e-12), axis=1, keepdims=True)
+    jac0, jac1 = zeta(0., eta)["jacobian"], zeta(1., eta)["jacobian"]
+    drop = jnp.maximum(jac0-jac1, 1e-12)
+    a_jac = jnp.min((jac0-jacobian_margin/nfp)/drop, axis=(1, 2), keepdims=True)
+    return jnp.clip(a, 0., jnp.minimum(a_span, a_jac)), b, c, eta_min
+
+
 def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         b_ref=None, bmns_b=None, a=0.3, b=0.0, c=-2.0, eta_min=2.8,
-        ngamma=32, neta=32, weights=None):
+        ngamma=32, neta=32, weights=None, limit_map=False, nband=0):
     """Mapped-gamma variance divided by the live Boozer mean field squared.
 
     Eta midpoint quadrature covers [eta_min,2*pi-eta_min]. Gamma is uniform
@@ -114,11 +134,22 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     nonconstant gamma harmonics, averaged over eta. The default normalization
     is invariant under field rescaling and differentiated with the spectrum.
     An explicit ``b_ref`` instead uses a fixed positive reference in Tesla.
+    ``limit_map=True`` clips the map on each surface to the closest one-to-one
+    map for the live iota, so every parameter value yields a valid map.
     No Fourier periodicity in the cut eta direction is assumed.
+
+    ``nband > 0`` adds ``band_residuals1d``: the spread of B on ``nband``
+    nodes per gamma line across the unmapped band between one period's cut
+    contour and the next. The mapped field has poloidally closed contours and
+    a bounce length 2 D(eta)/nfp independent of the field line, so with a
+    uniform band its collisionless bootstrap geometric factor (the G term of
+    f_s + <u B^2>; two-level limit: Delta = sum_i <chi_i>/(iota - a_i) = 0)
+    vanishes for every (a, b, c, eta_min, iota). The current therefore comes
+    from the band, and a flat band is the sufficient zero-bootstrap condition.
     """
     _integer(ngamma, 4, "ngamma"); _integer(neta, 4, "neta")
-    if not np.isfinite(eta_min) or not 0 < eta_min < np.pi:
-        raise ValueError("eta_min must be fixed strictly between zero and pi")
+    _require(jnp.isfinite(eta_min) & (eta_min > 0) & (eta_min < jnp.pi),
+             "eta_min must be strictly between zero and pi")
     cosine, sine, m, n, iota, weight, valid = _spectrum(bmnc_b, bmns_b, xm_b, xn_b, iota_b, nfp, weights)
     ns = cosine.shape[0]
     constant = (m == 0) & (n == 0)
@@ -130,40 +161,54 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     a, b, c, reference = (_surface(x, ns, name) for name, x in
                            (("a", a), ("b", b), ("c", c), ("b_ref", b_ref)))
     gamma = 2*jnp.pi*jnp.arange(ngamma)[None, :, None]/ngamma
+    eta_min = _surface(eta_min, ns, "eta_min")
+    if limit_map:
+        a, b, c, eta_min = _limited_map(a, b, c, eta_min, gamma, jnp.abs(iota[:, None, None]), nfp, neta)
     eta = eta_min+(2*jnp.pi-2*eta_min)*(jnp.arange(neta)[None, None, :]+0.5)/neta
-    coordinates = squeezed_pwo_coordinates(gamma, eta, iota=iota[:, None, None], nfp=nfp, a=a, b=b, c=c)
-    B = _evaluate(cosine, sine, m, n, coordinates["theta"], coordinates["zeta"])
-    # Sufficient global bound over the entire cut domain, including between nodes.
-    bound = ((1-jnp.abs(a)*jnp.pi*jnp.abs(iota[:, None, None]/nfp)*(1+jnp.abs(b)))
-             * (1+c*jnp.pi-2*c*eta_min)-jnp.abs(a))/nfp
+    # The map is built for positive iota. A mirror image (zeta -> -zeta, iota -> -iota)
+    # is the same device, so negative iota reads the same map at -zeta.
+    coordinates = squeezed_pwo_coordinates(gamma, eta, iota=jnp.abs(iota[:, None, None]), nfp=nfp, a=a, b=b, c=c)
+    B = _evaluate(cosine, sine, m, n, coordinates["theta"],
+                  jnp.where(iota[:, None, None] < 0, -1.0, 1.0)*coordinates["zeta"])
+    # Theta equals gamma, so each line of constant gamma maps to one line of constant
+    # theta. The map is one-to-one on the torus exactly when zeta increases along each
+    # line and the line spans less than one field period; both are checked here on the nodes.
+    ends = squeezed_pwo_coordinates(gamma, jnp.concatenate((eta_min, 2*jnp.pi-eta_min), axis=2),
+                                    iota=jnp.abs(iota[:, None, None]), nfp=nfp, a=a, b=b, c=c)["zeta"]
+    span = jnp.max(ends[:, :, 1]-ends[:, :, 0], axis=1)
+    eta_cut = eta_min[:, 0, 0]
+    jacobian_min = jnp.min(coordinates["jacobian"], axis=(1, 2))
     distance_at_cut = c*eta_min**2-(1+c*jnp.pi)*eta_min+jnp.pi
-    # Positive local Jacobian is insufficient on a torus: a lifted interval
-    # longer than one field period would cover physical points twice.
-    span_upper = 2*(distance_at_cut+jnp.abs(a)*eta_min*jnp.minimum(
-        1.0, jnp.abs(iota[:, None, None]*distance_at_cut/nfp)*(1+jnp.abs(b))))/nfp
     valid_map = (jnp.isfinite(a) & jnp.isfinite(b) & jnp.isfinite(c)
-                 & (c < -1/jnp.pi) & (eta_min >= jnp.pi+1/c)
-                 & jnp.isfinite(reference) & (reference > 0) & (bound > 0)
-                 & (distance_at_cut > 0) & (span_upper < 2*jnp.pi/nfp))
-    valid = valid & valid_map[:, 0, 0] & jnp.all(coordinates["jacobian"] > 0, axis=(1, 2))
+                 & (c < -1/jnp.pi) & jnp.isfinite(reference) & (reference > 0)
+                 & (distance_at_cut > 0) & (span[:, None, None] < 2*jnp.pi/nfp))
+    valid = valid & valid_map[:, 0, 0] & (jacobian_min > 0)
     mean = jnp.mean(B, axis=1, keepdims=True)
     out = _finish((B-mean)/reference, B, valid, weight)
+    if nband:
+        _integer(nband, 2, "nband")
+        # Midpoints from this period's right cut to the next period's left cut.
+        band = ends[:, :, 1:]+(ends[:, :, :1]+2*jnp.pi/nfp-ends[:, :, 1:])*(jnp.arange(nband)+.5)/nband
+        B_band = _evaluate(cosine, sine, m, n, jnp.broadcast_to(gamma, band.shape),
+                           jnp.where(iota[:, None, None] < 0, -1.0, 1.0)*band)
+        spread = (B_band-jnp.mean(B_band, axis=(1, 2), keepdims=True))/reference
+        out["band_residuals1d"] = (spread*jnp.sqrt(weight[:, None, None]/ngamma/nband)).ravel()
+        out.update(B_band=B_band, band_total=jnp.sum(out["band_residuals1d"]**2))
     out.update({"B_mapped": B, "B_mean_gamma": mean, "gamma": gamma[0, :, 0],
                 "B00": mean_field, "field_variance": variance,
                 "mapped_variance": jnp.mean((B-mean)**2, axis=(1, 2)),
                 "eta": eta[0, 0, :], "jacobian": coordinates["jacobian"],
-                "jacobian_lower_bound": bound[:, 0, 0],
-                "toroidal_span_upper": span_upper[:, 0, 0],
-                "eta_fraction": 1-eta_min/jnp.pi,
-                "mapped_area_fraction": jnp.mean(coordinates["jacobian"], axis=(1, 2))*(2*jnp.pi-2*eta_min)*nfp/(2*jnp.pi)})
+                "jacobian_min": jacobian_min, "toroidal_span": span,
+                "eta_fraction": 1-eta_cut/jnp.pi,
+                "mapped_area_fraction": jnp.mean(coordinates["jacobian"], axis=(1, 2))*(2*jnp.pi-2*eta_cut)*nfp/(2*jnp.pi)})
     return out
 
 
 class MappedPwOResidual:
     """Squeezed LC mapped-field variance with a fixed domain and live B00 scale.
 
-    Options match :func:`mapped_pwo_residual_from_boozer`. A conservative
-    positive Jacobian bound rejects maps whose nonfolding is not certified.
+    Options match :func:`mapped_pwo_residual_from_boozer`. Maps that fold or
+    cover a point twice on the evaluated nodes are rejected.
     Field normalization, mirror floors and full-surface diagnostics remain
     separate physical requirements.
     """
@@ -189,6 +234,12 @@ class MappedPwOResidual:
                           nfp=booz["nfp"], weights=self.weights, **self.options)
         out.update(booz)
         return out
+
+    def spectrum_state(self, state, rt):
+        """Return the flat Boozer spectrum and iota, for a term whose map parameters vary."""
+        booz = boozer_spectrum_state(state, rt, surfaces=self.surfaces, mboz=self.mboz,
+                                     nboz=self.nboz, oversample=self.oversample)
+        return jnp.concatenate((booz["bmnc_b"].ravel(), booz["iota_b"]))
 
     def residuals_state(self, state, rt):
         """Return the flat traceable least-squares residual."""
@@ -253,6 +304,74 @@ class MappedPwOResidual:
     def total(self, eq):
         """Return the scalar objective on a converged equilibrium."""
         return self.total_state(eq.state, eq.runtime)
+
+
+class FreeMapProblem:
+    """A boundary stage with free map parameters in one least-squares problem.
+
+    The stage's first residual rows must be ``mapped.spectrum_state``. The map
+    does not change the equilibrium, so its Jacobian columns come directly from
+    the kernel. Parameters move through a sigmoid inside ``MAP_BOUNDS``, and
+    ``limit_map`` keeps every value valid on every surface. ``band_weight > 0``
+    appends the unmapped-band flatness rows (``nband`` nodes per gamma line), the
+    sufficient zero-bootstrap condition of the mapped field; see
+    :func:`mapped_pwo_residual_from_boozer`.
+    """
+
+    MAP_BOUNDS = dict(a=(0., .8), b=(-1., 1.), c=(-4., -.5), eta_min=(2.2, 3.1))
+
+    def __init__(self, stage, mapped, equilibrium, values, free, *, weight=1e3, area_floor=.6,
+                 band_weight=0., nband=16):
+        booz = boozer_spectrum_state(equilibrium.state, equilibrium.runtime, surfaces=mapped.surfaces,
+                                     mboz=mapped.mboz, nboz=mapped.nboz, oversample=mapped.oversample)
+        ns, nm = booz["bmnc_b"].shape
+        self.stage, self.nx, self.nspec = stage, stage.x0.size, ns*nm+ns
+        names = tuple(values)
+        low, high = (np.array([self.MAP_BOUNDS[k][i] for k in names]) for i in (0, 1))
+        fixed = np.array([values[k] for k in names], dtype=float)
+        index = np.array([i for i, k in enumerate(names) if k in free], dtype=int)
+        self.names, self.index = names, index
+        xm, xn, nfp = booz["xm_b"], booz["xn_b"], booz["nfp"]
+
+        def parameters(u):
+            return jnp.asarray(fixed).at[index].set(low[index]+(high[index]-low[index])*jax.nn.sigmoid(u))
+        self._parameters = parameters
+
+        def rows(spectrum, u):
+            a, b, c, eta_min = parameters(u)
+            out = mapped_pwo_residual_from_boozer(
+                bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[ns*nm:],
+                nfp=nfp, a=a, b=b, c=c, eta_min=eta_min, weights=mapped.weights, limit_map=True,
+                nband=nband if band_weight > 0 else 0)
+            area = jnp.sqrt(100.)*jnp.maximum(area_floor-out["mapped_area_fraction"], 0.)
+            band = jnp.sqrt(band_weight)*out["band_residuals1d"] if band_weight > 0 else jnp.zeros(0)
+            return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area, band))
+        self._rows = jax.jit(rows)
+        self._columns = jax.jit(lambda s, u, v: (
+            jax.vmap(lambda d: jax.jvp(lambda q: rows(q, u), (s,), (d,))[1], in_axes=1, out_axes=1)(v),
+            jax.jacfwd(lambda q: rows(s, q))(u)))
+        clipped = np.clip(fixed[index], low[index]+1e-3*(high[index]-low[index]), high[index]-1e-3*(high[index]-low[index]))
+        fraction = (clipped-low[index])/(high[index]-low[index])
+        self.x0 = np.concatenate((np.asarray(stage.x0), np.log(fraction/(1-fraction))))
+
+    def residual(self, z):
+        """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""
+        raw = np.asarray(self.stage.residual(z[:self.nx]))
+        return np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
+                               raw[self.nspec:]))
+
+    def residual_jac(self, z):
+        """Return the joint Jacobian over the boundary and the free map variables."""
+        raw = np.asarray(self.stage.residual(z[:self.nx]))
+        full = np.asarray(self.stage.residual_jac(z[:self.nx]))
+        boundary, free = (np.asarray(q) for q in self._columns(
+            jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]), jnp.asarray(full[:self.nspec])))
+        rest = np.hstack((full[self.nspec:], np.zeros((full.shape[0]-self.nspec, free.shape[1]))))
+        return np.vstack((np.hstack((boundary, free)), rest))
+
+    def values(self, z):
+        """Return the map parameters at ``z`` as a dictionary."""
+        return dict(zip(self.names, map(float, self._parameters(jnp.asarray(z[self.nx:])))))
 
 
 def one_field_period(inp):

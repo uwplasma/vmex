@@ -45,9 +45,7 @@ _WOUT_POWERS = {
     **{name: (1, 2) for name in (
         "phi", "phipf", "chi", "chipf", "phips",
     )},
-    **{name: (2, 0) for name in (
-        "presf", "mass", "pres", "bdotb", "am_aux_f",
-    )},
+    **{name: (2, 0) for name in ("presf", "pres", "bdotb")},
     **{name: (0, 3) for name in ("volume_p", "vp", "gmnc", "gmns")},
     **{name: (1, -1) for name in (
         "bdotgradv", "bsupumnc", "bsupvmnc", "bsupumns", "bsupvmns",
@@ -174,8 +172,12 @@ def scale_input(
     - ``pres_scale``, the multiplier VMEC applies on top of the ``am`` /
       ``am_aux_f`` pressure profile: ``b_scale**2``, so pressure in Pa scales
       as ``b_scale**2`` while the profile *shape* coefficients stay as
-      written;
+      written.  With ``gamma != 0`` the profile is a mass,
+      ``p = mass / V'**gamma`` and ``mass ~ (phips R00)**gamma``, which carries
+      ``b_scale**gamma`` of its own, so the factor is ``b_scale**(2 - gamma)``
+      (``r_scale`` cancels);
     - ``extcur``, the external coil-group currents (A): ``b_scale * r_scale``;
+    - ``tvolume``, the boundary-volume target (m^3), when active: ``r_scale**3``;
     - ``curtor``, the net toroidal current (A): ``b_scale * r_scale``, but
       **only when** ``ncurr == 1``.  With ``ncurr == 0`` VMEC prescribes iota
       and never reads ``curtor``, so the stored value is passed through
@@ -209,9 +211,10 @@ def scale_input(
     changes = {name: _times(getattr(inp, name), r) for name in _INPUT_LENGTHS}
     changes.update(
         phiedge=inp.phiedge * b * r**2,
-        pres_scale=inp.pres_scale * b**2,
+        pres_scale=inp.pres_scale * b ** (2.0 - float(inp.gamma)),
         curtor=inp.curtor * b * r if inp.ncurr == 1 else inp.curtor,
         extcur=_times(inp.extcur, b * r),
+        tvolume=inp.tvolume * r**3 if inp.tvolume > 0.0 else inp.tvolume,
     )
     return replace(inp, **changes)
 
@@ -313,8 +316,10 @@ def scale_wout(
       ``currvmnc`` families; and the NESTOR potential ``potsin``/``potcos``;
     - ``(1, 2)`` fluxes in Wb — ``phi``, ``chi`` and their radial derivatives
       ``phipf``, ``chipf``, ``phips``;
-    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa),
-      ``mass``, and ``bdotb`` (T^2);
+    - ``(2, 0)`` pressure-like quantities — ``presf``, ``pres`` (Pa), and
+      ``bdotb`` (T^2); ``mass = pres * V'**gamma`` scales as
+      ``b_scale**2 * r_scale**(3 * gamma)``, and the ``am_aux_f`` knots as
+      ``b_scale**(2 - gamma)`` like ``am`` (below);
     - ``(0, 3)`` volumes in m^3 — ``volume_p``, ``vp``, and the Jacobian
       harmonics ``gmnc``/``gmns``;
     - ``(2, 3)`` energies — ``wb``, ``wp``;
@@ -363,7 +368,12 @@ def scale_wout(
         name: _times(getattr(data, name), b**b_power * r**r_power)
         for name, (b_power, r_power) in _WOUT_POWERS.items()
     }
-    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, b**2)
+    # ``mass = pres * V'**gamma``; ``am``/``am_aux_f`` re-run with
+    # ``pres_scale = 1``, so with ``gamma != 0`` they follow ``scale_input``.
+    gamma, p_factor = float(data.gamma), b ** (2.0 - float(data.gamma))
+    changes["am"] = _scale_pressure_coefficients(data.pmass_type, data.am, p_factor)
+    changes["am_aux_f"] = _times(data.am_aux_f, p_factor)
+    changes["mass"] = _times(data.mass, b**2 * r ** (3.0 * gamma))
     return replace(data, **changes)
 
 
@@ -420,6 +430,12 @@ def input_minor_radius(inp: VmecInput) -> float:
     return float(np.sqrt(2.0 * abs(np.mean(r * zu))))
 
 
+def _axis_harmonics(b: Any, data: WoutData) -> tuple[Any, Any]:
+    """``m = 0`` harmonics of half-mesh ``b`` at ``s = 0`` and their ``xn_nyq``."""
+    b, m0 = np.asarray(b), np.asarray(data.xm_nyq) == 0
+    return (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+
+
 def b00_axis(data: WoutData) -> float:
     """Boozer ``B00`` on the magnetic axis, ``int B^2 dl / int B dl`` [T].
 
@@ -429,9 +445,7 @@ def b00_axis(data: WoutData) -> float:
     from the first two half-mesh surfaces and the curve comes from the axis
     row of ``rmnc``/``zmns``.
     """
-    m0 = np.asarray(data.xm_nyq) == 0
-    b = np.asarray(data.bmnc)
-    b_axis, xn_b = (1.5 * b[1] - 0.5 * b[2])[m0], np.asarray(data.xn_nyq)[m0]
+    b_axis, xn_b = _axis_harmonics(data.bmnc, data)
     g0 = np.asarray(data.xm) == 0
     xn, r, z = np.asarray(data.xn)[g0], np.asarray(data.rmnc)[0, g0], np.asarray(data.zmns)[0, g0]
     phi = np.linspace(0.0, 2.0 * np.pi / int(data.nfp), 256, endpoint=False)[:, None]
@@ -440,6 +454,183 @@ def b00_axis(data: WoutData) -> float:
                  + (np.sin(xn * phi) @ (xn * r)) ** 2
                  + (np.cos(xn * phi) @ (xn * z)) ** 2)
     return float(np.sum(field**2 * dl) / np.sum(field * dl))
+
+
+def axis_field(data: Any, phi: float = 0.0, *, probe: bool = False,
+               ntheta: int = 128, ns: tuple[int, int] = (7, 13)) -> Any:
+    """``|B|`` on the magnetic axis at toroidal angle ``phi`` [T].
+
+    For a fixed-boundary input, estimate from flux divided by the normal-plane
+    cross-section area (``ntheta`` points), or use ``probe=True`` for two
+    converged coarse solves at ``ns``. The geometric estimate is differentiable
+    in traced boundary arrays and flux; the coarse solves are host-side.
+    Compose with ``scale_input(inp, b_scale=target/axis_field(inp))`` to set
+    a field before solving. Only the solved-WOUT value is an equilibrium field.
+
+    The ``m = 0`` Nyquist harmonics of the half-mesh ``bmnc`` (and ``bmns`` for
+    ``lasym``) are extrapolated to ``s = 0`` as ``1.5 b[1] - 0.5 b[2]`` and
+    summed at ``phi`` (radians), ``sum_n b_n cos(n phi) - b'_n sin(n phi)`` with
+    ``n = xn_nyq``.  Only ``m = 0`` survives at the axis; the extrapolated
+    ``m > 0`` harmonics are discretization artifacts there.  This is the
+    point value that :func:`b00_axis` averages along the axis.  It is not
+    ``wout.b0 = rbtor0 / R_axis``, a toroidal-component quantity that differs
+    from ``|B|`` wherever the axis is tilted.
+    """
+    if hasattr(data, "rbc"):
+        return _probe_axis_field(data, phi, ns) if probe else _estimate_axis_field(data, phi, ntheta)
+    cos_n, xn = _axis_harmonics(data.bmnc, data)
+    field = float(np.sum(cos_n * np.cos(xn * phi)))
+    if data.bmns is not None:
+        field -= float(np.sum(_axis_harmonics(data.bmns, data)[0] * np.sin(xn * phi)))
+    return abs(field)
+
+
+def match_b0(
+    inp: VmecInput, data: WoutData, b0_target: float, phi: float = 0.0,
+) -> VmecInput:
+    """Scale ``inp`` so that :func:`axis_field` at ``phi`` becomes ``b0_target`` [T].
+
+    ``data`` is the converged wout of ``inp``.  Shape, iota and beta are
+    unchanged (``scale_input`` with ``b_scale = b0_target / axis_field``), so
+    re-solving the returned deck gives ``b0_target`` at the same ``ns``.
+    """
+    return scale_input(inp, b_scale=abs(b0_target) / axis_field(data, phi))
+
+
+def _boundary_table(inp: Any, theta: Any, phi: Any) -> tuple[Any, ...]:
+    """Boundary ``R, Z`` and their ``phi``/``theta`` derivatives at ``(theta, phi)`` pairs."""
+    import jax.numpy as jnp
+
+    rbc, rbs, zbc, zbs = (jnp.asarray(a, dtype=float)[None] for a in (inp.rbc, inp.rbs, inp.zbc, inp.zbs))
+    m = jnp.arange(rbc.shape[2])
+    n = jnp.arange(-(rbc.shape[1] // 2), rbc.shape[1] // 2 + 1)[None, :, None] * inp.nfp
+    ang = m * theta[:, None, None] - n * phi[:, None, None]
+    c, s = jnp.cos(ang), jnp.sin(ang)
+    red = (1, 2)
+    return (
+        jnp.sum(rbc * c + rbs * s, red), jnp.sum(zbs * s + zbc * c, red),
+        jnp.sum(n * (rbc * s - rbs * c), red), jnp.sum(n * (zbc * s - zbs * c), red),
+        jnp.sum(m * (rbs * c - rbc * s), red), jnp.sum(m * (zbs * c - zbc * s), red),
+    )
+
+
+def _require_fixed_boundary(inp: Any) -> None:
+    if getattr(inp, "lfreeb", False):
+        raise ValueError("the field on axis of a free-boundary deck is set by its coils, not by PHIEDGE")
+
+
+def _estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
+    """Estimate ``|B|`` on the axis at toroidal angle ``phi`` from the input alone [T].
+
+    No equilibrium is solved.  ``PHIEDGE`` is the toroidal flux through the
+    boundary, and in a thin tube the flux is the axis field times the tube
+    cross-section, so ``|B| ~ |PHIEDGE| / A_perp``.  ``A_perp`` is the area
+    where the boundary surface meets the plane through the cross-section
+    centroid that is normal to the curve of centroids of the ``phi = const``
+    cross-sections.  The normal plane, not the ``phi = const`` cut, is what
+    makes this accurate on a helical axis: the cut overstates the area by
+    ``1 / cos(tilt)``, which is 3 to 25 % on the shipped stellarators.  The
+    field is taken as uniform over the cross-section, so the ``1/R`` and
+    diamagnetic variation across it, and the Shafranov shift of the axis off
+    the centroid, are not modelled.
+
+    Use the geometric estimate as a first guess. Finite pressure and current
+    can shift the magnetic axis away from the boundary centroid; use
+    ``axis_field(inp, probe=True)`` to include the coarse equilibrium response,
+    then :func:`match_b0` with the production WOUT to set the final field.
+
+    The body is a JAX expression, so ``jax.grad`` works with respect to
+    ``phi`` and, for an object holding traced arrays (``SimpleNamespace``
+    with ``rbc, rbs, zbc, zbs, phiedge, nfp``), to the boundary and
+    ``PHIEDGE``.
+
+    Parameters
+    ----------
+    inp:
+        Fixed-boundary deck; only ``PHIEDGE`` and the boundary tables are read.
+    phi:
+        Toroidal angle [rad] of the point on the axis.
+    ntheta:
+        Points on the boundary curve; the cut area is spectrally accurate.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    _require_fixed_boundary(inp)
+    phi = jnp.asarray(phi, dtype=float)
+    theta = 2.0 * jnp.pi * jnp.arange(ntheta) / ntheta
+
+    def centroid(p):
+        r, z, _, _, rt, zt = _boundary_table(inp, theta, jnp.full(ntheta, p))
+        area = jnp.sum(r * zt)
+        return jnp.stack([jnp.sum(0.5 * r**2 * zt) / area, -jnp.sum(0.5 * z**2 * rt) / area])
+
+    (rc, zc), (drc, dzc) = centroid(phi), jax.jacfwd(centroid)(phi)
+    cos, sin = jnp.cos(phi), jnp.sin(phi)
+    point = jnp.stack([rc * cos, rc * sin, zc])
+    tangent = jnp.stack([drc * cos - rc * sin, drc * sin + rc * cos, dzc])
+    tangent = tangent / jnp.linalg.norm(tangent)
+
+    def surface(p):
+        r, z, rp, zp, _, _ = _boundary_table(inp, theta, p)
+        x = jnp.stack([r * jnp.cos(p), r * jnp.sin(p), z], axis=1)
+        dx = jnp.stack([rp * jnp.cos(p) - r * jnp.sin(p), rp * jnp.sin(p) + r * jnp.cos(p), zp], axis=1)
+        return x, dx
+
+    # Newton in phi along each theta line onto the plane (x - point) . tangent = 0.
+    plane_phi = jnp.full(ntheta, phi)
+    for _ in range(6):
+        x, dx = surface(plane_phi)
+        plane_phi = plane_phi - ((x - point) @ tangent) / (dx @ tangent)
+    rel = surface(plane_phi)[0] - point
+    e1 = jnp.stack([cos, sin, 0.0])
+    e1 = e1 - tangent * (e1 @ tangent)
+    e1 = e1 / jnp.linalg.norm(e1)
+    u, v = rel @ e1, rel @ jnp.cross(tangent, e1)
+    k = jnp.fft.fftfreq(ntheta, 1.0 / ntheta)
+    ddt = lambda f: jnp.fft.ifft(1j * k * jnp.fft.fft(f)).real  # noqa: E731
+    area_perp = jnp.abs(jnp.pi * jnp.mean(u * ddt(v) - v * ddt(u)))
+    return jnp.abs(jnp.asarray(inp.phiedge, dtype=float)) / area_perp
+
+
+def _probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7, 13)) -> float:
+    """``|B|`` on the axis at ``phi`` [T] from two coarse solves, extrapolated in ``1/ns``.
+
+    The deck is solved at each radial resolution in ``ns`` (single stage,
+    ``ftol = 1e-10``, ``raise_on_max_iterations``), :func:`axis_field` is read
+    at each, and the two values are combined as ``(n2 B2 - n1 B1) / (n2 - n1)``,
+    which removes the ``O(h_s)`` axis-extrapolation error.  Against ``ns = 97``
+    this is within 0.5 % on 16 of 17 example decks (0.12 % on 12) and 0.8 % on the
+    2.7 % beta, 6 MA bootstrap QA; it takes 0.3 to 2.5 s warm and 10 to 35 s
+    with compilation.
+    The extrapolated value is the ``ns -> infinity`` field: a production solve
+    at finite ``ns`` differs from it by the ``O(h_s)`` resolution drift, which
+    :func:`match_b0` on the production wout removes.  Do not go below
+    ``ns = 7``: the 4-period QH reactor deck does not converge at ``ns = 5``
+    within 4000 iterations, and an unconverged probe raises.
+
+    Fixed-boundary decks only.
+    """
+    from .multigrid import solve_multigrid
+    from .wout import wout_from_result
+
+    _require_fixed_boundary(inp)
+    if (len(ns) != 2 or any(isinstance(n, (bool, np.bool_)) or not isinstance(n, (int, np.integer))
+                           or n < 7 for n in ns) or ns[0] >= ns[1]):
+        raise ValueError("ns must contain two increasing integer resolutions >= 7")
+    fields = []
+    for n in ns:
+        deck = replace(
+            inp,
+            ns_array=np.asarray([n]),
+            ftol_array=np.asarray([1e-10]),
+            niter_array=np.asarray([max(3000, int(np.max(np.asarray(inp.niter_array))))]),
+            lfull3d1out=False,
+        )
+        result = solve_multigrid(deck, verbose=False, raise_on_max_iterations=True)
+        fields.append(axis_field(wout_from_result(deck, result), phi))
+    (n1, n2), (b1, b2) = ns, fields
+    return (n2 * b2 - n1 * b1) / (n2 - n1)
 
 
 def scale_reference(data: WoutData, target: str = "volavgB") -> tuple[float, float]:

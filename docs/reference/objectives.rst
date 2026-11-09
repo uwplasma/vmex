@@ -124,6 +124,9 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.max_elongation` — equivalent-ellipse boundary
   elongation from Fourier-exact area and perimeter line integrals over one
   field period;
+- :func:`~vmex.core.optimize.min_boundary_curvature_radius` — the smallest
+  poloidal radius of curvature of the boundary cross-sections, in metres; a
+  floor keeps out tips sharper than coils can hold;
 - :func:`~vmex.core.optimize.magnetic_well` — the standard vacuum-well
   measure (positive = well, stabilizing).
 
@@ -354,6 +357,8 @@ maximum field. This removes roundoff amplification at nearly coincident nodes
 and preserves its derivative. Existing ``ConstructedQIResidual`` optimizers
 use the correction without script changes; it does not change the QI target.
 
+.. _objectives-mapped-pwo:
+
 Mapped-field contour variance
 -----------------------------
 
@@ -383,8 +388,36 @@ these limits, signed iota, aspect ratio, oriented Jacobian and solver residuals.
 The signed transform is live;
 freeze the map parameters, cut and quadrature, not iota or the default field scale.
 See :ref:`confinement-mapped-pwo` for the formula and its relation to bounce
-action. ``examples/optimization/pwO_optimization.py`` supplies a complete
-boundary workflow with feasible checkpoints and an independent NEO screen.
+action.
+
+**Map validity.** ``limit_map=True`` clips ``(a, b, c, eta_min)`` on each surface
+to the closest one-to-one map for the live ``iota``, so every parameter value
+gives a valid residual. Without it, an invalid map makes the rows non-finite.
+
+**Free map.** :class:`~vmex.core.pwo.FreeMapProblem` wraps a boundary stage whose
+first residual rows are ``mapped.spectrum_state`` and adds the map parameters
+to the least-squares variables. The map does not change the equilibrium, so its
+Jacobian columns come from the kernel alone. Parameters move through a sigmoid
+inside ``FreeMapProblem.MAP_BOUNDS``, and a penalty keeps the mapped area
+fraction above ``area_floor``, so the fit cannot shrink the map to nothing.
+``values(x)`` returns the optimized parameters.
+
+**Constraints that the variance does not see.** Each is a function of the state used
+with :class:`~vmex.core.optimize.Hinge`, which turns a metric into a residual that is
+zero inside ``[floor, ceiling]`` and the distance outside, as in
+``(opt.Hinge(opt.min_abs_iota, floor=0.42), 0.0, 100.0)``.
+
+- ``opt.edge_jacobian_ratio`` returns the min/max Jacobian ratio in each of
+  the outermost three radial cells. A pinched outer cell passes on the
+  optimizer's grid but flips the Jacobian sign when the boundary is re-solved on
+  a finer ``ns``, so the final solve fails. A floor of 0.25 prevents this.
+- ``opt.axis_excursion`` returns the RMS size of the magnetic axis' helical
+  harmonics in metres. A ceiling keeps the axis from winding away from a circle
+  as the boundary gains helicity.
+
+``examples/optimization/pwO_optimization.py`` combines these with the aspect
+ratio, an ``|iota|`` floor, a mirror-ratio ceiling and an optional magnetic well; see
+:ref:`optimization-low-transport`.
 
 Fast-ion confinement (Gamma_c)
 ------------------------------
@@ -482,7 +515,9 @@ The complete runnable workflows are
 ``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
 row on the Redl ``<J.B>`` itself (target 0), and
 ``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
-kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``).  Their
+kinetic one (``dkx.bootstrap.KineticBootstrapMismatch``);
+``QI_optimization_bootstrap_er.py`` evaluates it at the ambipolar ``E_r``
+(``ambipolar=True``).  Their
 setup has two distinct steps:
 
 1. ``KineticProfiles`` describes the density and temperature seen by the
@@ -686,6 +721,10 @@ Which objectives differentiate how
      - yes
      - yes
      - signed radial action slope with matched well identity
+   * - :class:`~vmex.core.maxj.DriftConfinementResidual`
+     - yes
+     - yes
+     - hinge on the smooth maximum radius of bounce-averaged drift orbits
    * - :class:`~vmex.core.maxj.JInvariantQIAndMaximumJResidual`
      - yes
      - yes
@@ -714,6 +753,14 @@ Which objectives differentiate how
      - yes
      - yes
      - traceable ``L_grad_B`` lane (soft-min via ``softmin_k``)
+   * - :func:`~vmex.core.optimize.l_grad_b_excess_state`
+     - yes
+     - yes
+     - one-sided pointwise rows for a minimum gradient scale length
+   * - :func:`~vmex.core.optimize.weighted_magnetic_well`
+     - yes
+     - yes
+     - volume-derivative well between two user-chosen radial regions
    * - :func:`~vmex.core.optimize.d_merc_state`,
        :func:`~vmex.core.optimize.mercier_stability_residual`
      - yes

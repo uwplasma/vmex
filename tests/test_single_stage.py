@@ -25,6 +25,9 @@ class Deck:
     lasym: bool = False
     lfreeb: bool = False
     mgrid_file: str = "NONE"
+    ntheta: int = 0
+    nzeta: int = 0
+    delt: float = 1.
     rbc: object = field(default_factory=lambda: np.ones((3, 2)))
     zbs: object = field(default_factory=lambda: np.zeros((3, 2)))
     am: object = field(default_factory=lambda: np.array([1., -1.]))
@@ -108,7 +111,7 @@ def harness(monkeypatch, tmp_path):
                         lambda *a, **kw: events.append(("field data", a, kw)) or "data")
     monkeypatch.setattr(ss.vc, "plan_vc_precision", lambda *a, **kw: "precision")
     monkeypatch.setattr(ss, "total_normal_field", lambda *a, **kw: (
-        np.array([[.01, .02]]), np.array([[.25, .75]])))
+        np.array([[.01, .02]]), np.array([[.25, .75]]), np.array([[.03, .04]])))
     for name, value in (("min_abs_iota", .45), ("aspect_ratio", 6.), ("volume_average_beta", .005)):
         monkeypatch.setattr(ss.opt, name, lambda *a, value=value: value)
     return NS(events=events, Coils=Coils, Surface=Surface, deck=deck, seed=seed,
@@ -153,6 +156,7 @@ def test_verification_preserves_physics_and_independently_checks_the_held_bounda
     np.testing.assert_array_equal(solves[1][1].ns_array, [16, 41])
     np.testing.assert_array_equal(solves[1][1].ftol_array, [1e-10, 1e-10])
     assert solves[1][1].lfreeb and solves[1][1].mgrid_file == "direct ESSOS field"
+    assert (solves[1][1].ntheta, solves[1][1].nzeta, solves[1][1].delt) == (32, 32, .3)
     assert "initial_state" not in solves[1][2]  # A cold independent check.
     assert solves[1][2]["external_field"].coils is h.final_coils
     assert solves[1][2]["raise_on_max_iterations"] is False
@@ -266,14 +270,16 @@ def test_total_normal_field_uses_equilibrium_strength_and_the_frozen_precision(m
         assert external_field is field
         return np.array([[.3, .8]])
 
-    interface = NS(weights=weights, bnormal_residual=residual)
+    interface = NS(weights=weights, bnormal_residual=residual,
+                   pressure_balance_residual=lambda external_field: np.array([[.9, 3.2]]))
     monkeypatch.setattr(ss, "coil_field", lambda coils: field)
     monkeypatch.setattr(ss.vc, "surface_field_data_from_state", lambda *a, **kw: data)
     monkeypatch.setattr(ss.vc, "PlasmaVacuumInterface", NS(from_surface_data=lambda *a, **kw: (
         calls.append(kw) or interface)))
-    normal, actual_weights = ss.total_normal_field(Deck(), "coils", "state", "context", 1, 2,
-                                                   "caller precision", digits=5)
+    normal, actual_weights, jump = ss.total_normal_field(Deck(), "coils", "state", "context", 1, 2,
+                                                      "caller precision", digits=5)
     np.testing.assert_allclose(normal, [[.1, .2]])
+    np.testing.assert_allclose(jump, [[.1, .2]])
     assert actual_weights is weights
     assert calls == [{"digits": 5, "precision": "caller precision"}]
 
@@ -395,8 +401,9 @@ def test_vacuum_normal_field_uses_exact_zero_plasma_field_without_virtual_casing
     monkeypatch.setattr(ss.vc, "external_B_cartesian", lambda *a: data.B_total * .1)
     monkeypatch.setattr(ss.vc.PlasmaVacuumInterface, "from_surface_data",
                         lambda *a, **kw: pytest.fail("vacuum needs no virtual casing"))
-    normal, weights = ss.total_normal_field(inp, "coils", "state", "context", 1, 2, None)
+    normal, weights, jump = ss.total_normal_field(inp, "coils", "state", "context", 1, 2, None)
     np.testing.assert_allclose(normal, [[.1, .1]])
+    np.testing.assert_allclose(jump, [[-.99, -.99]])
     np.testing.assert_allclose(weights, [[.25, .75]])
     assert ss._vacuum_input(inp)
     assert not ss._vacuum_input(replace(inp, curtor=1.))

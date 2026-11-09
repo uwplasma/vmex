@@ -212,10 +212,15 @@ nfp1–nfp4 decks in ``examples/data/``.
 pwO contour variance
 ~~~~~~~~~~~~~~~~~~~~
 
-The squeezed poloidal-omnigenity map of `Liu et al. (2026)
-<https://arxiv.org/abs/2603.12139v1>`_ motivates
-:class:`~vmex.core.pwo.MappedPwOResidual`. With :math:`N=N_{\rm fp}`,
-:math:`x=\eta` on the left branch and :math:`x=2\pi-\eta` on the right, set
+A field is piecewise omnigenous (pwO) when it is omnigenous within each class of
+magnetic wells and the classes join compatibly; `Velasco et al. (2024)
+<https://arxiv.org/abs/2405.07634v2>`_ introduce the class and `Calvo et al.
+(2025) <https://arxiv.org/abs/2505.02546v3>`_ use it to remove the bootstrap
+current, and `Velasco et al. (2026) <https://arxiv.org/abs/2603.20125v2>`_ perturb
+a quasi-axisymmetric field into one. `Liu et al. (2026)
+<https://arxiv.org/abs/2603.12139v1>`_ give a squeezed coordinate map that turns
+the condition into a contour fit. With :math:`N=N_{\rm fp}`, set :math:`x=\eta`
+on the left branch and :math:`x=2\pi-\eta` on the right, and
 
 .. math::
 
@@ -225,17 +230,13 @@ The squeezed poloidal-omnigenity map of `Liu et al. (2026)
    \zeta_{B,L}&=[\pi-S(x,\gamma+\kappa)-D(x)]/N,\\
    \zeta_{B,R}&=[\pi+S(x,-\gamma+\kappa)+D(x)]/N.
 
-The signed :math:`\iota=d\theta_B/d\zeta_B` is retained. The mapped angle
-:math:`\gamma` differs from the field-line label
-:math:`\alpha=\theta_B-\iota\zeta_B`. The example fixes
-:math:`(a,b,c)=(0.3,0,-2)` and :math:`\eta\in[2.8,2\pi-2.8]`.
-A conservative positive-Jacobian bound and a span shorter than one field
-period certify the cut against folding and duplicate toroidal coverage.
-The cut covers approximately 71.8% of Boozer-coordinate area; its fraction
-of the eta interval is only 10.9%. Neither number is an orbit fraction.
-
-For mapped field :math:`\mathcal B_{sij}`, uniform endpoint-free gamma
-nodes and midpoint eta nodes, the residual is
+The map uses :math:`|\iota|`; a negative :math:`\iota` reads it at
+:math:`-\zeta_B`, so a mirror image has the same residual. The mapped angle
+:math:`\gamma` is not the field-line label :math:`\alpha=\theta_B-\iota\zeta_B`.
+The parameters :math:`(a,b,c)` and the cut :math:`\eta\in[\eta_{\min},2\pi-\eta_{\min}]`
+are free variables of the optimization (:ref:`objectives-mapped-pwo`). For mapped field
+:math:`\mathcal B_{sij}` on uniform endpoint-free gamma nodes and midpoint eta
+nodes, the residual is
 
 .. math::
 
@@ -244,45 +245,87 @@ nodes and midpoint eta nodes, the residual is
    \qquad
    f_{\rm map}=\sum_{sij}r_{sij}^2
      =\sum_s\frac{w_s}{B_{00,s}^2}
-       \left\langle\operatorname{Var}_\gamma\mathcal B_s\right\rangle_\eta.
+       \left\langle\operatorname{Var}_\gamma\mathcal B_s\right\rangle_\eta,
 
-Here :math:`\sum_s w_s=1`. The live Boozer mean :math:`B_{00,s}>0`
-makes the objective invariant under field rescaling; its derivative is included.
-An explicit ``b_ref`` can instead supply a frozen reference. Discrete Parseval
-identifies the gamma variance with power in nonconstant gamma harmonics.
-There is no Jacobian weight, so this is neither a physical-area nor a bounce-time
-average. Requested surfaces can be equally spaced; Boozer evaluation uses the
-nearest VMEC half-mesh surfaces and reports their actual radii.
+with :math:`\sum_s w_s=1` and the live Boozer mean :math:`B_{00,s}>0`, so the
+objective is invariant under field rescaling. There is no Jacobian weight: this
+is neither a physical-area nor a bounce-time average.
 
-The **pwO optimization** uses the PO–pwO contour construction. In `Velasco et al. (2024)
-<https://arxiv.org/abs/2405.07634v2>`_, pwO requires field-line-independent action
-within each well class and compatible transitions between classes. These
-conditions need independent checks; a low contour-fit residual is insufficient.
+The map is one-to-one on the torus when :math:`\zeta_B` increases along each line
+of constant :math:`\theta_B` and the line spans less than one field period; the
+code checks both on the nodes, and requires :math:`c<-1/\pi` and a positive
+Jacobian. Equal-field points on the two branches are separated by
+:math:`\Delta\zeta_B=2D(x)/N`, so a common monotone branch profile gives
+field-line-independent bounce separation, the construction behind `Landreman and
+Catto (2012) <https://arxiv.org/abs/1112.5725>`_. A small variance alone does not
+establish common extrema, complete wells, compatible transitions or radial
+action behavior, and it does not certify confinement: pair the residual with a
+mirror ceiling, a transform floor and an independent neoclassical (NEO) or particle-tracing check.
 
-Action invariance requires more. At fixed energy and magnetic moment,
-vanishing bounce-averaged radial drift requires
-:math:`\partial_\alpha J=0`. Equal-field points on the two ideal mapped
-branches have separation :math:`\Delta\zeta_B=2D(x)/N` along a field line.
-A common monotone branch profile can therefore give field-line-independent
-bounce separation for wells entirely inside the mapped region, the
-construction underlying `Landreman and Catto (2012)
-<https://arxiv.org/abs/1112.5725>`_. Small sampled variance alone establishes
-neither that profile nor common extrema, complete wells, compatible well
-transitions or radial action behavior. It does not certify omnigenity,
-piecewise omnigenity, quasi-isodynamicity or particle confinement.
 
-The aspect-ratio-6, two-period example combines this contour fit with signed-
-transform and mirror controls. Independently refined mean
-:math:`Q=\epsilon_{\rm eff}^{3/2}` falls by 52.56% from its near-circle seed;
-a separate paired 256-alpha experiment reduces weighted 10 ms loss from
-100% to 6.73% at one launch surface, at common volume-RMS field and minor radius.
-These are measurements of the combined objective, not a bound from mapped
-variance to Q or losses. QA preconditioning does not remove this limitation:
-five NFP3 pwO steps lowered the variance by 26%, but mean Q rose from
-3.41e-6 to 2.97e-3, above the near-circle value 5.02e-4. Independent
-transport checks remain essential. A NEO-screened quarter step instead
-retains an 86.8% mean-Q reduction from the NFP3 near-circle seed. The README shows the retained
-boundary, unfilled Boozer contours and measured loss curves.
+.. _confinement-pwo-bootstrap:
+
+Bootstrap current of a pwO field
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In the :math:`1/\nu` regime the parallel bootstrap current is
+:math:`\langle j_\parallel B\rangle\propto G_{\rm bs}` times the profile gradients
+(`Shaing and Callen 1983 <https://doi.org/10.1063/1.864108>`_; `Nakajima et al.
+1989 <https://doi.org/10.1088/0029-5515/29/4/006>`_). With Boozer covariant
+components :math:`G` (toroidal) and :math:`I` (poloidal, the enclosed current),
+:math:`\xi=\sqrt{1-\lambda B}` and :math:`\langle\cdot\rangle` the flux-surface average,
+
+.. math::
+
+   G_{\rm bs}=-\frac{f_s+\langle uB^2\rangle}{f_t},\qquad
+   f_s=\frac{3\langle B^2\rangle}{4}\int_0^{1/B_{\max}}
+       \frac{\lambda\langle g_4\rangle}{\langle\xi\rangle}\,d\lambda,
+
+.. math::
+
+   \mathbf B\!\cdot\!\nabla u=-(\mathbf B\times\nabla\psi)\!\cdot\!\nabla B^{-2},\qquad
+   \mathbf B\!\cdot\!\nabla(g_4/\xi)=+(\mathbf B\times\nabla\psi)\!\cdot\!\nabla\xi^{-1},
+
+with :math:`u=g_4=0` where :math:`B=B_{\max}`, the global maximum. Quasi-axisymmetry gives
+:math:`G_{\rm bs}=G/\iota`, and any omnigenous field gives
+:math:`(MG+NI)/(\iota M-N)` (`Landreman and Catto 2012
+<https://arxiv.org/abs/1112.5725>`_), which is :math:`-I` for QI. Helander, Geiger and
+Maassberg (2011) relate the stellarator bootstrap current to the tokamak value.
+
+`Calvo et al. (2025) <https://arxiv.org/abs/2505.02546v3>`_ evaluate this for a pwO field
+whose :math:`B=B_M` region is bounded by two families of contours
+:math:`\theta-a_i\zeta=\text{const}`. Writing :math:`\chi_i` for the indicator of
+region :math:`i`, the part of :math:`\langle j_\parallel B\rangle` proportional to
+:math:`G` is proportional to
+
+.. math::
+
+   \Delta=\sum_i\frac{\langle\chi_i\rangle}{\iota-a_i},
+
+and the enclosed-current part is removed by :math:`I(0)=0`. The bootstrap current
+vanishes for arbitrary profiles if and only if :math:`\Delta=0`, which needs
+:math:`\iota-a_1` and :math:`\iota-a_2` of opposite sign.
+
+The mapped field of :ref:`confinement-mapped-pwo` has poloidally closed contours and a
+bounce length :math:`2D(\eta)/N` independent of the field line, so its :math:`\Delta`
+vanishes for every :math:`(a,b,c,\eta_{\min})` and :math:`\iota`. The mapped
+target therefore carries zero bootstrap current by construction. The current of an
+optimized boundary comes from the unmapped band between the cut contour of one period
+and the next, where :math:`B_{\max}` lives. A flat band with
+:math:`B=\text{const}` is sufficient for :math:`\Delta=0`, not necessary. With
+``BOOTSTRAP_TERM = "band"`` the optimizer adds
+
+.. math::
+
+   r^{\rm band}_{sjk}=\sqrt{\frac{w_b\,w_s}{N_\gamma N_{\rm band}}}
+     \frac{B_{sjk}-\overline{B}_s}{B_{00,s}},
+
+the spread of :math:`B` over :math:`N_{\rm band}` nodes per gamma line across the band
+(:class:`~vmex.core.pwo.FreeMapProblem`, ``band_weight`` :math:`=w_b`). The price is a
+higher edge :math:`\epsilon_{\rm eff}`. Check the current with the finite-collisionality
+DKX :math:`\langle j_\parallel B\rangle`, not with the 1/nu geometry alone: a reduced
+:math:`G_{\rm bs}` does not by itself guarantee a smaller current at reactor collisionality.
+
 
 Bounce action
 ~~~~~~~~~~~~~
@@ -436,6 +479,65 @@ squash-and-shuffle construction. It is the continuation target analogous to
 the published :math:`g_J`: it establishes a favorable direction without
 asking a local optimizer to cross actual-well topology changes. The final
 :class:`~vmex.core.maxj.MaximumJResidual` remains the physical certificate.
+
+Drift surfaces
+~~~~~~~~~~~~~~
+
+Maximum-J is a local statement about :math:`\partial J/\partial s`. The
+global statement is that bounce centres stay inside the plasma. For positive
+charge in :math:`\mathbf B=\nabla\psi\times\nabla\alpha`, the bounce-centre
+motion of a trapped particle of fixed pitch is
+
+.. math::
+
+   \frac{ds}{dt} = \frac{1}{\tau}\frac{\partial J}{\partial\alpha},
+   \qquad
+   \frac{d\alpha}{dt} = -\frac{1}{\tau}\frac{\partial J}{\partial s},
+
+with :math:`\tau` the bounce time and the dimensionless time
+:math:`t = t_{\rm phys}\,m v^2/(Z e\,\psi_{\rm edge})`; the opposite charge or
+orientation reverses the direction of travel and leaves the curves unchanged
+(W. Sengupta, A. Bhattacharjee and S. Buller, "Symmetry-agnostic stellarators
+for collisionless confinement", arXiv:2608.20042 (2026), Eq. (4)). The ratio
+of the two equations is the action-transport law :math:`dJ/d\alpha=0`, so
+orbits follow contours of :math:`J(s,\alpha)`: the drift surfaces. An orbit
+that reaches :math:`s=1` is a lost particle.
+
+:func:`~vmex.core.maxj.drift_surfaces_from_boozer` samples :math:`J` and
+:math:`\tau` on the Boozer surfaces and a uniform :math:`\alpha` grid. On each
+traced line it keeps the deepest usable well that starts within one field
+period of the first, because later wells belong to other field-line labels.
+:func:`~vmex.core.maxj.drift_orbits` fits the samples with a Fourier series in
+:math:`\alpha` times a polynomial in :math:`s` and integrates the equations
+with fixed-step RK4. Everything is ``jnp``, so the largest orbit radius
+``s_max`` and the conservation of :math:`J` along each orbit are
+differentiable functions of the Boozer spectrum. The field-line trace must
+close a poloidal transit: the default ``num_periods=12`` covers
+:math:`\iota \gtrsim n_{fp}/12`; a shorter trace leaves :math:`J` undefined
+and the orbit NaN.
+
+:class:`~vmex.core.maxj.DriftConfinementResidual` turns this into an
+objective. For every physical pitch, launch radius :math:`s_0` and launch
+label, it integrates one orbit for a fixed physical window and returns the
+reach
+
+.. math::
+
+   R = \tanh\frac{\max(\hat s - s_0,\,0)}{1 - s_0},
+
+where :math:`\hat s` is a log-sum-exp smooth maximum of the orbit radius. The
+smooth maximum overshoots the true maximum by up to :math:`\ln n_t/k` over
+:math:`n_t` orbit samples with sharpness :math:`k`, so a drift surface that
+stays on its flux surface has a small constant floor instead of zero; one
+that touches the LCFS has a reach of about 0.76. Its weighted mean over pitches and orbits
+(``gamma_w``) is a smooth version of the reach proxy :math:`\Gamma_W` of
+arXiv:2608.20042. Orbits whose launch point has no trapped well are passing
+particles and contribute nothing. The optional ``excursion_weight`` adds weak
+rows on the spread of :math:`J` along each surface relative to its radial
+slope; they need no orbit integration. The bounce-averaged model has no
+finite orbit width, so keep :math:`s_0` well inside the plasma and check the
+result with guiding-centre tracing. ``drift_surfaces.py`` shows the orbits of
+a quasi-axisymmetric equilibrium and the gradient of ``s_max``.
 
 ``QI_maxJ_continuation.py`` starts from the bundled ``nfp = 3`` QI
 equilibrium, retains a magnetic-well target, and ramps a negative slope

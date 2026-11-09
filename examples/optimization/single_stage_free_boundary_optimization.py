@@ -271,7 +271,7 @@ def field_from_u(u):
 params = im.params_from_input(inp)
 config = vj.make_free_boundary_config(
     inp, field0, ns=NS, ftol=FTOL, max_iterations=NITER,
-    adjoint_tol=1.0e-8, adjoint_solver="boundary_schur",
+    adjoint_tol=1.0e-8,
     field_from_parameters=field_from_u)
 solver_context = im.runtime_from_params(params, config.implicit)
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)

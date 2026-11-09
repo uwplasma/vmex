@@ -227,7 +227,11 @@ the Jacobian. Set
 ``jacobian_batch_size=1`` for the serial pass when peak memory, not
 throughput, is the binding constraint; ``None`` is the widest and the most
 memory-hungry. ``adjoint_tol`` and ``adjoint_maxiter`` control the certified
-Krylov solves.
+Krylov solves.  The block adjoint is accepted when its residual is below
+``10 * adjoint_tol * ||rhs||`` or at the round-off level of the residual
+(10 eps ``|| |J|^T |mu| ||``), whichever is larger, so a right-hand side that
+is small against the multiplier, such as the energy ``wb``, does not fall
+through to the Krylov solve.
 
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses
@@ -462,14 +466,15 @@ plasma--vacuum root. Every status-0 state is anchored there (to
 ``refine_tol``, 1e-10 by default), so its value and its adjoint refer to the
 same point; VMEC's ``ftol`` alone leaves the state off that root along weakly
 damped directions.
-The certified whole-state GCROT transpose remains the default.
-``adjoint_solver="boundary_schur"`` selects the advanced boundary-Schur lane, which
+The default ``adjoint_solver="boundary_schur"`` needs no tuning: it
 eliminates the block-tridiagonal radial bulk and solves only the evolved-edge
-correction before checking the full coupled residual. Local three-surface
-rows and a pivoted sparse band solve reduce its cold cost substantially, but
-local-row compilation still keeps it opt-in. It is a host lane: under an
-outer ``jax.jit`` the pullback warns and uses the staged coupled GCROT solve
-instead, so call the objective eagerly to keep it. ``device="auto"`` uses the CPU
+correction before checking the full coupled residual. Set
+``"coupled_gcrot"`` only to cross-check a suspect gradient, or when the
+default's banded factor of ``ns`` dense per-surface blocks does not fit host
+memory: GCROT is matrix-free but may not converge on 3-D decks. The default is a
+host lane: under an outer ``jax.jit`` the pullback runs it behind a
+``jax.pure_callback`` on the saved root, so jit and eager calls take the same
+solver and gradient. ``device="auto"`` uses the CPU
 for this response on accelerator hosts; an explicit ``device="gpu"`` or
 process-wide JAX placement overrides that measured lower-memory default.
 
@@ -648,6 +653,8 @@ spatial derivative. Third spatial derivatives and their parameter VJPs remain
 expensive; the examples print progress before each order and use compact grids
 for a bounded cold run.
 
+.. _optimization-low-transport:
+
 Low-transport optimization
 --------------------------
 
@@ -655,81 +662,41 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 
    python examples/optimization/pwO_optimization.py
 
-The file-level settings select the input, output directory, resolution and
-iteration budget. The default sets ``NFP=2`` and edits ``input.minimal_seed_nfp4`` in memory:
-major radius 1 m, minor radius 1/6 m, and a helical perturbation of 5% of the
-minor radius. For NFP1 the near-circle seed retains a physical n=2 harmonic.
-NFP1 and NFP3 use a QA precursor, followed by five pwO steps and
-NEO-constrained backtracking. NFP2 and NFP4 use the direct pwO mode ladder.
-Boundary modes 1 then 2 share NS35, M5/N5, force tolerance 1e-12 and a
-2000-iteration solver cap. Bounded least squares uses implicit residual
-Jacobians, optimizer ``ftol=1e-3`` and 15 iterations per stage.
-
-The pwO residual is combined with aspect ratio 6, a signed-iota
-floor of 0.42 and mirror ratio below 0.2. The mirror penalty targets 0.18;
-the final pwO stage has no symmetry or magnetic-well penalty. Live B00 normalization replaces
-reference-field arrays, and an automatic initial cost scale sets the term weight.
-Three equally spaced requests are snapped to actual VMEC half-mesh radii.
-The fixed map and cut are described in
-:ref:`confinement-mapped-pwo`.
-
-The vacuum run writes seed/trial WOUTs, ``input.trial`` and iteration history
-to ``low_transport/``. ``input.trial`` and ``wout_trial.nc`` retain the
-lowest-scoring feasible candidate; an infeasible terminal iterate cannot
-overwrite it. A matched NEO screen requires improvement at every sampled
-radius and at least 1% in their mean. That threshold is a selection rule,
-not an error estimate. Refine the equilibrium, Boozer transform and NEO
-calculation, then trace fresh particles to qualify a selected boundary.
-The README figure records such a comparison; running the example does not
-repeat its particle study.
-
-The one-period construction starts with the NFP2, mode-2 QA precursor.
-Representing the same physical boundary at NFP1 maps each toroidal index
-``n`` to ``2*n``, requiring boundary harmonics through n=4. An odd n=1
-perturbation breaks the two-period symmetry. Five pwO steps supply a
-direction; halving that step until NEO accepts retains a quarter step.
-It reduces pwO variance by 11.9% and mean Q by 65.6% relative to the
-near-circle seed, at A=6.007 and minimum signed iota=0.4198. This
-independent NS103/M7/N7 check finds a 67.0% mean-Q reduction and
-30.0% weighted alpha loss, against 100% in its near-circle seed. The
-vacuum driver automates this construction when ``NFP=1``; its NFP3
-path uses the same step control after a native three-period QA precursor.
-The NFP3 refined mean Q falls 87.2%, with paired losses down from 100% to
-26.8%. Fresh public runs changing only NFP completed in 562 s (NFP1) and
-516 s (NFP3), each below 3 GiB on eight logical CPUs.
+The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
+mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
+``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
+(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
+excursion, the edge-Jacobian ratio and the elongation. The map parameters
+``a, b, c, eta_min`` are optimized together with the boundary
+(:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
+The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
+add it. The verified boundary is re-solved on a finer radial grid and compared
+with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
+The pwO variance does not establish confinement; trace particles to qualify a
+boundary.
 
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
-Run the vacuum example first: pressure continuation requires its saved
-``low_transport/input.trial`` and writes ``low_transport_finite_beta/``.
-The zero-current pressure profile is proportional to ``1-s`` and targets
-0.5% volume-average beta. The saved vacuum WOUT starts pressure calibration;
-each pressure change is followed by a nonlinear equilibrium solve. The
-NFP2 continuation improves coarse mean Q by 26.6% in three iterations.
-NFP1 and NFP3 use a QA precursor at finite pressure, followed by five pwO
-steps and NEO backtracking. The original pressure-calibrated start remains
-in ``input.seed`` and ``wout_seed.nc``; the pwO start uses ``input.pwo_seed``
-and ``wout_pwo_seed.nc``. Independent NS103/M7/N7 checks find mean-Q
-reductions of 44.2% and 25.8%, with minimum iota 0.425 and 0.438. The full
-runs take 281 s and 348 s, below 3.3 GiB on eight logical CPUs.
-The direct NFP4 boundary polish fails NEO, including step fractions down
-to 1/64. Its calibrated seed is preserved and ``input.trial`` is not accepted.
-Finite-beta particle confinement and MHD stability remain unverified.
+Run the vacuum example first, with the same ``NFP`` and the magnetic well enabled
+(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.01`` and its WOUT; from a
+vacuum hill it does not reach a well). The zero-current pressure is
+proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
+and the beta error and a Mercier floor join the objective list. It uses the same
+``MAX_MODES`` ladder.
 
-``single_stage_optimization_pwO.py`` first fits coils to the fixed plasma,
-then adds the pwO residual to the joint boundary/coil objective. Coil
+``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
+pressure, and runs one finite-beta plasma stage with the pwO map free. It then
+fits coils to the fixed plasma and adds the pwO residual, with the map held,
+to the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius;
 dense geometry sampling checks constraints between field quadrature nodes.
-Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+Run the vacuum example first (``NFP = 4`` here; its plasma stage uses the same ``MAX_MODES`` ladder). Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
 keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
 still apply to supplied coils. The script requires
 ``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
-solve and its NEO transport at matched radial resolution. The held-coil
-transport screen compares with the preceding pwO run's ``input.seed``, using
-the final design's flux, pressure and current profiles for both equilibria.
-The fixed-boundary target comparison is also printed. At finite pressure,
+solve and its NEO transport at matched radial resolution. The fixed-boundary target comparison is also printed. At finite pressure,
 coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.

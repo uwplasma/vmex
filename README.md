@@ -1,28 +1,17 @@
 # VMEX
 
 [![PyPI version](https://img.shields.io/pypi/v/vmex.svg)](https://pypi.org/project/vmex/)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/github/license/uwplasma/vmex)](LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/uwplasma/vmex/ci.yml?branch=main&label=ci)](https://github.com/uwplasma/vmex/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
 [![Docs](https://img.shields.io/readthedocs/vmex/latest?label=docs)](https://vmex.readthedocs.io/en/latest/)
 
-VMEX is a JAX reimplementation of VMEC2000, the standard code for
-three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
-VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
-field driven by an MGRID table or coils), reproduces VMEC2000's iteration
-and writes standard `wout_*.nc` files. Because the solver is written in JAX,
-VMEX also differentiates the converged equilibrium through the implicit
-function theorem, so boundary, profile and coil parameters can be optimized
-with derivatives of the discrete equilibrium equations.
+VMEX is a JAX reimplementation of VMEC2000, the standard code for three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum field driven by an MGRID table or coils), reproduces VMEC2000's iteration and writes standard `wout_*.nc` files. Because the solver is written in JAX, VMEX also differentiates the converged equilibrium through the implicit function theorem, so boundary, profile and coil parameters can be optimized with derivatives of the discrete equilibrium equations.
 
-The goal is fast, differentiable and VMEC2000-compatible equilibria for
-stellarator optimization, including single-stage design, in which the plasma
-boundary and the coils are optimized together. VMEX also computes Boozer
-transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
-and stability diagnostics, and has a separate lane for open mirrors.
+The goal is fast, differentiable and VMEC2000-compatible equilibria for stellarator optimization, including single-stage design, in which the plasma boundary and the coils are optimized together. VMEX also computes Boozer transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity and stability diagnostics, and has a separate lane for open mirrors.
 
-- **Use existing workflows:** VMEC input decks and `wout_*.nc` output, `NS_ARRAY` multigrid
+- **Use existing workflows:** VMEC2000 `&INDATA` decks, VMEC++-style JSON inputs and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
 - **Design with gradients:** implicit scalar adjoints and residual Jacobians for SciPy, JAXopt or
   Optax, with quasisymmetry, quasi-isodynamic, Mercier, ballooning, bootstrap and maximum-`J` objectives.
@@ -56,8 +45,9 @@ radial preconditioner, polishing least squares, GMRES) and
 prints the interpreter, package versions and JAX devices; `vmex --test` solves a bundled QH deck
 end to end and writes its figures to `./vmex_test/`.
 
-Python 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, so a 3.11 environment
-resolves an older JAX; 3.12 or newer is recommended.
+Python 3.10, 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, JAX 0.7 and
+later need 3.11, and SciPy 1.16 needs 3.11, so an older interpreter resolves an older JAX and
+SciPy; 3.12 or newer is recommended. The `coils`, `neoclassical`, `turbulence` and `all` extras need Python 3.11 or newer.
 
 ### Optional packages for the full capabilities
 
@@ -73,8 +63,8 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.11` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.8.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.12` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.13.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
@@ -83,12 +73,12 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.27.0 | `pip install vmex` | `pip install "solvax>=0.27.0"` |
-| `booz_xform_jax` | 0.4.3 | `pip install vmex` | `pip install "booz_xform_jax>=0.4.3"` |
+| `solvax` | 0.35.1 | `pip install vmex` | `pip install "solvax>=0.35.1"` |
+| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.11 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.11"` |
+| `virtual-casing-jax` | 0.0.12 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.12"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
-| `dkx` | 2.8.0 | `vmex[neoclassical]` | `pip install "dkx>=2.8.0"` |
+| `dkx` | 2.13.0 | `vmex[neoclassical]` | `pip install "dkx>=2.13.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
@@ -225,6 +215,8 @@ to JAX optimizers, and `problem.evaluate(x)` reports solve effort and derivative
 [optimization guide](https://vmex.readthedocs.io/en/latest/howto/optimize-a-boundary.html) cover
 convergence checks, constraints, scaling and finite-difference verification.
 
+`axis_field(inp)` estimates the axis field before solving; compose it with `scale_input` to set a target field, or use `probe=True` for two coarse equilibrium solves.
+
 ## Ballooning stability
 
 The infinite-n ideal ballooning mode ([Dewar and Glasser 1983](https://doi.org/10.1063/1.864113),
@@ -275,61 +267,38 @@ Quasi-isodynamic designs at four field-period counts: the `|B|` contours close p
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
-### Low transport from a near-circular start
+### Quasi-isodynamic design with a self-consistent bootstrap current
 
-![Two-period boundary colored by magnetic-field strength, Boozer contours, transport and alpha losses](docs/_static/figures/readme_low_transport.webp)
+![Boundary and Boozer |B| before and after the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_shape.webp) ![Ambipolar E_r, bootstrap current and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_current.webp)
 
-**pwO optimization** minimizes the variation of |B| along contours of a squeezed
-omnigenous mapping,
-following the [PO–pwO construction](https://arxiv.org/abs/2603.12139v1):
+The bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field, and the Redl formula, which assumes quasi-axisymmetry, does not describe it (13 to 16 MA T/m² here against 0.3 to 1.7 from DKX). `QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to the [DKX](https://github.com/uwplasma/DKX) `<j·B>` at each surface's ambipolar ion-root `E_r` with QI shape stages at that fixed current (`max_mode` 1 then 3). It starts from the vacuum QI boundary `input.QI_nfp2_initial` at `β = 1.5 %` (needs `vmex[neoclassical]`; see the [neoclassical guide](docs/howto/neoclassical-transport.md)):
 
-$$
-f_{\mathrm{map}}=\sum_s \frac{w_s}{B_{00,s}^{2}}\left\langle\mathrm{Var}_{\gamma} B_s(\gamma,\eta)\right\rangle_{\eta}.
-$$
+```console
+python examples/optimization/QI_optimization_bootstrap_er.py
+```
 
-The mean field B₀₀ supplies the normalization. Aspect ratio 6, finite rotational
-transform and a mirror limit keep the search away from weak-transform or extreme-mirror solutions.
+| | seed (consistent current) | optimized |
+|---|---|---|
+| constructed-QI residual | 5.6e-3 | 2.0e-3 |
+| mirror ratio (limit 0.21) | 0.240 | 0.208 |
+| aspect ratio (limit 10) | 10.0 | 9.9 |
+| min \|ι\| (floor 0.5) | 0.56 | 0.59 |
+| β (target 1.5 %) | 1.50 % | 1.50 % |
+| rms(`<j·B>` equilibrium − DKX) / rms(DKX) | 1.8 % | 1.7 % |
 
-The two-period result lowers $Q = \epsilon_{\mathrm{eff}}^{3/2}$ by **52.6%** and alpha losses from **100% to 6.73%**.
-The vacuum particle comparison uses 256 paired 3.52 MeV alphas over 10 ms at a common
-volume-RMS field of 6 T and minor radius 1.7 m. Its β≈0.5% continuation lowers coarse Q another 26.6%.
-At finite beta, refined Q falls 44.2% (NFP1) and 25.8% (NFP3) after QA preconditioning; the NFP4 boundary polish fails NEO.
+The consistency error is taken on four kinetic surfaces, between which the profile is a monotone cubic through the DKX values; the script asserts it stays below 5 %. The final toroidal current is 269 kA. A full run takes 10 to 12 min on 8 CPU cores of a shared workstation, compilation included, and the CI smoke pass about 5 min ([figure script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
 
-![NFP 1–4 boundaries colored by magnetic-field strength, unfilled field contours and objective histories](docs/_static/figures/readme_low_transport_nfp.webp)
+### Piecewise omnigenity
 
-| Field periods | Aspect ratio | Minimum ι | Transport result |
-|---|---:|---:|---|
-| 1 | 6.007 | 0.421 | Refined mean Q −67.0%; QA precursor |
-| 2 | 6.003 | 0.494 | Refined mean Q −52.6% |
-| 3 | 6.006 | 0.418 | Refined mean Q −87.2%; QA precursor |
-| 4 | 6.001 | 0.438 | Refined mean Q −27.5% |
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
 
-The one-period construction uses a QA precursor, physical toroidal harmonics through n=4,
-and a NEO-screened pwO step. Its paired alpha losses fall from 100% to 30.0%.
-The three-period case follows the same QA-to-pwO path and lowers paired losses
-from 100% to 26.8%.
+![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 
-![Effective ripple, alpha losses and iota profiles compared with QA, QH, QP and the initial seeds; unfinished checks are marked](docs/_static/figures/readme_low_transport_comparison.webp)
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
-QH4 and QA2 have lower effective ripple than pwO2. The two-period field loses fewer alphas
-than QA2 (6.73% versus 24.12%); its difference from QH4 (7.97%) is unresolved within
-sampling uncertainty. All candidates target the same aspect ratio and iota floor;
-actual transforms differ, and only the pwO runs impose the mirror ceiling.
-QI refinement did not converge; its dashed iota profile is from the coarse equilibrium.
+The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
 
-Examples: [vacuum](examples/optimization/pwO_optimization.py),
-[finite beta](examples/optimization/pwO_optimization_finite_beta.py),
-[single stage](examples/optimization/single_stage_optimization_pwO.py).
-[Physics](docs/explanation/confinement.rst) · [workflow](docs/reference/optimization.rst) ·
-[figure generator](docs/_static/figures/sources/make_low_transport_figure.py).
-
-![Four-period pwO boundary colored by magnetic-field strength and fitted coils](docs/_static/figures/readme_low_transport_coils.webp)
-
-Joint vacuum optimization lowers the objective by 9.0%; the coils retain a 14.6%
-mean-Q reduction from the near-circle seed. The cold free boundary is 5.25 mm
-from the target. At β≈0.5%, the fit reaches 0.592% normal-field RMS error and
-4.90 mm displacement. Its mean Q improves 7.2%, with a 2.3% inner-radius increase
-that fails the strict transport screen.
+![pwO with and without the bootstrap band term: |B| in Boozer coordinates and on the boundary, DKX bootstrap current and alpha losses](docs/_static/figures/readme_pwo_bootstrap.webp)
 
 ### Free boundary with coils
 
@@ -585,15 +554,25 @@ and the [validation record](docs/explanation/validation.md).
 
 ## Comparison with MRX
 
-`python examples/vmex_mrx_comparison.py` (about 4 minutes, `pip install mrx`) relaxes the 2.5 %
+`python examples/vmex_mrx_comparison.py` relaxes the 2.5 %
 beta QA deck with [MRX](https://github.com/ToBlick/mrx), which does not assume nested surfaces,
 starting from the VMEX ns = 65 field.
+
+Install the MRX equilibrium solver from its source repository; the PyPI package with that name
+is a different project. The example uses this revision:
+
+```console
+pip install "git+https://github.com/ToBlick/mrx@dd1942e9efae05c57d62c02dc3207f87f0704f18"
+```
 
 ![VMEX flux surfaces and MRX Poincare sections, iota, toroidal current and pressure for the 2.5% beta QA deck](docs/_static/figures/readme_vmex_mrx_comparison.webp)
 
 - Traced iota, enclosed current and pressure agree with VMEX.
 - Near the axis VMEX iota still moves with ns: 0.188, 0.176, 0.166 at ρ = 0.1 for ns = 65, 129,
-  257, against 0.166 from DESC.
+  257. These three values do not establish its continuum limit. A matched, independently
+  converged DESC reference has not been established for this deck.
+- MRX reconstructs pressure from its relaxed field rather than imposing VMEX's pressure profile.
+  This is a consistency comparison from a shared initial field, not a matched-profile validation.
 
 ## Validation and speed
 
@@ -605,10 +584,11 @@ starting from the VMEX ns = 65 field.
   ([performance records](docs/reference/performance.rst), VMEX 0.8.1).
 - **Speed.** On those decks (Apple M4 CPU, one run each) VMEX took 0.50–1.34 times the VMEC2000
   wall time with a warm compilation cache and 0.60–3.13 times with it cleared; the difference is
-  mostly XLA compilation, which a repeated solve in one process skips. In the older
-  [ns = 201 table](https://vmex.readthedocs.io/en/latest/reference/performance.html) (VMEX 0.3.0)
-  VMEC++ was faster than VMEX on the largest 3-D decks it completed. On two RTX A4000 GPUs no
-  shipped deck or problem size ran faster than on the CPU.
+  mostly XLA compilation, which a repeated solve in one process skips.
+
+  CPU/GPU performance depends on the problem, software versions and cache state.
+  Measure complete solves and derivatives on your hardware using the
+  [performance guidance](https://vmex.readthedocs.io/en/latest/reference/performance.html#measuring-a-workload).
 - **Derivatives.** CI compares adjoint gradients with central finite differences: four Solov'ev
   gradients to `1e-6` relative and a 3-D `li383` boundary gradient to `2e-4`. One warm
   value-plus-Jacobian evaluation of a 48-parameter QA problem took 16.6 s on an Apple M4
@@ -641,6 +621,13 @@ scores VMEX, VMEC2000 and DESC against them.
 - With `tau != 0` the `iota = 2` family is degenerate: VMEX converges to a neighbouring
   equilibrium that differs by 8e-4 at every resolution. See the
   [validation record](docs/explanation/validation.md#exact-equilibria).
+- [Sengupta et al. (2026)](https://arxiv.org/abs/2610.28466) provide exact nonsymmetric vacuum
+  fields with nested surfaces. From their boundary and flux alone, the bundled
+  [checks](tests/test_exact_vacuum.py) recover the transform to 5.8e-5 (paraboloidal) and
+  5.4e-5 (ellipsoidal, without stellarator symmetry) for `ns = 65`, `mpol = 7`, `ntor = 14`
+  over `0.2 < s < 0.9`. The near-axis error remains 3e-4–1e-3.
+- The sheared finite-pressure families remain a failed recovery benchmark for VMEX and VMEC2000;
+  the exact-reference identities and the successful integer-family solves do not validate them.
 
 ## Performance and parallel execution
 
@@ -650,11 +637,17 @@ optimization. CPU and GPU performance depend on resolution and workload; the dat
 in the [performance reference](https://vmex.readthedocs.io/en/latest/reference/performance.html)
 and the [benchmark records](benchmarks/).
 
+Optimizations need no worker settings. Finite-difference probes already use every
+available CPU, and an exact-Jacobian run measures no faster on 36 cores than on 1, so
+it stays one process. Independent starts on every core are an
+[advanced option](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html#optimizations-on-a-full-node).
+
 `vj.parallel.solve_ensemble(inputs, workers=None)` solves independent cases concurrently and returns
 results in input order, each identical to solving that input alone; `workers=1` is the serial
 baseline. Set worker and device budgets with the
-[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html). Multi-device
-kernel and derivative tests do not yet establish a scalable distributed nonlinear equilibrium solve.
+[ensemble guide](https://vmex.readthedocs.io/en/latest/howto/parallel-ensembles.html).
+
+Defaults for CPU, GPU and whole nodes, and when to change them: [running on CPU, GPU and whole nodes](https://vmex.readthedocs.io/en/latest/howto/run-on-gpu.html#running-on-cpu-gpu-and-whole-nodes).
 
 ## Running the examples
 

@@ -6,7 +6,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from vmex.core import pwo
 from vmex.core.pwo import (
+    FreeMapProblem,
     MappedPwOResidual,
     mapped_pwo_residual_from_boozer,
     squeezed_pwo_coordinates,
@@ -248,6 +250,28 @@ def test_locally_nonfolding_map_with_global_overlap_is_rejected():
         mapped_pwo_residual_from_boozer(**_spectrum(), b_ref=1.5, eta_min=eta_min)
 
 
+def test_map_validity_is_the_exact_one_to_one_condition():
+    # The old global bound rejected the first map; a real span near one period is fine.
+    field = dict(bmnc_b=[[1., .1, .05, .02]], xm_b=np.array([0, 0, 1, 1]),
+                 xn_b=np.array([0, 3, 0, 3]), iota_b=[.8], nfp=3, c=-2.)
+    wide = mapped_pwo_residual_from_boozer(a=.4, b=.4, **field)
+    assert wide["toroidal_span"][0] < 2*np.pi/3 and wide["jacobian_min"][0] > 0
+    assert bool(wide["valid"][0])
+    with pytest.raises(ValueError):  # a line longer than one field period covers points twice
+        mapped_pwo_residual_from_boozer(a=.6, b=0., **field)
+
+
+def test_mapped_residual_is_the_same_for_a_mirror_image():
+    # zeta -> -zeta flips iota and n; the device, hence the residual, is unchanged.
+    field = dict(bmnc_b=[[1., .1, .05, .02]], bmns_b=[[0., .03, -.02, .01]],
+                 xm_b=np.array([0, 0, 1, 1]), nfp=3)
+    xn = np.array([0, 3, 0, 3])
+    right = mapped_pwo_residual_from_boozer(xn_b=xn, iota_b=[.7], **field)
+    left = mapped_pwo_residual_from_boozer(xn_b=-xn, iota_b=[-.7], **field)
+    np.testing.assert_allclose(left["total"], right["total"], rtol=1e-13)
+    assert right["total"] > 0
+
+
 def test_mapped_residual_jvp_vjp_and_independent_finite_difference():
     # Different surface weights, both Fourier parities and signed live iota.
     x = jnp.array([1.5, .08, -.06, 1.7, .04, -.09,
@@ -263,7 +287,9 @@ def test_mapped_residual_jvp_vjp_and_independent_finite_difference():
         values = np.asarray(values)
         gamma = 2*np.pi*np.arange(12)[None, :, None]/12
         eta = (2.8+(2*np.pi-5.6)*(np.arange(10)+.5)/10)[None, None, :]
-        theta, zeta = _map(gamma, eta, iota=values[12:14, None, None])
+        iota = values[12:14, None, None]
+        theta, zeta = _map(gamma, eta, iota=np.abs(iota))
+        zeta = np.sign(iota)*zeta
         phase = theta[..., None]*modes["xm_b"]-zeta[..., None]*modes["xn_b"]
         field = np.sum(values[:6].reshape(2, 1, 1, 3)*np.cos(phase)
                        + values[6:12].reshape(2, 1, 1, 3)*np.sin(phase), axis=-1)
@@ -493,3 +519,179 @@ def test_transport_backtrack_requires_every_radius_physics_and_variance(tmp_path
     else:
         assert len(monitor.report["backtracking"]) == 6
         assert not monitor.report["transport_screen_passed"]
+
+
+def test_limited_map_turns_any_parameters_into_a_valid_map():
+    wild = dict(a=5., b=3., c=-.1, eta_min=.2)
+    out = mapped_pwo_residual_from_boozer(**_spectrum(2), b_ref=1.5, limit_map=True, **wild)
+    assert bool(np.all(out["valid"])) and np.all(np.isfinite(out["residuals1d"]))
+    grad = jax.grad(lambda a: mapped_pwo_residual_from_boozer(
+        **_spectrum(2), b_ref=1.5, limit_map=True, a=a, b=.2, c=-2., eta_min=2.8)["total"])(.3)
+    assert np.isfinite(float(grad))
+
+
+def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch):
+    spec = _spectrum(2)
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
+    shift = np.linspace(.01, .03, flat.size)
+
+    class Stage:
+        x0 = np.zeros(2)
+
+        def residual(self, x):
+            return np.concatenate((flat + shift*x[0], [x[1] - 1.]))
+
+        def residual_jac(self, x):
+            return np.column_stack((np.append(shift, 0.), np.append(np.zeros(flat.size), 1.)))
+
+    class Equilibrium:
+        state = runtime = None
+
+    mapped = MappedPwOResidual((.3, .6))
+    np.testing.assert_allclose(mapped.spectrum_state(None, None), flat)
+    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(a=.3, b=.1, c=-2., eta_min=2.8),
+                             ("a", "b", "c", "eta_min"), weight=10.)
+    z = problem.x0 + .05
+    jac = problem.residual_jac(z)
+    fd = np.column_stack([(problem.residual(z + h) - problem.residual(z - h)) / 2e-6
+                          for h in 1e-6*np.eye(z.size)])
+    np.testing.assert_allclose(jac, fd, rtol=1e-5, atol=1e-7)
+    values = problem.values(z)
+    for name, (low, high) in FreeMapProblem.MAP_BOUNDS.items():
+        assert low < values[name] < high
+
+
+# Independent collisionless toy checks; finite-collisionality current remains separate.
+def _bootstrap_ratio(B, iota, nfp, n_lambda=32):
+    """-iota Delta_G/f_t: u, h solved per Fourier mode and zeroed at B_max."""
+    nt, nz = B.shape
+    weight = np.exp(1e3*(B-B.max())/np.ptp(B))
+    weight /= weight.sum()
+    m = (np.fft.fftfreq(nt)*nt)[:, None]
+    k = (np.fft.fftfreq(nz)*nz*nfp)[None, :]
+    d = iota*m+k
+    coef = np.where((m != 0) | (k != 0), m*d/np.where(d == 0, 1., d*d+(1e-3*iota*m)**2), 0.)
+
+    def solve(f):
+        g = np.fft.ifft2(coef*np.fft.fft2(f, axes=(-2, -1)), axes=(-2, -1)).real
+        return g-np.sum(weight*g, axis=(-2, -1), keepdims=True)
+
+    inverse = B**-2
+    volume = inverse.mean()
+    nodes, quadrature = np.polynomial.legendre.leggauss(n_lambda)
+    t = .5*(nodes+1)
+    lam = (1-t*t)/B.max()
+    xi = np.sqrt(1-lam[:, None, None]*B)
+    passing = (xi*inverse).mean(axis=(1, 2))
+    g4 = (xi*inverse*solve(1/xi)).mean(axis=(1, 2))/passing
+    measure = .75/volume/B.max()*quadrature*t*lam
+    f_t = 1-np.sum(measure*volume/passing)
+    delta_g = np.sum(measure*g4)-solve(inverse).mean()/volume
+    return -iota*delta_g/f_t
+
+
+def _prototype(w2, *, q=6, nfp=2, t1=-.3, t2=1.8, n=128):
+    """Two-level parallelogram field and its corner-connecting iota."""
+    w1 = .3*np.pi/nfp
+    iota = t2/(np.pi*(1-t1*t2)/(nfp*w1)-1)
+    theta, zeta = np.meshgrid(2*np.pi*np.arange(n)/n, 2*np.pi*np.arange(n)/(nfp*n), indexing="ij")
+    bump = sum(np.exp(-((u+t1*v)/w1)**(2*q)-((v+t2*u)/w2)**(2*q))
+               for u in (zeta-np.pi/nfp+2*np.pi/nfp*j for j in (-1, 0, 1))
+               for v in (theta-np.pi+2*np.pi*j for j in (-1, 0, 1)))
+    return .95+.1*np.minimum(bump, 1.), iota
+
+
+def _mapped_field(a, b, c, eta_min, iota, nfp, profile, band, n=128):
+    """B(eta) on the mapped domain and ``band(theta, zeta)`` everywhere else."""
+    theta = 2*np.pi*np.arange(n)/n
+    zeta = 2*np.pi*np.arange(n)/(nfp*n)
+    eta = np.linspace(eta_min, 2*np.pi-eta_min, 4001)
+    lines = np.asarray(squeezed_pwo_coordinates(theta[:, None], eta[None], iota=iota, nfp=nfp,
+                                                a=a, b=b, c=c)["zeta"])
+    B = band(*np.meshgrid(theta, zeta, indexing="ij"))
+    for row, line in enumerate(lines):
+        assert np.all(np.diff(line) > 0) and line[-1]-line[0] < 2*np.pi/nfp
+        for shift in 2*np.pi/nfp*np.arange(-1, 2):
+            inside = (zeta+shift >= line[0]) & (zeta+shift <= line[-1])
+            B[row, inside] = profile(np.interp(zeta[inside]+shift, line, eta))
+    return B
+
+
+def test_oracle_reproduces_two_level_prototype_zero_at_w2_pi():
+    zero, iota = _prototype(np.pi)
+    half, _ = _prototype(.5*np.pi)
+    assert abs(_bootstrap_ratio(zero, iota, 2)) < 5e-3
+    assert _bootstrap_ratio(half, iota, 2) > .05
+    tokamak = 1+.1*np.cos(2*np.pi*np.arange(64)/64)[:, None]*np.ones((1, 64))
+    assert _bootstrap_ratio(tokamak, .42, 2) == pytest.approx(1., abs=1e-2)
+
+
+MAPS = [(2, .3, 0., -2., 2.9, .45), (2, .6, .8, -2., 3., .45), (3, .3, 0., -.6, 2.5, .7),
+        (3, .8, .5, -3., 3.05, .42), (3, .4, -.5, -1., 2.4, .5)]
+
+
+@pytest.mark.parametrize("nfp,a,b,c,eta_min,iota", MAPS)
+def test_mapped_field_with_flat_band_has_zero_bootstrap_for_every_map(nfp, a, b, c, eta_min, iota):
+    def flat(theta, zeta):
+        return np.full(theta.shape, 1.1)
+    two_level = _mapped_field(a, b, c, eta_min, iota, nfp, lambda e: .9+0*e, flat)
+    smooth = _mapped_field(a, b, c, eta_min, iota, nfp, lambda e: 1+.1*np.cos(e),
+                           lambda t, z: np.full(t.shape, 1+.1*np.cos(eta_min)))
+    assert abs(_bootstrap_ratio(two_level, iota, nfp)) < 3e-3
+    assert abs(_bootstrap_ratio(smooth, iota, nfp)) < 1e-3
+
+
+@pytest.mark.parametrize("nfp,a,b,c,eta_min,iota", MAPS[:2])
+def test_band_islands_carry_the_bootstrap_current(nfp, a, b, c, eta_min, iota):
+    # B_max only on part of the band: lines through the gaps join two wells.
+    def islands(theta, zeta):
+        return np.where(np.cos(theta) > 0, 1.1, .9)
+    field = _mapped_field(a, b, c, eta_min, iota, nfp, lambda e: .9+0*e, islands)
+    assert abs(_bootstrap_ratio(field, iota, nfp)) > .03
+
+
+def _kernel(x, nband=6):
+    out = mapped_pwo_residual_from_boozer(
+        bmnc_b=x[:3][None], bmns_b=x[3:6][None], xm_b=np.array([0, 1, 1]),
+        xn_b=np.array([0, 0, 3]), iota_b=x[6:7], nfp=3, a=x[7], eta_min=x[8], b=.2,
+        ngamma=8, neta=6, nband=nband)
+    return out
+
+
+def test_band_rows_match_a_manual_band_evaluation():
+    x = jnp.array([1.4, .07, -.05, 0., .02, .03, -.66, .35, 2.9])
+    out = _kernel(x)
+    assert bool(out["valid"][0])
+    gamma = 2*np.pi*np.arange(8)/8
+    right = np.asarray(squeezed_pwo_coordinates(gamma, 2*np.pi-2.9, iota=.66, nfp=3, a=.35, b=.2)["zeta"])
+    left = np.asarray(squeezed_pwo_coordinates(gamma, 2.9, iota=.66, nfp=3, a=.35, b=.2)["zeta"])+2*np.pi/3
+    zeta = -(right[:, None]+(left-right)[:, None]*(np.arange(6)+.5)/6)   # negative iota: mirror
+    theta = gamma[:, None]
+    field = 1.4+.07*np.cos(theta)-.05*np.cos(theta-3*zeta)+.02*np.sin(theta)+.03*np.sin(theta-3*zeta)
+    expected = (field-field.mean())/1.4/np.sqrt(48)
+    np.testing.assert_allclose(out["band_residuals1d"], expected.ravel(), atol=1e-14)
+    assert float(out["band_total"]) > 0
+
+
+def test_flat_band_gives_zero_rows_and_axisymmetric_field_does_not():
+    flat = _kernel(jnp.array([1.4, 0., 0., 0., 0., 0., .66, .3, 2.8]))
+    assert float(flat["band_total"]) < 1e-28
+    assert float(_kernel(jnp.array([1.4, .1, 0., 0., 0., 0., .66, .3, 2.8]))["band_total"]) > 1e-4
+
+
+def test_band_rows_derivatives_match_finite_differences():
+    x = jnp.array([1.4, .07, -.05, 0., .02, .03, .66, .35, 2.9])
+    direction = jnp.array([.1, -.2, .3, .1, -.1, .2, .05, .2, -.3])
+    assert bool(_kernel(x)["valid"][0])
+    rows = jax.jit(lambda q: _kernel(q)["band_residuals1d"])
+    value, tangent = jax.jvp(rows, (x,), (direction,))
+    assert np.all(np.isfinite(tangent)) and np.linalg.norm(tangent) > 0
+    _, pullback = jax.vjp(rows, x)
+    cotangent = jnp.linspace(-1., 1., value.size)
+    np.testing.assert_allclose(jnp.vdot(cotangent, tangent), jnp.vdot(pullback(cotangent)[0], direction),
+                               rtol=1e-12)
+    for step in (1e-4, 1e-5):
+        finite = (rows(x+step*direction)-rows(x-step*direction))/(2*step)
+        np.testing.assert_allclose(tangent, finite, rtol=1e-6, atol=1e-10)

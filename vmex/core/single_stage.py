@@ -141,15 +141,17 @@ def _vacuum_input(inp):
 
 
 def total_normal_field(inp, coils, state, runtime, nphi, ntheta, precision, *, digits=4):
-    """Total-field normal residual divided by equilibrium ``|B|``, and area weights."""
+    """Total-field normal residual over ``|B|``, area weights, and pressure jump over ``|B|^2``."""
     data = vc.surface_field_data_from_state(inp, state, runtime=runtime, nphi=nphi, ntheta=ntheta)
+    B2 = jnp.sum(data.B_total**2, axis=0)
     if _vacuum_input(inp):
         field = vc.external_B_cartesian(coil_field(coils), data.gamma, data.phi)
         area = jnp.linalg.norm(data.area_vector, axis=0)
-        return (jnp.sum(field * data.normal, axis=0) / jnp.linalg.norm(data.B_total, axis=0),
-                area / jnp.sum(area))
+        return (jnp.sum(field * data.normal, axis=0) / jnp.sqrt(B2), area / jnp.sum(area),
+                jnp.sum(field**2, axis=0) / B2 - 1)
     interface = vc.PlasmaVacuumInterface.from_surface_data(data, digits=digits, precision=precision)
-    return interface.bnormal_residual(coil_field(coils)) / jnp.linalg.norm(data.B_total, axis=0), interface.weights
+    return (interface.bnormal_residual(coil_field(coils)) / jnp.sqrt(B2), interface.weights,
+            interface.pressure_balance_residual(coil_field(coils)) / B2)
 
 
 class SingleStageProblem:
@@ -184,7 +186,7 @@ class SingleStageProblem:
             _, trial_coils = self.objects_from_x(x)
 
             def limits(state, runtime):
-                normal, weights = total_normal_field(
+                normal, weights, _ = total_normal_field(
                     inp, trial_coils, state, runtime, nphi, ntheta, precision, digits=vc_digits)
                 rms = jnp.sqrt(jnp.sum(weights * normal**2))
                 return hinge(jnp.stack((opt.min_abs_iota(state, runtime) / iota_floor - 1,
@@ -276,7 +278,7 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
                                             inp.nfp, nphi=61, ntheta=64)
     data = vc.surface_field_data_from_state(inp, equilibrium.solution,
                                            runtime=equilibrium.solver_context, nphi=61, ntheta=64)
-    normal, area = map(np.asarray, total_normal_field(
+    normal, area, jump = map(np.asarray, total_normal_field(
         inp, coils, equilibrium.solution, equilibrium.solver_context, 61, 64,
         None if _vacuum_input(inp) else vc.plan_vc_precision(data, digits=joint.vc_digits),
         digits=joint.vc_digits))
@@ -284,6 +286,7 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     gamma, points = np.asarray(geometry.gamma), np.asarray(surface.gamma).reshape(-1, 3)
     metrics = {"B.n/B RMS": float(np.sqrt(np.sum(area * normal**2))),
                "B.n/B max": float(np.max(np.abs(normal))),
+               "pressure jump RMS": float(np.sqrt(np.sum(area * jump**2))),
                "coil-surface distance": _clearance(gamma, points),
                "coil-coil distance": min(float(cKDTree(gamma[i]).query(gamma[j])[0].min())
                                          for i in range(len(gamma)) for j in range(i + 1, len(gamma))),
@@ -295,7 +298,9 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     jax.clear_caches()
     gc.collect()
     print("[verify] cold NESTOR free boundary", flush=True)
+    # NESTOR needs a finer angular grid and a smaller step than the fixed-boundary solve.
     free_inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", ns_array=np.array(free_ns),
+                       ntheta=max(inp.ntheta, 32), nzeta=max(inp.nzeta, 32), delt=min(inp.delt, .3),
                        ftol_array=np.full(len(free_ns), free_ftol), niter_array=np.full(len(free_ns), 8000))
     free = {"converged": False, "phiedge": float(inp.phiedge),
             "ns": list(free_ns), "metrics_provisional": True}
