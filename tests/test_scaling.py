@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import jax
 import numpy as np
 import pytest
 
@@ -18,8 +19,10 @@ from vmex.core.multigrid import solve_free_boundary_multigrid, solve_multigrid
 from vmex.core.postprocess import full_mesh_from_half
 from vmex.core.scaling import (
     aries_cs_scales,
+    axis_field,
     b00_axis,
     input_minor_radius,
+    match_b0,
     probe_input,
     scale_input,
     scale_mgrid,
@@ -168,6 +171,38 @@ def test_scale_wout_commutes_with_finite_beta_solve(finite_beta_similarity):
     _assert_pressure_echo(
         solved_scaled_input, scale_input(inp, b_scale=2.3, r_scale=1.7)
     )
+
+
+def test_adiabatic_pressure_scales_as_b_to_two_minus_gamma():
+    """``GAMMA != 0`` makes the pressure profile a mass: PRES_SCALE ~ B**(2-gamma)."""
+    inp = VmecInput.from_file(DATA / "input.shaped_tokamak_pressure")
+    inp = dataclasses.replace(
+        inp,
+        gamma=1.4,
+        ns_array=np.array([9]),
+        ftol_array=np.array([1e-12]),
+        niter_array=np.array([3000]),
+    )
+    b, r = 1.5, 1.3
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    scaled_input = scale_input(inp, b_scale=b, r_scale=r)
+    assert scaled_input.pres_scale == pytest.approx(inp.pres_scale * b**0.6)
+    scaled_wout = scale_wout(original, b_scale=b, r_scale=r)
+    _assert_wout_similarity(run(scaled_input), scaled_wout)
+    # The echoed profile re-runs with PRES_SCALE = 1, so it carries the same factor.
+    np.testing.assert_allclose(scaled_wout.am, b**0.6 * original.am)
+    knots = dataclasses.replace(original, am_aux_f=np.ones(3))
+    np.testing.assert_allclose(scale_wout(knots, b_scale=b).am_aux_f, b**0.6)
 
 
 def test_scale_wout_keeps_pressure_coefficients_consistent_with_presf(
@@ -584,3 +619,155 @@ def test_cli_default_input_scaling_reconverges_to_aries_cs(tmp_path, capsys):
     )
     assert abs(scaled_wout.volavgB / 5.8646 - 1.0) <= 2.0 * declared_error
     assert scaled_wout.Aminor_p == pytest.approx(1.7044, rel=2e-12)
+
+
+@pytest.mark.parametrize("name, ns", [
+    ("input.circular_tokamak", [9, 13]),      # AM = 0: V = 2 pi^2 R0 a^2 = 48 pi^2 exactly
+    ("input.solovev_analytical", [15, 21]),   # finite beta and toroidal current
+    ("input.nfp2_QA_finite_beta", [5, 7]),     # 3D, finite beta
+])
+def test_tvolume_run_is_the_dilation_of_the_unscaled_run(name, ns):
+    """A boundary dilated by lambda is the boundary rescaled to TVOLUME = lambda^3 V.  With
+    B -> B / lambda^2 (phiedge fixed, p ~ B^2, I ~ B R) the equilibrium is self-similar:
+    iota, beta and the aspect ratio are unchanged and the volume is the target.  The deck
+    below keeps the unscaled boundary and axis, so only TVOLUME carries the dilation."""
+    base = VmecInput.from_file(DATA / name)
+    base = dataclasses.replace(base, ns_array=np.array(ns), ftol_array=np.full(2, 1e-11),
+                               niter_array=np.full(2, 4000))
+    lam = 1.4
+
+    def solve(deck):
+        result = solve_multigrid(deck, verbose=False, device="cpu")
+        assert result.converged
+        return wout_from_state(inp=deck, state=result.state, fsqr=float(result.fsqr),
+                               fsqz=float(result.fsqz), fsql=float(result.fsql),
+                               niter=int(result.iterations), converged=True)
+
+    ref = solve(base)
+    if name.endswith("circular_tokamak"):
+        assert ref.volume_p == pytest.approx(48 * np.pi**2, rel=1e-12)
+    dilated = dataclasses.replace(
+        scale_input(base, b_scale=lam**-2, r_scale=lam), rbc=base.rbc, rbs=base.rbs,
+        zbc=base.zbc, zbs=base.zbs, raxis_c=base.raxis_c, raxis_s=base.raxis_s,
+        zaxis_c=base.zaxis_c, zaxis_s=base.zaxis_s, tvolume=lam**3 * ref.volume_p)
+    got = solve(dilated)
+    assert got.volume_p == pytest.approx(lam**3 * ref.volume_p, rel=1e-12)
+    np.testing.assert_allclose(got.iotaf, ref.iotaf, rtol=0.0, atol=1e-8)
+    for key in ("betatotal", "aspect"):
+        assert getattr(got, key) == pytest.approx(getattr(ref, key), rel=1e-8)
+    assert got.Aminor_p == pytest.approx(lam * ref.Aminor_p, rel=1e-9)
+    assert got.b0 == pytest.approx(ref.b0 / lam**2, rel=1e-8)
+
+
+def test_axis_field_sums_the_m0_harmonics_extrapolated_to_the_axis():
+    bmnc = np.zeros((4, 3))
+    bmnc[1], bmnc[2] = [1.0, 0.2, 9.0], [1.0, 0.1, 9.0]
+    bmns = np.zeros((4, 3))
+    bmns[1], bmns[2] = [0.0, 0.4, 9.0], [0.0, 0.2, 9.0]
+    wout = SimpleNamespace(
+        bmnc=bmnc, bmns=None, xm_nyq=np.array([0, 0, 1]), xn_nyq=np.array([0, 2, 0]),
+    )
+    # m = 0 only: 1 + 0.25 cos(2 phi); the m = 1 column is an artifact.
+    assert axis_field(wout, 0.3) == pytest.approx(1.0 + 0.25 * np.cos(0.6))
+    wout.bmns = bmns
+    assert axis_field(wout, 0.3) == pytest.approx(
+        1.0 + 0.25 * np.cos(0.6) - 0.5 * np.sin(0.6)
+    )
+
+
+@pytest.mark.parametrize(
+    "name, changes",
+    [
+        ("LandremanPaul2021_QA_lowres", dict(ns_array=np.array([9]))),
+        ("shaped_tokamak_pressure", dict(ns_array=np.array([9]), gamma=1.4)),
+    ],
+)
+def test_match_b0_reproduces_the_target_axis_field(name, changes):
+    """Vacuum and finite-beta decks: re-solving the matched deck gives ``b0_target``."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA / f"input.{name}"),
+        ftol_array=np.array([1e-13]),
+        niter_array=np.array([4000]),
+        **changes,
+    )
+
+    def run(deck):
+        result = solve_multigrid(deck, verbose=False)
+        assert result.converged
+        return wout_from_state(
+            inp=deck, state=result.state, fsqr=float(result.fsqr),
+            fsqz=float(result.fsqz), fsql=float(result.fsql),
+            niter=int(result.iterations), converged=True,
+        )
+
+    original = run(inp)
+    target, phi = 1.7 * axis_field(original), 0.0
+    matched = match_b0(inp, original, target, phi)
+    assert axis_field(run(matched), phi) == pytest.approx(target, rel=1e-10)
+
+
+def test_estimate_axis_field_is_flux_over_area_for_a_circular_tokamak():
+    inp = VmecInput.from_file(DATA / "input.circular_tokamak")
+    radius = inp.rbc[0, 1]
+    assert float(axis_field(inp)) == pytest.approx(inp.phiedge / (np.pi * radius**2), rel=1e-9)
+    # One toroidal angle is as good as another for an axisymmetric deck.
+    assert float(axis_field(inp, 1.1)) == pytest.approx(float(axis_field(inp)), rel=1e-9)
+
+
+def test_estimate_axis_field_uses_the_plane_normal_to_a_helical_axis():
+    """Quasi-axisymmetric vacuum deck: 1 % of the solved 1.0061 T (ns = 97), not the 6 % of PHIEDGE / A."""
+    inp = VmecInput.from_file(DATA / "input.LandremanPaul2021_QA_lowres")
+    assert float(axis_field(inp)) == pytest.approx(1.0061, rel=0.015)
+    period = 2.0 * np.pi / inp.nfp
+    assert float(axis_field(inp, 0.3 + period)) == pytest.approx(float(axis_field(inp, 0.3)), rel=1e-9)
+    assert float(axis_field(inp, -0.3)) == pytest.approx(float(axis_field(inp, 0.3)), rel=1e-9)  # stellarator symmetry
+
+
+def test_estimate_axis_field_handles_up_down_asymmetric_decks():
+    inp = VmecInput.from_file(DATA / "input.up_down_asymmetric_tokamak")
+    assert inp.lasym
+    assert float(axis_field(inp)) == pytest.approx(5.3117, rel=0.01)  # solved axis_field, ns = 25
+
+
+def test_estimate_axis_field_is_differentiable_in_phiedge_boundary_and_angle():
+    inp = VmecInput.from_file(DATA / "input.LandremanPaul2021_QA_lowres")
+
+    def field(rbc, phiedge, phi):
+        deck = SimpleNamespace(rbc=rbc, rbs=inp.rbs, zbc=inp.zbc, zbs=inp.zbs, phiedge=phiedge, nfp=inp.nfp)
+        return axis_field(deck, phi)
+
+    args = (np.asarray(inp.rbc), float(inp.phiedge), 0.3)
+    value = float(field(*args))
+    d_rbc, d_phiedge, d_phi = jax.grad(field, argnums=(0, 1, 2))(*args)
+    assert float(d_phiedge) == pytest.approx(value / inp.phiedge, rel=1e-9)
+    step = 1e-6
+    bump = np.zeros_like(args[0])
+    bump[inp.ntor, 1] = step  # R_{n=0,m=1}
+    fd_rbc = float(field(args[0] + bump, *args[1:]) - field(args[0] - bump, *args[1:])) / (2 * step)
+    assert float(d_rbc[inp.ntor, 1]) == pytest.approx(fd_rbc, rel=1e-5)
+    fd_phi = float(field(args[0], args[1], 0.3 + step) - field(args[0], args[1], 0.3 - step)) / (2 * step)
+    assert float(d_phi) == pytest.approx(fd_phi, rel=1e-5)
+
+
+def test_input_axis_field_and_scaling_hit_the_target():
+    inp = VmecInput.from_file(DATA / "input.shaped_tokamak_pressure")
+    probed = axis_field(inp, probe=True)
+    assert probed == pytest.approx(4.10642, rel=2e-3)  # ns = 97
+    # estimate: PHIEDGE, PRES_SCALE and CURTOR follow so that the estimate becomes the target
+    scaled = scale_input(inp, b_scale=3.0 / axis_field(inp))
+    assert float(axis_field(scaled)) == pytest.approx(3.0, rel=1e-12)
+    assert scaled.pres_scale == pytest.approx(inp.pres_scale * (3.0 / float(axis_field(inp))) ** 2)
+    # probe: the scaling law is exact, so a second probe of the scaled deck reads the target
+    matched = scale_input(inp, b_scale=1.3 * probed / axis_field(inp, probe=True))
+    assert matched.phiedge == pytest.approx(1.3 * inp.phiedge, rel=1e-12)
+    assert axis_field(matched, probe=True) == pytest.approx(1.3 * probed, rel=1e-8)
+
+
+def test_input_field_rejects_free_boundary_and_invalid_probe_resolutions(monkeypatch):
+    with pytest.raises(ValueError, match="coils"):
+        axis_field(VmecInput.from_file(DATA / "input.cth_like_free_bdy"))
+    monkeypatch.setattr("vmex.core.multigrid.solve_multigrid",
+                        lambda *args, **kwargs: pytest.fail("invalid probe must not solve"))
+    for ns in ((7, 7), (13, 7), (5, 13), (True, 13), (7., 13), (7,), (7, 13, 17)):
+        with pytest.raises(ValueError, match="two increasing integer resolutions"):
+            axis_field(VmecInput(), probe=True, ns=ns)

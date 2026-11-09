@@ -16,7 +16,7 @@ Buller & Drevlak, Phys. Plasmas 29, 082501 (2022).
   ``<J.B>`` formula (eqs. 10-16, 19-21 with the Sauter 18b-18e
   collisionalities), transcribed verbatim from simsopt ``j_dot_B_Redl``
   including its quasisymmetry isomorphism: ``iota -> iota - nfp*helicity_n``
-  everywhere iota appears, ``G`` unshifted.
+  everywhere iota appears, with the prefactor ``G -> G + N*I``.
 - :class:`KineticProfiles` / :func:`profile_value_and_dds` — polynomial
   ``ne/Te/Ti/Zeff`` profiles in ``s`` (lowest order first, simsopt
   ``ProfilePolynomial`` convention), value + analytic d/ds via Horner.
@@ -65,6 +65,7 @@ import jax.numpy as jnp
 
 from .fields import surface_currents
 from .input import VmecInput
+from .omnigenity import _ResidualTerm
 from .profiles import MU0
 from .solver import SolverRuntime, SpectralState
 from .statephysics import (
@@ -87,6 +88,7 @@ __all__ = [
     "redl_geometry_from_wout",
     "redl_geometry_from_state",
     "j_dot_B_redl",
+    "BootstrapFiniteNuResidual",
     "vmec_j_dot_B",
     "RedlBootstrapMismatch",
     "BootstrapPicardResult",
@@ -569,12 +571,13 @@ def j_dot_B_redl(
     ne_s, d_ne_d_s = profile_value_and_dds(profiles.ne_coeffs, s)
     Te_s, d_Te_d_s = profile_value_and_dds(profiles.Te_coeffs, s)
     Ti_s, d_Ti_d_s = profile_value_and_dds(profiles.Ti_coeffs, s)
-    Zeff_s, _ = profile_value_and_dds(profiles.Zeff_coeffs, s)
+    Zeff_s, d_Zeff_d_s = profile_value_and_dds(profiles.Zeff_coeffs, s)
 
     ne_s = jnp.maximum(ne_s, 1e17)
     Te_s = jnp.maximum(Te_s, 1.0)
     Ti_s = jnp.maximum(Ti_s, 1.0)
     ni_s = ne_s / Zeff_s
+    d_ni_d_s = d_ne_d_s / Zeff_s - ne_s * d_Zeff_d_s / Zeff_s ** 2
     pe_s = ne_s * Te_s
     pi_s = ni_s * Ti_s
 
@@ -647,8 +650,10 @@ def j_dot_B_redl(
         / (1 + 0.004 * nu_i * nu_i * (f_t ** 6))
 
     # Factor of ELEMENTARY_CHARGE converts temperatures from eV to J:
-    pref = -geom.G * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
-    dnds_term = pref * (ne_s * Te_s + ni_s * Ti_s) * L31 * (d_ne_d_s / ne_s)
+    # Landreman 2022 (A1): the quasisymmetric prefactor is G + N*I, not G.
+    pref = -(geom.G + helicity_N * geom.I) * ELEMENTARY_CHARGE / (geom.psi_edge * iota_N)
+    # Redl eq (2) with separate gradients; ni=ne/Zeff assumes one ion species.
+    dnds_term = pref * (Te_s * d_ne_d_s + Ti_s * d_ni_d_s) * L31
     dTeds_term = pref * pe_s * (L31 + L32) * (d_Te_d_s / Te_s)
     dTids_term = pref * pi_s * (L31 + L34 * alpha) * (d_Ti_d_s / Ti_s)
     jdotB = dnds_term + dTeds_term + dTids_term
@@ -667,6 +672,67 @@ def j_dot_B_redl(
         "dTids_term": dTids_term, "jdotB": jdotB,
     }
     return jdotB, details
+
+
+def equivalent_ripple_spread(*, bmnc_b, xm_b, xn_b, iota_b, nfp, bmns_b=None,
+                             ntheta: int = 32, nphi: int = 48):
+    r"""Relative spread of the one-period ``int dl/B`` over field lines (Albert et al. 2024, eq. 85).
+
+    Albert, Beidler, Kapper, Kasilov & Kernbichler (arXiv:2407.21599, Sec. 3.3):
+    the leading ``nu_*^(-1/2)`` off-set of the bootstrap coefficient is absent only if
+    the trapping domains are equivalent, i.e. ``d I_j(vartheta_0, eta_b)/d vartheta_0 = 0``
+    with ``I_j ~ int dl/B`` between consecutive maxima (omnigeneity). In Boozer angles
+    ``dl/B ~ (G + iota I) dphi/B^2``, so with maxima on the field-period boundary (pwO,
+    QI) this is ``J(theta_0) = <B^-2>_phi`` along the line ``theta = theta_0 + iota phi``
+    over one period. Returns ``sqrt(var(J)/mean(J)^2 + 1e-16)`` per surface,
+    with a dimensionless smoothing floor of ``1e-8``: the floor for QI/pwO
+    with poloidally closed contours and aligned period-boundary maxima, ``O(eps)`` otherwise.
+    """
+    m_b, k_b = jnp.asarray(xm_b), jnp.asarray(xn_b)
+    iota = jnp.atleast_1d(jnp.asarray(iota_b))[:, None, None]
+    th0 = 2 * jnp.pi * jnp.arange(ntheta) / ntheta
+    ph = 2 * jnp.pi * jnp.arange(nphi) / (nphi * nfp)
+    theta = th0[None, :, None] + iota * ph[None, None, :]          # (nsurf, ntheta, nphi)
+    phase = (m_b * theta[..., None] - k_b * ph[None, None, :, None])
+    B = jnp.einsum("sk,stpk->stp", jnp.asarray(bmnc_b), jnp.cos(phase))
+    if bmns_b is not None:
+        B = B + jnp.einsum("sk,stpk->stp", jnp.asarray(bmns_b), jnp.sin(phase))
+    J = jnp.mean(B ** -2, axis=-1)
+    return jnp.sqrt(jnp.var(J, axis=-1) / jnp.mean(J, axis=-1) ** 2 + 1e-16)
+
+
+class BootstrapFiniteNuResidual(_ResidualTerm):
+    """Rows ``sqrt(w_j) E_j`` with ``E`` from :func:`equivalent_ripple_spread`.
+
+    Finite-collisionality bootstrap residual: ``E`` is the cross-field-line spread of the
+    one-period ``int dl/B`` that Albert et al. (2024) show controls the leading
+    ``nu_*^(-1/2)`` off-set. On 11 pwO/QI designs it ranks the DKX ``|I_bs|`` with
+    Spearman 0.88, where the collisionless ratio ranks -0.30. Valid when maxima sit on the field-period
+    boundary (pwO, QI); weights default to uniform. A diagnostic, not an objective: as a pwO
+    objective term (weights 1e3 and 1e4, NFP 3) the optimized design's DKX ``<J.B>`` keeps one
+    sign on every surface, so the net current does not fall.
+    """
+
+    name = "bootstrap_finite_nu"
+
+    def __init__(self, surfaces, *, weights=None, mboz: int = 16, nboz: int = 16,
+                 oversample: int = 2):
+        self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
+        weights = np.ones_like(self.surfaces) if weights is None else np.asarray(weights, float)
+        if weights.shape != self.surfaces.shape or np.any(weights < 0) or weights.sum() <= 0:
+            raise ValueError("weights must be nonnegative, one per surface, not all zero")
+        self.weights = np.sqrt(weights / weights.sum())
+        self.mboz, self.nboz, self.oversample = mboz, nboz, oversample
+
+    def compute_state(self, state, rt):
+        """Boozer spectrum, per-surface ``spread`` and the weighted rows."""
+        booz = self._boozer(state, rt)
+        spread = equivalent_ripple_spread(
+            bmnc_b=booz["bmnc_b"], bmns_b=booz.get("bmns_b"), xm_b=booz["xm_b"],
+            xn_b=booz["xn_b"], iota_b=booz["iota_b"], nfp=booz["nfp"])
+        out = dict(booz, spread=spread, residuals1d=self.weights * spread)
+        out["total"] = jnp.sum(out["residuals1d"] ** 2)
+        return out
 
 
 # ===========================================================================
@@ -873,8 +939,9 @@ class RedlBootstrapMismatch:
 class BootstrapPicardResult:
     """Outcome of :func:`self_consistent_bootstrap`.
 
-    ``input`` carries the final ``AC``/``CURTOR`` (``ncurr=1``,
-    ``pcurr_type="power_series"``); ``equilibrium`` is the last solved
+    ``input`` is the deck used for ``equilibrium``, with its final
+    ``AC``/``CURTOR``; refits use ``ncurr=1``, ``pcurr_type="power_series"``.
+    ``equilibrium`` is the last solved
     :class:`~vmex.core.optimize.Equilibrium`; ``history`` is one dict per
     iteration (``curtor``, ``delta``, ``f_boot``).  ``delta`` is the
     self-consistency error ``max|I'_Redl - I'_applied| / max|I'_Redl|``
@@ -918,6 +985,8 @@ def self_consistent_bootstrap(
     degree: int = 12,
     s_eval=None,
     solve_kwargs: dict | None = None,
+    current_model=None,
+    initial_state=None,
     verbose: bool = False,
 ) -> BootstrapPicardResult:
     """Fixed-boundary Picard iteration to a bootstrap-consistent current profile.
@@ -948,10 +1017,17 @@ def self_consistent_bootstrap(
     stable.  ``degree`` is clipped to ``ns - 2``.  The first solve uses
     ``inp``'s own current settings (any ``pcurr_type``); every refit
     switches to ``ncurr=1`` + ``power_series``.
+
+    ``current_model(equilibrium, s_eval, jr)`` replaces the Redl ``<J.B>``
+    ``jr`` [A T/m^2] on ``s_eval`` in step 2, e.g. by a kinetic calculation
+    on the solved equilibrium; the loop then converges to that current.
+    ``initial_state`` hot-starts the first solve.
     """
     from . import optimize as opt
 
     solve_kwargs = dict(solve_kwargs or {})
+    if n_iter < 1:
+        raise ValueError("n_iter must be positive")
     if s_eval is None:
         s_eval = np.linspace(0.02, 0.98, 49)
     s_eval = np.atleast_1d(np.asarray(s_eval, dtype=float))
@@ -962,7 +1038,7 @@ def self_consistent_bootstrap(
     mismatch = RedlBootstrapMismatch(profiles, helicity_n,
                                      surfaces=np.clip(s_eval, 0.05, 0.95))
     history: list[dict] = []
-    state = None
+    state = initial_state
     dIds_applied = None   # I'(s_full) currently driving the equilibrium
     eq = None
     converged = False
@@ -985,6 +1061,8 @@ def self_consistent_bootstrap(
 
         geom = redl_geometry_from_wout(w, s_eval)
         jr, _ = j_dot_B_redl(profiles, geom, helicity_n)
+        if current_model is not None:
+            jr = current_model(eq, s_eval, jr)
         jr_full = np.interp(s_full, np.concatenate([[0.0], s_eval, [1.0]]),
                             np.concatenate([[0.0], np.asarray(jr), [0.0]]))
         fsa_B2_full = np.interp(s_full, s_eval, np.asarray(geom.fsa_B2))
@@ -1017,6 +1095,8 @@ def self_consistent_bootstrap(
         if delta <= float(tol):
             converged = True
             break
+        if it + 1 == int(n_iter):
+            break  # Return the solved deck, not an unevaluated next iterate.
 
         dIds_use = (dIds_new if dIds_applied is None
                     else (1.0 - relax) * dIds_applied + relax * dIds_new)

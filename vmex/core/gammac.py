@@ -67,21 +67,15 @@ Field lines are the PEST lines of :mod:`vmex.core.stability` /
 :mod:`vmex.core.turbulence`; every geometric ingredient is an exact spectral
 point evaluation with JAX AD, and the singular bounce integrals reuse the
 drift kernels of :func:`vmex.core.bounce.bounce_action`.  Everything is jnp:
-the proxy is traceable and differentiable end to end.  Stellarator-symmetric
-states with ``iota != 0`` on the target surfaces only, inherited from the
-field-line parameterization.
+the proxy is traceable end to end. Symmetric and asymmetric toroidal states
+use the same interior-flux-surface geometry; the field-line parameterization
+requires nonzero ``iota`` on the target surfaces.
 
-Two derivative semantics, named explicitly rather than switched by options:
-:class:`GammaC` is the hard physical diagnostic — its *value* is the number
-to report, but its discretized boundary derivative is exact-yet-divergent
-under grid refinement (branch noise; the measured ladder is pinned in
-``tests/test_gammac.py``) — and :class:`GammaCSmooth` is the optimization
-surrogate: the same wells and quadrature with the two measured noise
-structures (separatrix bounce-time curvature and superbanana drift-angle
-corners) regularized on a fixed, annealable ``temperature`` scale, giving a
-boundary derivative that is stable in sign and magnitude under the same
-refinement ladder.  A matched-topology tracked variant
-(``GammaCTracked``) can join them without changing either meaning.
+:class:`GammaC` supplies the hard diagnostic; its sampled boundary derivative
+can change sign under refinement. :class:`GammaCSmooth` regularizes
+separatrix bounce-time curvature and superbanana drift-angle corners with an
+annealable ``temperature``. Both omit normalized pitch-grid shape derivatives,
+so check actual forward descent before optimizing a new configuration.
 """
 
 from __future__ import annotations
@@ -141,9 +135,10 @@ def gamma_c_from_fieldlines(
     ``dB/drho at fixed PEST angles / B``, ``drift_correction`` is ``K / B``,
     and ``tangency`` is ``|grad rho| ||e_alpha||``.  ``pitch`` and
     ``pitch_weights`` are quadrature nodes and weights of the lambda
-    integral.  All complete wells contribute; ``excluded_fraction`` reports
-    the measure lost to hard ``overflow`` exclusion so callers can reject
-    an under-provisioned ``max_wells``.
+    integral. Any well-slot overflow invalidates the surface's ``gamma_c``
+    with NaN rather than a falsely low cost. ``excluded_fraction`` and
+    ``overflow_fraction`` report the fraction of overflowing line/pitch
+    pairs; increase ``max_wells`` before using that surface.
     """
     return _wells_assembly(
         bmag=bmag, radial_drift=radial_drift,
@@ -168,14 +163,13 @@ def gamma_c_smooth_from_fieldlines(
     quadrature_order: int = 32,
     temperature: float = 0.15,
 ) -> dict[str, Array]:
-    """Derivative-safe smooth surrogate of :func:`gamma_c_from_fieldlines`.
+    """Smooth surrogate of :func:`gamma_c_from_fieldlines`.
 
     Same ingredient contract, well detection, and sine-mapped bounce
     quadrature as the hard diagnostic — including its exact per-well
     cancellations, so the axisymmetric limit stays at quadrature noise —
     with the hard-branch noise sources of the discretized boundary
-    derivative regularized on one scale ``delta`` (a quadrature parameter,
-    held fixed under differentiation like the pitch grid):
+    derivative regularized on a field-dependent scale ``delta``:
 
     - **capped bounce kernels**: the inverse parallel speed becomes
       ``1/sqrt(max(1 - lambda B, 0) + delta)`` (the ``kernel_floor`` of
@@ -184,8 +178,7 @@ def gamma_c_smooth_from_fieldlines(
       pitch node landing at distance ``d`` from a barrier top contributes a
       ``1/d`` derivative term whose sign depends on which side the node
       fell — the sign-flipping refinement ladder measured for the hard
-      gradient.  The floor caps that curvature at scale ``delta``, which
-      the pitch grid resolves, so the discretized derivative converges;
+      gradient. The floor regularizes that curvature at scale ``delta``;
     - the same floor also removes the hard **birth/death jump**: the exact
       bounce time of a well born at a quadratic ``|B|`` minimum starts at the
       finite oscillator period (amplitude-independent), so the hard value
@@ -200,15 +193,13 @@ def gamma_c_smooth_from_fieldlines(
     it under ``stop_gradient`` left the AD slope at 0.37x of the true FD
     slope of the objective, and the missing coherent term let branch noise
     set the through-the-solve sign).  Deliberately **not** tied to the grid
-    spacings: a per-resolution ``delta`` makes every refinement rung
-    differentiate a different functional, and the measured li383 ladder
-    stayed sign-erratic that way; a fixed fraction converges (the
-    regression test pins it).  The resolution must resolve the smoothing
-    instead: ``num_pitch * temperature >~ 4`` keeps the pitch spacing
-    inside ``delta`` (the default pairing 0.15 x 32 satisfies it).
-    Annealing = re-optimizing at a lower ``temperature`` with a
-    correspondingly finer budget; the surrogate converges to the hard
-    ``Gamma_c`` in that joint limit.
+    spacings: otherwise each refinement rung differentiates a different
+    functional. ``num_pitch * temperature >~ 4`` was a useful budget guide
+    on the tested li383 case, not a convergence guarantee. Normalized
+    pitch-grid shape derivatives remain frozen. Check actual forward
+    descent and independently refine field-line, pitch and bounce sampling
+    for each configuration; anneal ``temperature`` while comparing against
+    the hard diagnostic.
     """
     bmag = jnp.asarray(bmag)
     if temperature <= 0.0:
@@ -295,8 +286,10 @@ def _wells_assembly(
         masked("drift_gradient") + masked("parallel_correction"))
     if corner_floor is None:
         safe = jnp.where(denominator != 0.0, denominator, 1.0)
-        gamma = (2.0 / jnp.pi) * jnp.arctan(
-            jnp.where(denominator != 0.0, numerator / safe, 0.0))
+        # Pure radial drift has |gamma|=1; only a zero drift vector gets zero.
+        gamma = jnp.where(denominator != 0.0,
+                         (2.0 / jnp.pi) * jnp.arctan(numerator / safe),
+                         jnp.sign(numerator))
     else:
         # Superbanana corners: where the radial AND tangential bounce-drift
         # integrals vanish together, d(arctan(N/D))/dp ~ 1/|(N, D)|, and a
@@ -310,8 +303,8 @@ def _wells_assembly(
         # ~1/corner_floor, exactly the near-superbanana structure whose
         # drift angle the discretization cannot determine stably; every
         # drift-dominated cell keeps its hard value, and small wells are
-        # judged against their own scale, not a global one.  Stop-gradient
-        # as for every quadrature parameter.
+        # judged against their own scale. corner_floor is a quadrature
+        # parameter; the per-well magnitude keeps its field dependence.
         magnitude = masked("drift_absradial") + masked("argmin_tangency") * (
             masked("drift_absgradient") + masked("parallel_abscorrection"))
         sigma = corner_floor * magnitude
@@ -337,6 +330,7 @@ def _wells_assembly(
     gamma_c = (jnp.pi / (8.0 * jnp.sqrt(2.0))
                * jnp.sum(weights * jnp.mean(velocity_sum, axis=0))
                / jnp.mean(line_length))
+    gamma_c = jnp.where(jnp.any(out["overflow"]), jnp.nan, gamma_c)
     out.update({
         "gamma_c": gamma_c,
         "gamma_per_well": jnp.where(keep, gamma, jnp.nan),
@@ -440,21 +434,15 @@ def _sampling_grids(dtype, nalpha: int, num_transit: int,
 def _pitch_grid(bmag, level_nodes, num_pitch: int):
     """``(pitch, pitch_weights)`` across the trapped range of ``bmag``.
 
-    The pitch nodes are a quadrature grid, not an observable, and the
-    ``|B|`` extrema over a reflection-closed set of lines are attained at
-    mirror-image PAIRS of points.  Differentiating through jnp.min/max
-    sends the whole cotangent to one member of each pair, which breaks a
-    symmetry Gamma_c has exactly: on a stellarator-symmetric state
-    d(Gamma_c)/d(sine spectra) must vanish, and it came out at 17% of
-    the physical gradient.  Worse, that term does not converge -- over
-    num_pitch = 12/24/48/96 the violation ran 1.7e-1, 1.8e-1, 6.0e-3,
-    1.6e-1, so it is an erratic subgradient with no limit, not a
-    discretization term.  Holding the grid fixed under differentiation
-    restores the identity to 1e-10 and moves the physical gradient by
-    2e-4.
+    Freeze the normalized extrema to preserve stellarator-reflection
+    gradients, but retain the common field scale: under B -> c B and
+    flux -> c flux, pitch weights and the line normalizer scale as 1/c,
+    leaving Gamma_c invariant. Shape derivatives of this adaptive
+    quadrature remain approximate.
     """
-    b_min = jax.lax.stop_gradient(jnp.min(bmag))
-    b_max = jax.lax.stop_gradient(jnp.max(bmag))
+    mean_b = jnp.mean(bmag)
+    b_min = mean_b * jax.lax.stop_gradient(jnp.min(bmag) / mean_b)
+    b_max = mean_b * jax.lax.stop_gradient(jnp.max(bmag) / mean_b)
     level = b_min + (b_max - b_min) * level_nodes
     return 1.0 / level, (b_max - b_min) / int(num_pitch) / level**2
 
@@ -729,11 +717,12 @@ def gamma_c_state(
     at ``points_per_transit`` points per turn, centred on the field-line label
     so the stellarator reflection is an exact invariance of the estimator; the
     lambda integral uses ``num_pitch`` open-midpoint nodes across the trapped
-    range ``[1/B_max, 1/B_min]`` of the sampled lines, held fixed under
-    differentiation (see the note at the node construction).  ``max_wells``
+    range ``[1/B_max, 1/B_min]`` of the sampled lines.  Differentiation holds
+    the normalized grid shape fixed while retaining its common field scale
+    (see the node construction).  ``max_wells``
     defaults to ``16 * num_transit`` slots per pitch level;
-    ``overflow_fraction`` reports any spill.  Returns per-surface arrays led
-    by ``gamma_c``.
+    ``overflow_fraction`` reports any spill, which makes that surface's
+    ``gamma_c`` NaN. Returns per-surface arrays led by ``gamma_c``.
 
     The absolute value carries roughly 10-20 % scatter at these resolutions --
     it is a comparative proxy, and the resolution belongs in any quoted
@@ -765,21 +754,12 @@ def gamma_c_smooth_state(
     temperature: float = 0.15,
     zeta0: float = 0.0,
 ) -> dict[str, Array]:
-    """Smooth-surrogate ``Gamma_c`` with a refinement-stable boundary gradient.
+    """Smooth ``Gamma_c`` surrogate with approximate pitch-grid derivatives.
 
-    Same sampling contract, arguments, and outputs as :func:`gamma_c_state`
-    — the surfaces, field lines, pitch grid, wells, and Nemov drift
-    ingredients are identical — with the hard-branch derivative-noise
-    sources regularized on the resolution-tied scale of
-    :func:`gamma_c_smooth_from_fieldlines` (returned per surface as
-    ``epsilon``).  ``temperature`` scales that smoothing; refinement anneals
-    it automatically.
-
-    This is the **optimization** lane: its value converges to the hard
-    ``Gamma_c`` as the grids refine, and its boundary derivative is stable
-    in sign and magnitude under refinement where the hard diagnostic's is
-    not (see :class:`GammaCSmooth` for the measured ladder).  Report the
-    hard value; differentiate this one.
+    Same sampling and outputs as :func:`gamma_c_state`, with the smoothing
+    scale of :func:`gamma_c_smooth_from_fieldlines` returned as ``epsilon``.
+    Approach the hard value by refining the grid and annealing temperature;
+    validate forward descent and report the independent hard value.
     """
     _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)
     if not float(temperature) > 0.0:
@@ -809,15 +789,11 @@ class GammaC(_ResidualTerm):
     linearly and validate ``Gamma_alpha`` as the predictor.
     Traceable in both gradient modes.
 
-    **This is the hard physical diagnostic — its value is the number to
-    report, but its boundary derivative is NOT a convergent quantity**: the
-    discretized gradient is exact yet flips sign under grid refinement,
-    because hard well detection and hard branch selection make the
-    discretized ``Gamma_c`` piecewise with grid-dependent breakpoints (the
-    measured ladder is in ``tests/test_gammac.py``).  Do not drive a
-    boundary optimization with this class; use :class:`GammaCSmooth`, whose
-    derivative is refinement-stable, and recompute this hard value to report
-    the result.
+    Hard well detection and branch selection make the sampled boundary
+    gradient sensitive to grid refinement; measured examples change sign.
+    Use :class:`GammaCSmooth` for optimization, checking forward descent
+    because its pitch-grid derivatives remain approximate. Recompute this
+    hard diagnostic on accepted results.
     """
 
     name = "gamma_c"
@@ -873,32 +849,15 @@ class GammaC(_ResidualTerm):
 
 
 class GammaCSmooth(GammaC):
-    """Derivative-safe smooth surrogate of :class:`GammaC` for optimization.
+    """Smooth optimization surrogate of :class:`GammaC`.
 
-    Same rows, weights, and least-squares contract as :class:`GammaC`, but
-    ``compute_state`` evaluates :func:`gamma_c_smooth_state`: the same wells
-    and bounce quadrature with the branch-noise sources of the boundary
-    derivative regularized, so the derivative is stable in sign and
-    magnitude under refinement of every sampling grid — the property the
-    hard diagnostic's derivative measurably lacks.  The surrogate value is
-    systematically below the hard one: by a factor 2-3 on multi-well 3-D
-    fields and by orders of magnitude on near-omnigenous fields whose
-    ripple wells are shallower than the floor (measured smooth/hard ratios
-    at ``temperature = 0.15`` in ``tests/test_gammac.py``: 0.42 on li383,
-    0.004 on the QA, 0.02 on the tokamak).  It preserves the tokamak << QA
-    << unoptimized-3D ordering and anneals toward the hard value as
-    ``temperature`` drops, but it is a gradient objective only, never a
-    reported number: use this class inside the optimizer and always
-    recompute the hard :class:`GammaC` value on the accepted result.
-
-    The three derivative semantics are thus explicit in the class
-    name: :class:`GammaC` is the hard value (no derivative promise
-    across topology events), ``GammaCSmooth`` is the smooth annealed
-    surrogate, and a matched-topology tracked variant can join them later
-    without changing either meaning.  ``temperature`` multiplies the
-    resolution-tied smoothing scales (see
-    :func:`gamma_c_smooth_from_fieldlines`); annealing = optimizing stages
-    at decreasing ``temperature``.
+    Same rows, weights, and least-squares contract as :class:`GammaC`, using
+    :func:`gamma_c_smooth_state`. Frozen pitch-grid shape derivatives remain
+    approximate: check forward descent for each new configuration.
+    ``temperature`` controls the smoothing scale; refine the grid while
+    annealing it. The surrogate can substantially underestimate hard GammaC,
+    especially for shallow ripple wells, so recompute :class:`GammaC` on
+    accepted results.
     """
 
     name = "gamma_c_smooth"

@@ -123,8 +123,11 @@ from .statephysics import (
     elongation_profile,
     iota_edge,
     max_elongation,
+    min_boundary_curvature_radius,
     mean_iota,
     min_abs_iota,
+    edge_jacobian_ratio,
+    axis_excursion,
     soft_min_abs_iota,
     volume,
     volume_average_beta,
@@ -148,6 +151,9 @@ __all__ = [
     "aspect_ratio",
     "mean_iota",
     "min_abs_iota",
+    "edge_jacobian_ratio",
+    "axis_excursion",
+    "Hinge",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
@@ -155,8 +161,10 @@ __all__ = [
     "volume",
     "volume_average_beta",
     "magnetic_well",
+    "weighted_magnetic_well",
     "elongation_profile",
     "max_elongation",
+    "min_boundary_curvature_radius",
     "d_merc",
     "d_merc_state",
     "mercier_stability_residual",
@@ -171,6 +179,7 @@ __all__ = [
     "trial_pressure_glasser_stability_residual",
     "l_grad_b",
     "l_grad_b_state",
+    "l_grad_b_excess_state",
     "quasi_isodynamic_residual",
     "boozer_modes_from_wout",
     "quasi_isodynamic_residual_from_wout",
@@ -183,6 +192,7 @@ __all__ = [
     "least_squares",
     "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
+    "BootstrapFiniteNuResidual",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
@@ -195,9 +205,9 @@ Array = Any
 def __getattr__(name: str):  # PEP 562 lazy re-export
     # bootstrap.py lazily imports this module inside self_consistent_bootstrap,
     # so the f_boot objective is re-exported lazily to keep the two decoupled.
-    if name == "RedlBootstrapMismatch":
-        from .bootstrap import RedlBootstrapMismatch
-        return RedlBootstrapMismatch
+    if name in ("RedlBootstrapMismatch", "BootstrapFiniteNuResidual"):
+        from . import bootstrap
+        return getattr(bootstrap, name)
     # gammac.py sits on the stability/turbulence field-line lane; the lazy
     # re-export keeps the fast-ion proxy import-light like the f_boot term.
     if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
@@ -783,6 +793,25 @@ class QuasisymmetryRatioResidual:
 # ``edge_iota`` (implicit.py exposes the mirror alias).
 
 
+class Hinge:
+    """An inequality as a residual: zero inside ``[floor, ceiling]``, the distance outside.
+
+    ``fun`` is any ``(state, runtime)`` metric, scalar or per surface, so
+    ``(Hinge(min_abs_iota, floor=0.42), 0.0, 100.0)`` is an objective tuple.
+    """
+
+    def __init__(self, fun: Callable, *, floor: Any = None, ceiling: Any = None):
+        self.fun, self.floor, self.ceiling = fun, floor, ceiling
+        self.name = getattr(fun, "__name__", type(fun).__name__)
+
+    def __call__(self, state: SpectralState, rt: SolverRuntime) -> Array:
+        """Return the distance of ``fun`` outside the band, zero inside."""
+        value = self.fun(state, rt)
+        below = 0.0 if self.floor is None else jnp.maximum(self.floor - value, 0.0)
+        above = 0.0 if self.ceiling is None else jnp.maximum(value - self.ceiling, 0.0)
+        return below + above
+
+
 def report_targets(
     eq: Equilibrium,
     *,
@@ -862,6 +891,19 @@ def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
     v1 = 1.5 * dvol[-1] - 0.5 * dvol[-2]
     v0_safe = jnp.where(v0 != 0.0, v0, jnp.ones_like(v0))
     return jnp.where(v0 != 0.0, (v0 - v1) / v0_safe, 0.0)
+
+
+def weighted_magnetic_well(state: SpectralState, rt: SolverRuntime, *, inner, outer) -> Array:
+    """``sum((w1 - w2) V') / sum((w1 + w2) V')`` on the half mesh, with ``w1 = inner(s)``.
+
+    Positive means a favorable well between the regions the weights select,
+    without the endpoint extrapolation of :func:`magnetic_well`.
+    """
+    _, _, _, _, energies = _field_chain(state, rt)
+    vp = jnp.abs(jnp.asarray(energies.vp))[1:]
+    s = (jnp.arange(vp.size) + 0.5) / vp.size
+    w1, w2 = inner(s), outer(s)
+    return jnp.sum((w1 - w2) * vp) / jnp.sum((w1 + w2) * vp)
 
 
 def d_merc(eq) -> jnp.ndarray:
@@ -956,6 +998,19 @@ def l_grad_b_state(
         return jnp.min(grid)
     k = jnp.asarray(float(softmin_k), dtype=grid.dtype)
     return -jax.scipy.special.logsumexp(-k * grid) / k
+
+
+def l_grad_b_excess_state(
+    state: SpectralState, rt: SolverRuntime, *, target: float,
+    s_index: int = -1, ntheta: int = 24, nphi: int = 24,
+) -> Array:
+    """Pointwise rows ``max(target / L_grad_B - 1, 0)``: one per grid point.
+
+    Unlike the scalar minimum, every point below ``target`` drives its own
+    Gauss-Newton row, and the rows are zero once the target is met.
+    """
+    grid = _lgradb_grid(s_index=s_index, ntheta=ntheta, nphi=nphi, **_lgradb_state_tables(state, rt))
+    return jnp.ravel(jnp.maximum(target / grid - 1.0, 0.0))
 
 
 # ===========================================================================
@@ -1225,6 +1280,9 @@ def quasi_isodynamic_residual(
 
         shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
             x_target, signed_phi)
+        # The first coordinate is exactly -lend (the wall); roundoff in phi - phimin
+        # must not slide it into the artificial node ramp.
+        shuffled = shuffled.at[..., 0].set(1.0)
         constructed_bnorm = shuffled
         shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
         if float(argmin_softness) > 0.0:

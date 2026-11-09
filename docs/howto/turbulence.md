@@ -5,7 +5,7 @@
 `turbulence` extra:
 
 ```console
-pip install "vmex[turbulence]"        # gkx>=2.5.0
+pip install "vmex[turbulence]"        # gkx>=2.6.0
 vmex input.my_case --turbulence
 vmex wout_my_case.nc --turbulence --outdir turb
 ```

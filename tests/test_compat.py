@@ -145,6 +145,26 @@ class _PolicyConfig:
         setattr(self, key, value)
 
 
+def test_configure_cache_disable_survives_policy_and_can_be_reenabled(clean_cache_env, tmp_path):
+    import jax
+
+    mp = clean_cache_env
+    config = _PolicyConfig()
+    mp.setattr(jax, "config", config)
+    mp.setattr(_compat, "_CONFIGURED", {})
+    mp.setattr(_compat, "_APPLIED", [None])
+    mp.setattr(_compat, "_reset_jax_cache", lambda: None)
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)
+    mp.setenv("VMEX_COMPILATION_CACHE_DIR", str(tmp_path / "managed"))
+    _compat.configure(compilation_cache=False)
+    _compat._apply_compilation_cache_policy(jax)
+    assert not config.jax_enable_compilation_cache
+    assert config.jax_compilation_cache_dir is None
+    _compat.configure(compilation_cache=True)
+    assert config.jax_enable_compilation_cache
+    assert config.jax_compilation_cache_dir is not None
+
+
 def test_policy_overrides_jax_env_cache(clean_cache_env, tmp_path):
     """JAX reads JAX_COMPILATION_CACHE_DIR itself at import; vmex must split
     that raw path per machine, switch it off when disabled, and be a no-op
@@ -456,23 +476,25 @@ def test_configure_compilation_cache_wiring(monkeypatch):
     assert fake3.config.updates["jax_compilation_cache_dir"] == "/tmp/x"
 
 
-def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch):
+def test_compilation_cache_defaults_are_bounded_and_selective(monkeypatch, tmp_path):
     monkeypatch.delenv("VMEX_CACHE_MIN_COMPILE_TIME_SECS", raising=False)
     monkeypatch.delenv("VMEC_JAX_CACHE_MIN_COMPILE_TIME_SECS", raising=False)
     monkeypatch.delenv("VMEX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     monkeypatch.delenv("VMEC_JAX_COMPILATION_CACHE_MAX_SIZE", raising=False)
     fake = types.SimpleNamespace(config=_FakeConfig())
-    _compat._configure_compilation_cache(fake, "/tmp/cachedir")
+    _compat._configure_compilation_cache(fake, str(tmp_path))
     # Floor 0: storing the polish path's many sub-second programs halves the
-    # CLI rerun (60.6 s -> 31.6 s measured); the eviction bound below keeps
-    # the disk cost finite.
+    # CLI rerun (60.6 s -> 31.6 s measured); the trim below keeps the disk
+    # cost finite.
     assert fake.config.updates["jax_persistent_cache_min_compile_time_secs"] == 0.0
-    # The bound stays finite (JAX only locks the cache when eviction is on)
-    # but scales with the disk: the old fixed 1 GiB sat at its cap and evicted
-    # the executables the next optimization stage asked for.
-    bound = fake.config.updates["jax_compilation_cache_max_size"]
+    # JAX's own eviction is left off: with a finite size every write re-scans
+    # the cache directory (cold first gradient 40.0 s against 22.9 s).
+    assert "jax_compilation_cache_max_size" not in fake.config.updates
+    # The disk bound is VMEX's own trim, scaled with the filesystem: the old
+    # fixed 1 GiB sat at its cap and evicted the executables the next
+    # optimization stage asked for.
+    bound = _compat._default_cache_max_size(str(tmp_path))
     assert _compat._CACHE_SIZE_FLOOR <= bound <= _compat._CACHE_SIZE_CEILING
-    assert bound == _compat._default_cache_max_size("/tmp/cachedir")
     assert _compat._default_cache_max_size("/no/such/path") == \
         _compat._CACHE_SIZE_FLOOR
 
@@ -677,6 +699,31 @@ def test_prune_cache_entries_survives_a_hostile_directory(tmp_path):
     assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1) == 0
 
 
+def test_prune_cache_entries_dates_entries_without_a_sidecar_by_file_time(tmp_path):
+    """With JAX's eviction off there are no atime sidecars: the oldest file goes."""
+    import os
+
+    for i in range(6):
+        entry = tmp_path / f"k{i}-cache"
+        entry.write_bytes(b"x")
+        os.utime(entry, (1000 + 10 * (5 - i), 1000 + 10 * (5 - i)))  # k0 newest
+    assert _compat._prune_cache_entries(str(tmp_path), 2) == 4
+    assert sorted(p.name for p in tmp_path.glob("*-cache")) == ["k0-cache", "k1-cache"]
+
+
+def test_prune_cache_entries_enforces_the_byte_bound(tmp_path):
+    _seed_cache(tmp_path, 8)
+    for entry in tmp_path.glob("*-cache"):
+        entry.write_bytes(b"x" * 100)
+    # inside the entry cap, over the byte bound: the oldest go first
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 5
+    assert sorted(int(p.name[1:-6]) for p in tmp_path.glob("*-cache")) == [5, 6, 7]
+    # inside both bounds: no work
+    assert _compat._prune_cache_entries(str(tmp_path), 100, max_bytes=350) == 0
+    # a cache directory that does not exist yet is not an error
+    assert _compat._prune_cache_entries(str(tmp_path / "absent"), 1, max_bytes=1) == 0
+
+
 def test_configure_compilation_cache_bounds_resident_entries(tmp_path, monkeypatch):
     monkeypatch.delenv("VMEX_CACHE_MAX_ENTRIES", raising=False)
     monkeypatch.delenv("VMEC_JAX_CACHE_MAX_ENTRIES", raising=False)
@@ -761,6 +808,7 @@ def test_explicit_cache_dir_is_split_by_machine(clean_cache_env):
     different subdirectories of the same user path.
     """
     mp = clean_cache_env
+    mp.setattr(_compat, "_cache_deserialize_unsafe", lambda: False)  # jaxlib < 0.10 keeps the cache off
     mp.setenv("JAX_COMPILATION_CACHE_DIR", "/shared/jax")
     mp.setattr(_compat, "_cache_machine_fingerprint", lambda: "linux-x86_64-aaaa")
     first = _compat._default_compilation_cache_dir()
@@ -797,6 +845,7 @@ def test_import_points_jax_at_the_single_scoped_default(tmp_path):
         if "COMPILATION_CACHE" not in key and not key.startswith("VMEX_")
     }
     env["HOME"] = str(tmp_path)
+    env["VMEX_COMPILATION_CACHE"] = "1"  # jaxlib < 0.10 keeps the cache off unless asked
     fingerprint = _compat._cache_machine_fingerprint()
     expected = tmp_path / ".cache" / "vmex" / "jax_cache" / fingerprint
     assert pathlib.Path(_import_cache_dir(env)) == expected
@@ -887,3 +936,17 @@ def test_explicit_float32_choice_is_respected_and_refused_by_the_solver():
     assert _fresh(probe).splitlines() == ["False", "True"]
     assert _fresh("import jax, vmex.core.solver; print(jax.config.jax_enable_x64)",
                   JAX_ENABLE_X64="0") == "False"
+
+
+@pytest.mark.parametrize("cpus, pool", [(3, "3"), (500, str(_compat._MAX_THREADS))])
+def test_configure_sizes_thread_pools_and_keeps_user_values(monkeypatch, cpus, pool):
+    monkeypatch.setattr("solvax.available_cpus", lambda: cpus)
+    monkeypatch.setitem(_compat._CONFIGURED, "x64", True)
+    for name in ("NPROC", "ESSOS_CPU_DEVICES"):
+        monkeypatch.setenv(name, "1")
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "7")
+    _compat.configure()
+    assert os.environ["NPROC"] == pool
+    assert os.environ["ESSOS_CPU_DEVICES"] == str(cpus)
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "7"

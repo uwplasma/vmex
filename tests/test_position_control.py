@@ -176,6 +176,25 @@ def test_multigrid_carries_the_control_across_rungs() -> None:
     assert np.isfinite(ctl.history).all() and np.diff(ctl.history[:, 0]).min() < 0   # iteration restarts on rung 2
 
 
+def test_default_target_is_read_after_the_axis_guess() -> None:
+    """A deck with no RAXIS/ZAXIS guess (all zero) still gets a positive R0.
+
+    The default target is the initial axis.  It used to be read before the
+    solver re-guessed a zero axis, so ``R_00 = 0`` and the first update
+    divided by ``r0**2``.
+    """
+    base = lasym_free_input(REPO / "examples" / "data")
+    inp = dataclasses.replace(
+        base, ns_array=np.asarray([8]), ftol_array=np.asarray([1.0e-8]), niter_array=np.asarray([60]),
+        raxis_c=np.zeros_like(base.raxis_c), zaxis_s=np.zeros_like(base.zaxis_s),
+        raxis_s=np.zeros_like(base.raxis_s), zaxis_c=np.zeros_like(base.zaxis_c))
+    run = FB.solve_free_boundary(inp, external_field=lasym_free_field(), max_iterations=60,
+                                 error_on_no_convergence=False, position_control=PositionControl())
+    ctl = run.position_control
+    assert ctl is not None and ctl.r0 > 0.5 and ctl.target[0] > 0.5
+    assert np.isfinite(ctl.history).all()
+
+
 ### Input-deck option (LPOSITION_CONTROL) ####################################
 
 DATA = REPO / "examples" / "data"
@@ -254,4 +273,4 @@ def test_cli_runs_the_control_deck(tmp_path, capsys, control_mgrid) -> None:
         shutil.copy(src, tmp_path / src.name)
     rc = cli.main([str(tmp_path / CONTROL_DECK.name)])
     out = capsys.readouterr().out
-    assert rc == 0 and "POSITION CONTROL: B_Z^ctrl = 39." in out
+    assert rc == 0 and "POSITION CONTROL: B_Z^ctrl = 40." in out

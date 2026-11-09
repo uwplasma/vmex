@@ -49,7 +49,10 @@ profile shapes do not change. Dimensional quantities scale as:
 
 For inputs, pressure scales once through `PRES_SCALE`; `AM`, `AM_AUX_F`,
 current/iota profiles, and every normalized spline coordinate remain shape
-data. `CURTOR` scales only in prescribed-current mode.
+data. `CURTOR` scales only in prescribed-current mode. With `GAMMA != 0` the
+pressure profile is a mass (`p = mass / V'^GAMMA`), so `PRES_SCALE` scales as
+$B_s^{2-\gamma}$ (independent of $R_s$) and `scale_wout` applies the same factor
+to `AM`/`AM_AUX_F`.
 
 A wout records no `PRES_SCALE`, so `scale_wout` puts $B_s^2$ into the
 coefficients it echoes: every `AM_AUX_F` knot value, and the entries of `AM`
@@ -58,6 +61,54 @@ the leading coefficient of `two_power`, the numerator of `rational`), so the
 profile a scaled wout describes evaluates to its `presf`. `AC`, `AI`, and the
 knot positions stay shape data: iota is dimensionless, and every current
 profile is normalized to `ctor`, which scales as $B_s R_s$.
+
+## Set the field on axis
+
+`PHIEDGE` alone does not fix `|B|` on axis: that value exists only after a
+solve. Solve once, then rescale the deck with
+{func}`vmex.core.scaling.match_b0`, which applies `scale_input` with
+`b_scale = b0_target / axis_field(wout, phi)`:
+
+```python
+import vmex
+
+inp = vmex.VmecInput.from_file("input.case")
+wout = vmex.wout_from_result(inp, vmex.solve_multigrid(inp))
+print(vmex.axis_field(wout, phi=0.0))  # |B| on axis at phi = 0, in T
+matched = vmex.match_b0(inp, wout, 5.7, phi=0.0)
+# re-solving `matched` at the same ns gives axis_field = 5.7 T, same beta, iota and shape
+```
+
+`axis_field` extrapolates the half-mesh `m = 0` Nyquist harmonics of `|B|` to
+`s = 0` (`1.5 b[1] - 0.5 b[2]`) and sums them at the toroidal angle `phi`; the
+`m > 0` terms are discretization artifacts at the axis and are left out. It is
+the point value behind `b00_axis`, and it differs from the wout's `b0 =
+rbtor0 / R_axis`, which is a toroidal-component quantity (on a strongly
+helical axis the two differ by 10 % or more). The extrapolation has
+$O(h_s)$ error, so define the target at the production `ns`.
+
+### Before the first solve
+
+Use the existing {func}`vmex.core.scaling.axis_field` with a fixed-boundary
+input to estimate its field without a solve. Set `probe=True` for two converged
+coarse solves instead. Compose either with {func}`vmex.core.scaling.scale_input`:
+
+```python
+matched = vmex.scale_input(inp, b_scale=5.7 / vmex.axis_field(inp, phi=0.0, probe=True))
+```
+
+The geometric estimate is `|PHIEDGE| / A`, where `A` is the area of the boundary
+cut by the plane normal to the curve through the cross-section centroids. It
+ignores the pressure, the current and the Shafranov shift. Against the solved
+`axis_field` of 17 example decks it is within 1.4 % on 13 (vacuum and low-beta
+stellarators, a shaped tokamak, up-down asymmetric decks), 2.5 to 3 % on a
+2.5 % beta QH and a tokamak with current, and 8 to 13 % on the two decks at
+2.7 to 2.9 % beta. Using the `phi = const` cut instead of the normal plane is
+off by 3 to 25 % on a helical axis. `axis_field(inp, probe=True)` solves at `ns = 7` and
+`13` and extrapolates in `1/ns`; it is within 0.5 % of the `ns = 97` value on
+16 of 17 decks and 0.8 % on the 2.7 % beta, 6 MA QA. It takes 0.3 to 2.5 s warm
+and 10 to 35 s with compilation. Either way, solve once at the production `ns`
+and apply `match_b0` to that wout to remove the remainder exactly.
 
 ## ARIES-CS targets from an input
 

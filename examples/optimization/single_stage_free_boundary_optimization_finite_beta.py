@@ -252,9 +252,9 @@ field0 = BiotSavart(coils0)
 B_phi = np.asarray(jax.vmap(field0.B)(jnp.asarray(points)))[:, 1].reshape(R.shape)
 toroidal_flux = float(np.sum(rho_weights[:, None] * B_phi * area_element)
                       * (2.0 * np.pi / theta.size))
-# VMEC counts the toroidal angle clockwise seen from above, so its PHIEDGE
-# has the opposite sign to the flux measured along +phi.
-inp = replace(inp, phiedge=-toroidal_flux)
+# The free-boundary solve takes the external field along the same +phi, and
+# stops (vacuum.f, ier_flag 7) unless PHIEDGE has the sign of that field.
+inp = replace(inp, phiedge=toroidal_flux)
 # Beta is proportional to the pressure at fixed boundary and flux, so one
 # fixed-boundary solve of the seed at PRES_SCALE = 1 gives the scale.
 beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
@@ -272,7 +272,7 @@ def field_from_u(u):
 params = im.params_from_input(inp)
 config = vj.make_free_boundary_config(
     inp, field0, ns=NS, ftol=FTOL, max_iterations=NITER,
-    adjoint_tol=1.0e-8, adjoint_solver="boundary_schur",
+    adjoint_tol=1.0e-8,
     field_from_parameters=field_from_u)
 solver_context = im.runtime_from_params(params, config.implicit)
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
