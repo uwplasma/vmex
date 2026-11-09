@@ -21,12 +21,13 @@ import pytest
 jax = pytest.importorskip("jax")
 import jax.numpy as jnp  # noqa: E402
 
-from vmex.core.errors import MgridNotFoundError, VmecNumericalError  # noqa: E402
+from vmex.core.errors import MgridNotFoundError, VmecInputError, VmecNumericalError  # noqa: E402
 from vmex.core import extender as ext  # noqa: E402
 from vmex.core.extender import MagneticField, VmecExtender, VmecInteriorField  # noqa: E402
 from vmex.core.mgrid import (  # noqa: E402
     MgridData,
     MgridField,
+    deck_extcur,
     read_mgrid,
     tabulate_cartesian_field,
     write_mgrid,
@@ -945,6 +946,57 @@ def test_deck_extcur_multiplies_the_table_in_every_mgrid_mode(
             np.testing.assert_allclose(loaded, -1.5 * np.asarray(want), rtol=1e-14, atol=0.0)
     cubic = MgridField.from_input(SimpleNamespace(extcur=None, mgrid_file="unused"), path, order=3)
     assert cubic.order == 3 and not np.any(cubic.extcur)
+
+
+def test_deck_extcur_pads_missing_groups_and_rejects_dropped_currents(data: MgridData) -> None:
+    """EXTCUR beyond the mgrid's coil groups is an error, not a silent drop.
+
+    VMEC2000's ``read_mgrid`` reads ``extcur(ig)`` for the file's ``nextcur``
+    groups only, so a deck written for a two-group mgrid runs on a one-group
+    table with its second current ignored; VMEC++ rejects the length
+    mismatch.  VMEX keeps the VMEC2000 padding (missing entries are zero,
+    trailing zeros are harmless) and stops on a nonzero entry that has no
+    group, which would change the field it was written for.
+    """
+    assert data.nextcur == 1
+    np.testing.assert_array_equal(deck_extcur([-12.0], data), [-12.0])
+    np.testing.assert_array_equal(deck_extcur([-12.0, 0.0, 0.0], data), [-12.0])
+    np.testing.assert_array_equal(deck_extcur(None, data), [0.0])
+    np.testing.assert_array_equal(deck_extcur([], data), [0.0])
+    two = replace(data, nextcur=2, coil_groups=("a", "b"), raw_coil_cur=(1.0, 1.0),
+                  br=np.repeat(data.br, 2, 0), bp=np.repeat(data.bp, 2, 0),
+                  bz=np.repeat(data.bz, 2, 0))
+    np.testing.assert_array_equal(deck_extcur([3.0], two), [3.0, 0.0])  # VMEC2000: group 2 off
+
+    with pytest.raises(VmecInputError) as exc:
+        deck_extcur([-12.0, -2.55], data)
+    assert exc.value.ier_flag == 5
+    assert "EXTCUR(2) = -2.55" in exc.value.hint and "1 coil group but" in exc.value.hint
+    with pytest.raises(VmecInputError, match="ERROR READING INPUT"):
+        deck_extcur([0.0, 0.0, 4.0], data)
+
+    deck = SimpleNamespace(extcur=[-12.0, -2.55], mgrid_file=str(MGRID_PATH))
+    with pytest.raises(VmecInputError, match="ERROR READING INPUT"):
+        MgridField.from_input(deck)
+    deck.extcur = [-12.0]
+    np.testing.assert_array_equal(MgridField.from_input(deck).extcur, [-12.0])
+
+
+def test_cli_plan_rejects_deck_extcur_the_mgrid_cannot_apply(tmp_path: Path) -> None:
+    """``vmex <deck>`` stops before the solve, with the extra entry named."""
+    from vmex.core.cli import _free_boundary_plan
+    from vmex.core.input import VmecInput
+
+    deck = REPO / "examples" / "data" / "input.cth_like_free_bdy_lasym_small"
+    inp = VmecInput.from_file(deck)
+    assert np.asarray(inp.extcur).size == 1  # the shipped deck is consistent
+    plan = _free_boundary_plan(SimpleNamespace(coils=None), inp, deck, emit=lambda *a, **k: None)
+    np.testing.assert_array_equal(plan.extcur, np.asarray(inp.extcur))
+
+    bad = replace(inp, extcur=np.asarray([-12.0, -2.55]))
+    with pytest.raises(VmecInputError) as exc:
+        _free_boundary_plan(SimpleNamespace(coils=None), bad, deck, emit=lambda *a, **k: None)
+    assert "EXTCUR(2) = -2.55" in exc.value.hint
 
 
 def test_raw_current_table_reproduces_the_vmec2000_pairing(data: MgridData, tmp_path: Path) -> None:

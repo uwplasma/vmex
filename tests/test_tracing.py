@@ -63,6 +63,37 @@ def test_counts_are_consistent(traced):
     assert np.all(np.diff(traced.loss_fractions) >= 0.0)  # cumulative
 
 
+def test_trace_timing_separates_setup_from_orbits(solovev_wout, traced, monkeypatch):
+    from types import SimpleNamespace
+    import essos.boozer
+    from vmex.core import tracing
+
+    field, bx = tracing.boozer_field(read_wout(solovev_wout), mboz=8, nboz=8)
+    clock = [0.]
+    monkeypatch.setattr(tracing.time, "perf_counter", lambda: clock[0])
+    monkeypatch.setattr(tracing, "_COMPILE_S", [0., 1.])
+
+    def stage(seconds, compilation, result):
+        def run(*args, **kwargs):
+            clock[0] += seconds
+            tracing._COMPILE_S[0] += compilation
+            return result
+        return run
+
+    monkeypatch.setattr(tracing, "boozer_field", stage(2., .5, (field, bx)))
+    monkeypatch.setattr(tracing, "sample_births", stage(3., .25, traced.initial_conditions))
+    trace = SimpleNamespace(states=traced.trajectories, loss_times=traced.lost_times,
+                            thermalized_times=traced.thermalized_times,
+                            energy_error=traced.energy_error)
+    monkeypatch.setattr(essos.boozer, "trace_boozer", stage(7., 1.25, trace))
+    result = trace_alphas(solovev_wout, **TRACE_KWARGS)
+    assert result.wall_time_s == 7.
+    assert result.metadata["setup_time_s"] == 5.
+    assert result.metadata["total_wall_time_s"] == 12.
+    assert result.metadata["compile_time_s"] == 2.
+    assert result.metadata["trace_compile_time_s"] == 1.25
+
+
 @pytest.mark.parametrize("name,bad", [
     ("energy_eV", 0), ("energy_eV", -1), ("energy_eV", np.nan),
     ("energy_eV", np.inf), ("energy_eV", [20000]),
@@ -557,7 +588,8 @@ def test_cli_trace_writes_summary_files_and_figures(solovev_wout, tmp_path):
     assert summary["method"] == "adaptive8"
     assert summary["nparticles"] == 8 and summary["scale_target"] == "volavgB"
     assert summary["collisions"] is True
-    assert {"loss_fraction_sigma", "compile_time_s", "devices", "versions"} <= set(summary)
+    assert {"loss_fraction_sigma", "compile_time_s", "trace_compile_time_s",
+            "setup_time_s", "total_wall_time_s", "devices", "versions"} <= set(summary)
     arrays = np.load(tmp_path / "solovev_trace.npz")
     assert arrays["initial_conditions"].shape == (8, 4)
     assert np.all((arrays["initial_conditions"][:, 0] > 0) & (arrays["initial_conditions"][:, 0] < 1))
@@ -988,3 +1020,73 @@ def test_cli_trace_prints_the_truncation_warning_once(solovev_wout, tmp_path, mo
     assert rc == 0
     assert buffer.getvalue().count("Equilibrium spectrum truncated") == (0 if silenced else 1)
     assert silenced or "pass --trace-no-resolution-check to silence." in buffer.getvalue()
+
+
+@pytest.mark.parametrize("angle_grid", [None, 6, 9])
+def test_angular_table_control_is_forwarded_and_saved(monkeypatch, angle_grid, tmp_path):
+    """Acquisition metadata records the requested representation, including direct sums."""
+    from types import SimpleNamespace
+    from vmex.core import tracing
+    import essos.boozer
+    import booz_xform_jax
+
+    calls = {}
+    bx = SimpleNamespace(asym=False, xm_b=np.array([0]), xn_b=np.array([0]),
+                         nfp=1, s_b=np.array([0.25]), iota=np.array([0.6]),
+                         rmnc_b=np.ones((1, 1)), zmns_b=np.ones((1, 1)), numns_b=np.ones((1, 1)))
+    class Transform:
+        def __new__(cls, **kwargs):
+            return bx
+    bx.read_wout_data = lambda *args, **kwargs: None
+    bx.run = lambda: None
+    monkeypatch.setattr(booz_xform_jax, "Booz_xform", Transform)
+    def construct(booz, psi0, mode_tolerance, *, angle_grid):
+        calls["angle_grid"] = angle_grid
+        return SimpleNamespace(xm=np.array([0]), table=None if angle_grid is None else np.zeros(1))
+    monkeypatch.setattr(essos.boozer.BoozerField, "from_booz_xform", construct)
+    def trace(field, *args, **kwargs):
+        return SimpleNamespace(states=np.zeros((2, 2, 5)), energy_error=np.zeros(2),
+                               loss_times=np.full(2, -1), thermalized_times=np.full(2, -1),
+                               failed=np.zeros(2, dtype=bool))
+    monkeypatch.setattr(essos.boozer, "trace_boozer", trace)
+    monkeypatch.setattr(tracing, "sample_births", lambda *args, **kwargs: np.zeros((2, 4)))
+    monkeypatch.setattr(tracing, "spectral_truncation", lambda wout: 0.0)
+    wout = SimpleNamespace(rmnc=np.ones(1), lasym=False, phi=np.array([0, 1]), Aminor_p=1.7, volavgB=5.7)
+    result = tracing.trace_alphas(wout, scale=None, nparticles=2, angle_grid=angle_grid, times_to_trace=2)
+    assert calls["angle_grid"] == angle_grid
+    assert result.metadata["angle_grid"] == angle_grid
+    assert result.metadata["angle_table"] is (angle_grid is not None)
+    summary, _ = result.save(tmp_path / "representation")
+    import json
+    assert json.loads(summary.read_text())["angle_grid"] == angle_grid
+
+
+@pytest.mark.parametrize("angle_grid", [0, -1, True, 1.5, np.nan, (32, 32)])
+def test_invalid_angular_table_control_rejected_before_io(angle_grid):
+    with pytest.raises(ValueError, match="angle_grid"):
+        trace_alphas("missing_wout.nc", angle_grid=angle_grid)
+
+
+def test_cli_direct_spectrum_control_requires_trace():
+    parser = cli.build_parser()
+    assert parser.parse_args([str(SOLOVEV_DECK)]).trace_angle_grid is None
+    assert parser.parse_args([str(SOLOVEV_DECK), "--trace-angle-grid", "0"]).trace_angle_grid == 0
+    with pytest.raises(SystemExit):
+        cli.main([str(SOLOVEV_DECK), "--trace-angle-grid", "0", "--quiet"])
+
+
+@pytest.mark.parametrize("flag,expected", [(None, 6), ("0", None), ("9", 9)])
+def test_cli_angular_table_control_forwarded(monkeypatch, tmp_path, flag, expected):
+    from types import SimpleNamespace
+    from vmex.core import plotting, tracing
+
+    seen = {}
+    def trace(*args, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(metadata={"spectral_truncation": 0}, save=lambda path: (path, path))
+    monkeypatch.setattr(tracing, "trace_alphas", trace)
+    monkeypatch.setattr(plotting, "plot_tracing", lambda *args, **kwargs: {})
+    args = cli.build_parser().parse_args(["wout_fake.nc", "--trace"] +
+                                         ([] if flag is None else ["--trace-angle-grid", flag]))
+    cli._run_trace(Path("wout_fake.nc"), args, tmp_path, emit=lambda message: None, quiet=True)
+    assert seen["angle_grid"] == expected
