@@ -916,3 +916,49 @@ def test_filter_bsubuv_lasym_halves_the_self_conjugate_nyquist_modes():
     assert out_u.shape == bsubu.shape and out_v.shape == bsubv.shape
     assert np.all(np.isfinite(out_u)) and np.all(np.isfinite(out_v))
     assert float(np.max(np.abs(out_u - bsubu))) > 1e-3
+
+
+# ---------------------------------------------------------------------------
+# Finite-collisionality equivalent-ripple spread (Albert et al. 2024, eq. 85)
+# ---------------------------------------------------------------------------
+
+
+def _spread(xm, xn, bmnc, iota=(0.42, 0.61), nfp=3):
+    return bs.equivalent_ripple_spread(
+        bmnc_b=jnp.tile(jnp.asarray(bmnc, float), (len(iota), 1)), xm_b=np.array(xm),
+        xn_b=np.array(xn), iota_b=jnp.asarray(iota), nfp=nfp)
+
+
+def test_equivalent_ripples_vanish_for_omnigenous_and_not_for_helical_fields():
+    # B(zeta) only has poloidally closed contours and equal period integrals.
+    # A helical B(theta - zeta) off its helicity need not.
+    np.testing.assert_allclose(_spread([0, 0, 0], [0, 3, 6], [1.0, 0.15, 0.03]), 0.0, atol=1e-7)
+    qh = _spread([0, 1], [0, 3], [1.0, 0.15])
+    assert np.all(np.asarray(qh) > 1e-3)
+    for scale in np.logspace(-4, 4, 9):
+        np.testing.assert_allclose(_spread([0, 0], [0, 3], scale * np.array([1., .15])), 1e-8, rtol=1e-12)
+        np.testing.assert_allclose(_spread([0, 1], [0, 3], scale * np.array([1., .15])), qh, rtol=1e-12)
+
+
+def test_finite_nu_residual_is_differentiable_and_rows_scale_with_amplitude():
+    def f(eps):
+        return jnp.sum(_spread([0, 1], [0, 3], [1.0, eps]))
+    g = jax.grad(f)(0.1)
+    assert np.isfinite(g) and g > 0
+    assert float(f(0.2)) > 1.9 * float(f(0.1))
+
+
+def test_bootstrap_finite_nu_residual_weights_rows_and_lazy_export(monkeypatch):
+    from vmex.core import optimize
+    assert optimize.BootstrapFiniteNuResidual is bs.BootstrapFiniteNuResidual
+    for bad in ([1.0], [-1.0, 2.0], [0.0, 0.0]):
+        with pytest.raises(ValueError, match="weights"):
+            bs.BootstrapFiniteNuResidual([0.3, 0.6], weights=bad)
+    term = bs.BootstrapFiniteNuResidual([0.3, 0.6], weights=[1.0, 3.0])
+    booz = dict(bmnc_b=jnp.tile(jnp.array([1.0, 0.15]), (2, 1)), bmns_b=jnp.full((2, 2), 0.02),
+                xm_b=np.array([0, 1]),
+                xn_b=np.array([0, 3]), iota_b=jnp.array([0.42, 0.61]), nfp=3)
+    monkeypatch.setattr(term, "_boozer", lambda state, rt: booz, raising=False)
+    out = term.compute_state(None, None)
+    np.testing.assert_allclose(out["residuals1d"], np.sqrt([0.25, 0.75]) * np.asarray(out["spread"]))
+    np.testing.assert_allclose(out["total"], np.sum(np.asarray(out["residuals1d"]) ** 2))
