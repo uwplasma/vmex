@@ -48,7 +48,7 @@ OFFSETS = [-0.04, -0.02, 0.0, 0.02, 0.04]
 # Radial grid, iteration budget and tolerance of every solve, and the control
 # update interval (the PID gains keep their defaults; the target is the
 # nominal axis):
-NS, NITER, FTOL = 16, 8000, 1e-10
+NS, NITER, FTOL = 16, 8000, 1e-12
 INTERVAL = 20
 
 # Output directory (deck, mgrid) and the two figures (32-color lossless WebP):

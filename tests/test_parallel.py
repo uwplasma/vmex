@@ -13,6 +13,7 @@ the mechanism is explained in ``docs/explanation/architecture.rst``.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 
 import numpy as np
@@ -93,53 +94,11 @@ def test_map_ensemble_preserves_order_and_is_serial_at_one_worker():
     assert parallel.map_ensemble(fn, []) == []
 
 
-def test_default_workers_clamping():
-    cpu = parallel.available_cpus()
-    assert parallel.default_workers(3) == min(3, cpu)
-    assert parallel.default_workers(10_000) == min(10_000, cpu)
-    # explicit -> clamped to [1, n_items]
-    assert parallel.default_workers(4, 100) == 4
-    assert parallel.default_workers(4, 0) == 1
-    assert parallel.default_workers(4, -5) == 1
-    assert parallel.default_workers(0) == 1
+def test_cpu_count_and_map_come_from_solvax():
+    import solvax.parallel
 
-
-def test_available_cpus_respects_process_limits(monkeypatch):
-    monkeypatch.setattr(parallel.os, "process_cpu_count", lambda: 3, raising=False)
-    monkeypatch.setattr(parallel.os, "cpu_count", lambda: 64)
-    assert parallel.available_cpus() == 3
-
-
-def test_available_cpus_uses_affinity_fallback(monkeypatch):
-    monkeypatch.delattr(parallel.os, "process_cpu_count", raising=False)
-    monkeypatch.setattr(
-        parallel.os, "sched_getaffinity", lambda _pid: {2, 4}, raising=False
-    )
-    monkeypatch.setattr(parallel.os, "cpu_count", lambda: 64)
-    assert parallel.available_cpus() == 2
-
-
-def test_available_cpus_respects_scheduler_allocation(monkeypatch):
-    monkeypatch.delattr(parallel.os, "process_cpu_count", raising=False)
-    monkeypatch.delattr(parallel.os, "sched_getaffinity", raising=False)
-    monkeypatch.setattr(parallel.os, "cpu_count", lambda: 64)
-    for name in ("SLURM_CPUS_PER_TASK", "PBS_NP", "NSLOTS", "LSB_DJOB_NUMPROC"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "6")
-    assert parallel.available_cpus() == 6
-
-
-def test_available_cpus_ignores_unavailable_hints(monkeypatch):
-    monkeypatch.delattr(parallel.os, "process_cpu_count", raising=False)
-
-    def unavailable(_pid):
-        raise OSError("affinity unavailable")
-
-    monkeypatch.setattr(parallel.os, "sched_getaffinity", unavailable, raising=False)
-    monkeypatch.setattr(parallel.os, "cpu_count", lambda: 7)
-    for name in ("SLURM_CPUS_PER_TASK", "PBS_NP", "NSLOTS", "LSB_DJOB_NUMPROC"):
-        monkeypatch.setenv(name, "invalid")
-    assert parallel.available_cpus() == 7
+    assert parallel.available_cpus is solvax.parallel.available_cpus
+    assert parallel.map_ensemble is solvax.parallel.map_independent
 
 
 def test_map_ensemble_exception_policy():
@@ -217,3 +176,66 @@ def test_parallel_finite_difference_and_problem_ensemble():
         )
     with pytest.raises(ValueError, match="equal length"):
         parallel.evaluate_problems(problems, [problems[0].x0])
+
+
+
+class _Doubled:
+    """Picklable worker function that also reports the worker's core count."""
+
+    def __call__(self, x):
+        cores = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else 1
+        return np.append(2.0 * np.asarray(x), cores)
+
+
+def _build_doubled():
+    return _Doubled()
+
+
+def _gpu_env(x):
+    return os.environ.get("CUDA_VISIBLE_DEVICES")
+
+
+def _build_gpu_env():
+    return _gpu_env
+
+
+def test_process_workers_pin_cores_and_match_serial_jacobian():
+    """Spawned workers keep order, pin one core each and reproduce the Jacobian."""
+    x = np.array([0.3, -0.7])
+    with parallel.ProcessWorkers(_build_doubled, 2) as pool:
+        rows = pool.map([x, 2 * x])
+        jacobian = parallel.finite_difference_jacobian(None, x, pool=pool)
+    np.testing.assert_array_equal(rows[1][:2], 4 * x)
+    if hasattr(os, "sched_getaffinity"):
+        assert [row[2] for row in rows] == [1.0, 1.0]
+    np.testing.assert_allclose(jacobian[:2], 2 * np.eye(2), atol=1e-8)
+
+
+def test_process_workers_deal_gpus_and_refuse_oversubscription(tmp_path):
+    with parallel.ProcessWorkers(
+        _build_gpu_env, gpus=[7], cache_dir=tmp_path
+    ) as pool:
+        assert pool.map([0, 1]) == ["7", "7"]
+    with parallel.ProcessWorkers(
+        _build_doubled, threads=parallel.available_cpus()
+    ) as pool:
+        assert pool.map([1.0])[0][0] == 2.0
+    if hasattr(os, "sched_getaffinity"):
+        with pytest.raises(ValueError, match="exceeds"):
+            parallel.ProcessWorkers(_build_doubled, 10**6)
+
+
+def test_worker_start_applies_its_slot_in_process(monkeypatch, tmp_path):
+    """The spawned-side setup, run here because coverage cannot see the child."""
+    import multiprocessing
+
+    pinned = []
+    monkeypatch.setattr(parallel.os, "sched_setaffinity",
+                        lambda _pid, cores: pinned.append(cores), raising=False)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "")
+    monkeypatch.setenv("VMEX_COMPILATION_CACHE_DIR", "")
+    slots = multiprocessing.get_context("spawn").Value("i", 1)
+    parallel._start_worker(_build_gpu_env, [[0], [5]], ["0", "3"], tmp_path, slots)
+    assert pinned == [[5]] and slots.value == 2
+    assert os.environ["VMEX_COMPILATION_CACHE_DIR"] == str(tmp_path)
+    assert parallel._call_worker(None) == "3"
