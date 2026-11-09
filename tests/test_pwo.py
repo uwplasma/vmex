@@ -574,6 +574,39 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     assert Stage.metadata["term_slices"][0][2] == flat.size
 
 
+def test_free_map_problem_appends_band_rows_with_exact_derivatives(monkeypatch):
+    spec = _spectrum(2)
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
+    shift = np.linspace(.01, .03, flat.size)
+
+    class Stage:
+        x0 = np.zeros(1)
+
+        def residual(self, x):
+            return flat + shift*x[0]
+
+        def residual_jac(self, x):
+            return shift[:, None]
+
+    class Equilibrium:
+        state = runtime = None
+
+    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
+    values = dict(a=.3, b=.1, c=-2., eta_min=2.8)
+    free = ("a", "eta_min")
+    plain = FreeMapProblem(Stage(), mapped, Equilibrium(), values, free, weight=10.)
+    banded = FreeMapProblem(Stage(), mapped, Equilibrium(), values, free, weight=10.,
+                            band_weight=4., nband=5)
+    z = banded.x0 + .05
+    assert banded.residual(z).size == plain.residual(z).size + 2*12*5
+    jac = banded.residual_jac(z)
+    fd = np.column_stack([(banded.residual(z + h) - banded.residual(z - h)) / 2e-6
+                          for h in 1e-6*np.eye(z.size)])
+    np.testing.assert_allclose(jac, fd, rtol=1e-5, atol=1e-7)
+
+
 def test_free_map_failure_pairs_survive_nested_views_and_status_retries(monkeypatch):
     from types import SimpleNamespace
     from vmex.core.problem import FunctionProblem

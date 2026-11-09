@@ -124,6 +124,16 @@ def _pwo_seed():
     return replace(inp, rbc=rbc, zbs=zbs)
 
 
+def _solve(inp, ladder=(37, 45, 55, 71)):
+    """Solve on the final radial grid, restarting in small steps as the example does."""
+    equilibrium = None
+    for ns in ladder:
+        equilibrium = opt.solve_equilibrium(
+            replace(inp, ns_array=np.array([ns])), verbose=False, raise_on_max_iterations=True,
+            initial_state=None if equilibrium is None else equilibrium.solution)
+    return equilibrium
+
+
 def _draw_pwo(output):
     result = vj.VmecInput.from_file(QS_INPUT_DIR / f"input.pwO_optimized_nfp{PWO_NFP}")
     cases = ((_pwo_seed(), "Near-circular seed", "#566a79"), (result, "pwO", "#c56627"))
