@@ -242,3 +242,21 @@ def test_no_tracked_file_exceeds_one_mib() -> None:
     paths = [ROOT / path for path in result.stdout.decode().rstrip("\0").split("\0") if path]
     oversized = [path.relative_to(ROOT) for path in paths if path.stat().st_size > 2**20]
     assert not oversized
+
+
+def test_unreachable_download_host_falls_back_to_the_release_api(monkeypatch) -> None:
+    """A timed-out release-download URL is retried through the GitHub releases API."""
+    module = _load_fetch_assets()
+    bundle = module.BUNDLES_BY_NAME["reference-nc"]
+    name = bundle.url.rsplit("/", 1)[1]
+    listing = json.dumps({"assets": [{"name": name, "url": "https://api.example/asset"}]}).encode()
+
+    def _open(request):
+        url = getattr(request, "full_url", request)
+        if url == bundle.url:
+            raise module.urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+        assert url == "https://api.example/asset" or "/releases/tags/" in url
+        return io.BytesIO(listing if "/releases/tags/" in url else b"payload")
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", _open)
+    assert module._read_bundle(bundle) == b"payload"
