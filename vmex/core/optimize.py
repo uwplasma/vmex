@@ -193,6 +193,7 @@ __all__ = [
     "minimize",
     "HeliumAshObjective",  # noqa: F822 - provided lazily by __getattr__ below
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
+    "BootstrapFiniteNuResidual",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
@@ -208,9 +209,9 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
     if name == "HeliumAshObjective":
         from .ash import HeliumAshObjective
         return HeliumAshObjective
-    if name == "RedlBootstrapMismatch":
-        from .bootstrap import RedlBootstrapMismatch
-        return RedlBootstrapMismatch
+    if name in ("RedlBootstrapMismatch", "BootstrapFiniteNuResidual"):
+        from . import bootstrap
+        return getattr(bootstrap, name)
     # gammac.py sits on the stability/turbulence field-line lane; the lazy
     # re-export keeps the fast-ion proxy import-light like the f_boot term.
     if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
