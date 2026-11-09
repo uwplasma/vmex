@@ -675,6 +675,62 @@ with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
 boundary.
 
+Bootstrap current. The mapped field has zero collisionless geometric factor for every map;
+the current comes from the unmapped band where :math:`B_{\max}` lives. ``BOOTSTRAP_TERM = "band"``
+flattens :math:`B` across that band, and ``DKX_FINAL_STAGES`` adds the DKX
+:math:`\langle \mathbf{J}\cdot\mathbf{B}\rangle` row to the last stages. Verify either with a
+converged DKX run. The equivalent-ripple spread
+(:class:`~vmex.core.bootstrap.BootstrapFiniteNuResidual`) ranks designs by their DKX current, and
+was also tried as an objective row. NFP 3, 15 evaluations per stage, one optimization per row,
+DKX at ``--res 25,33,64,8`` with spectral angles on nine surfaces at ARIES-CS size. DKX does not
+converge on a surface at a low-order rational :math:`\iota`, so the first row replaces
+:math:`s = 0.25` (:math:`\iota = -6/7`) by 0.22 and 0.30, the last row replaces 0.12 by 0.14, and the DKX-row run has no :math:`s = 0.97` sample:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Modes
+     - Extra row
+     - Wall (s)
+     - DKX :math:`I_{\rm bs}` (kA)
+     - :math:`\epsilon_{\rm eff}^{3/2}`, edge
+   * - 1 to 4
+     - none
+     - 922
+     - +133
+     - 1.0e-3
+   * - 1 to 4
+     - spread, weight 1e4
+     - 923
+     - -98
+     - 1.5e-3
+   * - 1 to 4
+     - spread, weight 1e5
+     - 922
+     - -167
+     - 2.2e-3
+   * - 1 to 4
+     - DKX row, last stage
+     - 1252
+     - +49
+     - 2.6e-4
+   * - 1 to 3
+     - none
+     - 404
+     - +537
+     - 6.0e-4
+   * - 1 to 3
+     - spread, weight 1e4
+     - 438
+     - -148
+     - 2.4e-3
+
+The spread at weight 1e4 lowers :math:`|I_{\rm bs}|` in both pairs but changes its sign, weight 1e5
+does not lower it, the run time is unchanged and the edge :math:`\epsilon_{\rm eff}^{3/2}`
+rises by 1.5 to 4 times. The DKX row gives a smaller current at 1.4 times the run time without that
+cost. With ``QI_optimization.py`` the current is already below 6 kA, and the spread at weight 1e4 leaves it
+there (+5 and -4 kA) while halving the edge :math:`\epsilon_{\rm eff}^{3/2}`.
+
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
