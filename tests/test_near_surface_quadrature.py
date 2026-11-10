@@ -143,3 +143,9 @@ def test_auto_resolves_identically_eager_and_traced_and_pulls_back_the_returned_
         step = 1e-5
         numeric = (scalar(parameters + step) - scalar(parameters - step)) / (2 * step)
         assert abs(pullback - numeric) <= 1e-6 * max(abs(numeric), 1.0), (order, pullback, numeric)
+
+
+def test_direct_tier_stays_the_plain_schedule_whatever_the_virtual_casing_routing():
+    """Newer virtual-casing-jax routes ``B_plasma_xyz`` near the surface; ``auto`` must not see that."""
+    field = VmecExtender.from_surface_data(_two_source_torus(16, 16), digits=4)
+    assert getattr(field.plasma_field.config, "near_surface", False) is False
