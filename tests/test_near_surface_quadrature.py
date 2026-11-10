@@ -125,22 +125,24 @@ def test_auto_resolves_identically_eager_and_traced_and_pulls_back_the_returned_
                                          _torus_points(0.15, count=1, seed=6)]))
     parameters = jnp.array([1.0])
     original = VmecExtender.from_parameterized_surface_data(
-        scaled, parameters, accuracy_check="off", graded_nodes=(24, 48))
+        scaled, parameters, accuracy_check="off")
     field = original.set_points(points)
     copied = copy.copy(field)
     for order, name in enumerate(("B", "gradB", "gradgradB", "gradgradgradB")):
         eager = getattr(field, name)()
+        # one map: the grading centre is a Newton iterate, so compilations agree
+        # to the rule's own error (1e-9 at third order), not to rounding
         np.testing.assert_allclose(jax.jit(getattr(field, name))(points), eager,
-                                   rtol=1e-10, atol=1e-12)
-        np.testing.assert_allclose(getattr(copied, name)(), eager, rtol=1e-10, atol=1e-12)
+                                   rtol=1e-8, atol=1e-10)
+        np.testing.assert_allclose(getattr(copied, name)(), eager, rtol=1e-8, atol=1e-10)
         weights = jnp.cos(jnp.arange(eager.size)).reshape(eager.shape)
         pullback = np.asarray(getattr(field, name + "_vjp")(weights)).ravel()[0]
 
         def scalar(p, name=name, weights=weights):
             rebuilt = VmecExtender.from_surface_data(
-                scaled(p), accuracy_check="off", graded_nodes=(24, 48)).set_points(points)
+                scaled(p), accuracy_check="off").set_points(points)
             return float(jnp.vdot(getattr(rebuilt, name)(), weights))
-        step = 1e-5
+        step = 1e-3  # the field is linear in the parameter; a small step only adds round-off
         numeric = (scalar(parameters + step) - scalar(parameters - step)) / (2 * step)
         assert abs(pullback - numeric) <= 1e-6 * max(abs(numeric), 1.0), (order, pullback, numeric)
 
