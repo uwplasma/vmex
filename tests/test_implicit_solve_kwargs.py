@@ -72,3 +72,35 @@ def test_implicit_least_squares_honors_multigrid_solve_kwargs():
         rtol=1.0e-7,
         atol=1.0e-10,
     )
+
+
+def test_implicit_problem_passes_host_roots_to_terms():
+    """A term with ``roots`` gets them from the host, as an argument of the jitted rows."""
+
+    class Doubled:
+        """Toy ambipolar term: the aspect ratio times its 'root' 2 (3 without roots)."""
+
+        ambipolar = True
+        calls = 0
+
+        def roots(self, state, runtime):
+            del state, runtime
+            Doubled.calls += 1
+            return (np.asarray([2.0]),)
+
+        def residuals_state(self, state, runtime, roots=None):
+            factor = 3.0 if roots is None else roots[0][0]
+            return factor * opt.aspect_ratio(state, runtime)
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    inp = dataclasses.replace(inp, ns_array=np.asarray([5]),
+                              ftol_array=np.asarray([1.0e-10]), niter_array=np.asarray([1000]))
+    problem = opt.VmecProblem.from_tuples(
+        inp, [(Doubled().residuals_state, 0.0, 1.0), (opt.aspect_ratio, 0.0, 1.0)],
+        max_mode=1, device="cpu")
+    rows = problem.residual(problem.x0)
+    jac = problem.residual_jac(problem.x0)
+    np.testing.assert_allclose(rows[0], 2.0 * rows[1], rtol=1e-10)
+    np.testing.assert_allclose(jac[0], 2.0 * jac[1], rtol=1e-8, atol=1e-12)
+    assert Doubled.calls >= 1
