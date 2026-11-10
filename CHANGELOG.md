@@ -2,6 +2,10 @@
 
 Full release notes are on GitHub. Numerical results here have committed artifacts; `benchmarks/` records identify the measured revision.
 
+## Unreleased
+
+- **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
+
 ## 0.14.0 - 2026-11-09
 
 - **pwO bootstrap control.** `pwO_optimization.py` gains `BOOTSTRAP_TERM = "band"`, which flattens |B| across the unmapped B_max band (DKX current -135 to -5 kA at NFP 3), and optional DKX stages at the end; `BootstrapFiniteNuResidual` reports the equivalent-ripple spread as a diagnostic.
@@ -189,9 +193,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
 `VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
-(#449). On clusters, a shared cache path was read by nodes with different CPU
-features; XLA rejected the other node's executables ("Target machine feature
-... is not supported on the host machine") and recompiled on every run.
+(#449): nodes with different CPU features no longer recompile on every run.
 
 ## 0.11.1 and earlier
 
