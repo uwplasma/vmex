@@ -51,11 +51,11 @@ BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2, 3]
-MAX_NFEV = [15]*len(MAX_MODES)
+MAX_MODES = [1, 2, 3, 4, 5]
+MAX_NFEV = [25]*len(MAX_MODES)
 ASPECT_TARGET = 6.0
-MAGNETIC_WELL_TARGET = 0          # 0 turns the well off
-# MAGNETIC_WELL_TARGET = 0.01  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
+# MAGNETIC_WELL_TARGET = 0          # 0 turns the well off
+MAGNETIC_WELL_TARGET = 0.03  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
 MAGNETIC_WELL_WEIGHT = 1e3
 ELONGATION_LIMIT = 9.0
 NS_ARRAY = np.array([35])
@@ -64,7 +64,7 @@ FTOL_ARRAY = np.array([1e-12])
 STAGE_FTOL = [FTOL_ARRAY]*len(MAX_MODES)
 
 # Stages that also minimize the smooth fast-ion proxy GammaC, its surfaces and weight:
-GAMMA_C = [False]*len(MAX_MODES) #[False] * (len(MAX_MODES) - 2) + [True] * 2
+GAMMA_C = [False] * (len(MAX_MODES) - 2) + [True] * 2 #[False]*len(MAX_MODES) #[False] * (len(MAX_MODES) - 2) + [True] * 2
 GAMMA_C_SURFACES = tuple(SURFACES[1:])
 GAMMA_C_WEIGHT = 100.0
 
@@ -76,7 +76,7 @@ GAMMA_C_WEIGHT = 100.0
 # Spectral angles on 15 x 21 x 48 x 5 are within 8 % of the converged Fokker-Planck run on a
 # 2-period design; the 11 x 11 finite-difference default is not converged on pwO.
 # Residual units: MA T/m^2 at ARIES-CS size.
-DKX_FINAL_STAGES = 0
+DKX_FINAL_STAGES = 2
 DKX_SURFACES = (0.25, 0.55, 0.85)
 DKX_WEIGHT = 30.0
 DKX_RESOLUTION = dict(Ntheta=15, Nzeta=21, Nxi=48, NL=4, Nx=5)
@@ -85,7 +85,8 @@ ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te =
 DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
 
 # Targets:
-IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
+IOTA_FLOOR = 0.31 if NFP==1 else 1.05  # minimum |iota| over the profile; use 0.31 for NFP = 1
+IOTA_MAX = 1.95                   # maximum |iota| over the profile
 MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
@@ -104,7 +105,7 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
-FINAL_FTOL = 1.0e-10
+FINAL_FTOL = 1.0e-12
 FINAL_NITER = 30000
 
 # Every output file name contains this:
@@ -139,6 +140,10 @@ def boozer_spectrum(equilibrium_state, solver_context):
     """The field and iota the map reads; FreeMapProblem turns these rows into the pwO residual."""
     return pwo.spectrum_state(equilibrium_state, solver_context)
 
+def max_iota(equilibrium_state, solver_context):
+    """Maximum |iota| over the profile, which the mapped variance does not see."""
+    return opt.max_abs_iota(equilibrium_state, solver_context)
+
 
 # Each term is (function, target, weight).
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
@@ -147,6 +152,7 @@ objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 1000.0),
+    (opt.Hinge(max_iota, ceiling=IOTA_MAX), 0.0, 100.0),
     (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
@@ -176,7 +182,7 @@ if any(DKX):
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("elongation", opt.max_elongation, ".4f"),
-    ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
+    ("max iota", max_iota, ".4f"), ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
     ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
 monitor = opt.OptimizationMonitor()
 
@@ -245,15 +251,15 @@ for ns in FINAL_NS:
         final_input, initial_state=final_equilibrium.solution,
         verbose=not ci_smoke, raise_on_max_iterations=True)
 
-# Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
-seed_equilibrium = opt.solve_equilibrium(
-    replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
-    verbose=False, raise_on_max_iterations=True)
-half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
-neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
-seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
-final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
-print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
+# # Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
+# seed_equilibrium = opt.solve_equilibrium(
+#     replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
+#     verbose=False, raise_on_max_iterations=True)
+# half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
+# neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
+# seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
+# final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
+# print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 
 ### Print, plot and save ######################################################
 

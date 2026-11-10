@@ -4,6 +4,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
+- **`max_abs_iota` objective.** `vmex.optimize.max_abs_iota` returns the largest `|iota|` over the half-mesh surfaces (axis excluded), the counterpart of `min_abs_iota`; `pwO_optimization.py` uses it for its iota ceiling.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09

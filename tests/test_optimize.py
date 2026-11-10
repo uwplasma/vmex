@@ -272,6 +272,16 @@ def test_min_abs_iota_floors_the_profile_not_its_average(solovev_eq):
         opt.soft_min_abs_iota(eq.state, eq.runtime, tau=0.0)
 
 
+def test_max_abs_iota_reads_the_profile_maximum(solovev_eq):
+    """``max_abs_iota`` is the half-mesh ``|iota|`` maximum, axis excluded."""
+    eq = solovev_eq
+    iotas = np.abs(np.asarray(eq.wout.iotas)[1:])
+    assert float(opt.max_abs_iota(eq.state, eq.runtime)) == pytest.approx(
+        float(iotas.max()), rel=1e-10)
+    assert (float(opt.max_abs_iota(eq.state, eq.runtime))
+            >= float(opt.min_abs_iota(eq.state, eq.runtime)))
+
+
 def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     """``min_abs_iota`` is traceable and its state derivative matches FD."""
     eq = solovev_eq

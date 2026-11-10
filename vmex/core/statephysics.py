@@ -408,6 +408,15 @@ def min_abs_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     return jnp.min(jnp.abs(iotas[1:]))
 
 
+def max_abs_iota(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Largest ``|iota|`` over the half-mesh surfaces (axis excluded).
+
+    Companion of :func:`min_abs_iota`, for capping the transform of a profile.
+    """
+    iotas = _iotas_half(state, rt)
+    return jnp.max(jnp.abs(iotas[1:]))
+
+
 def soft_min_abs_iota(
     state: SpectralState, rt: SolverRuntime, *, tau: float = 0.02
 ) -> Array:
