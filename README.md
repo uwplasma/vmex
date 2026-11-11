@@ -675,7 +675,7 @@ python examples/take_fixed_boundary_gradients.py
 | Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
-| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
+| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py`, `mirror/mirror_exterior_field.py` | core; the beta scan needs `vmex[coils]`; the exterior field needs a `virtual-casing-jax` with `virtual_casing_jax.mirror` |
 | Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
 
 The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
