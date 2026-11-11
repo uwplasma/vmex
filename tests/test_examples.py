@@ -166,6 +166,7 @@ EXECUTED_EXAMPLES = {
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
+    "examples/mirror/mirror_exterior_field.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
     "examples/optimization/QA_optimization.py",
@@ -789,6 +790,18 @@ def test_mirror_fixed_boundary_axisymmetric_example(tmp_path):
     assert summary["converged"] and summary["variational_max"] <= 1.0e-12
     assert summary["mirror_ratio_relative_error"] < 2.0e-3  # measured 1.0e-3
     assert summary["axis_field_max_relative_error"] < 2.0e-3  # measured 8.0e-4
+
+
+@pytest.mark.full
+def test_mirror_exterior_field_example(tmp_path):
+    """The plasma field outside the mirror boundary is far above the vacuum-solve discretization floor."""
+    import json
+    pytest.importorskip("virtual_casing_jax.mirror")
+    _run_example(EXAMPLES / "mirror" / "mirror_exterior_field.py", tmp_path, timeout=900)
+    summary = json.loads((tmp_path / "results" / "mirror_exterior_field" / "summary.json").read_text())
+    assert summary["net_flux_defect"] < 1.0e-8
+    assert 1.0e-4 < summary["plasma_field_outside_max_T"] < 1.0e-3  # measured 5.0e-4; 1e-5 at zero pressure
+    assert summary["coil_field_inside_change_from_vacuum_relative_to_center_field"] < 5.0e-2  # measured 1.2e-2
 
 
 @pytest.mark.full
