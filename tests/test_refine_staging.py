@@ -529,3 +529,18 @@ def test_a_carried_correction_from_another_device_seeds_the_refinement() -> None
         jax.tree.map(jnp.zeros_like, state), devices[1])
     refined = im._refine_fixed_point(cfg, p0, state, mask)
     assert all(leaf.devices() == {devices[0]} for leaf in jax.tree.leaves(refined))
+
+
+def test_force_evaluation_accepts_a_state_from_another_device() -> None:
+    """A host-solved state is evaluated beside the runtime, not mixed with it."""
+    import pytest
+    from vmex.core import solver
+
+    devices = jax.devices("cpu")
+    if len(devices) < 2:
+        pytest.skip("needs two devices")
+    inp, _, _ = _small_solovev_setup()
+    runtime = solver.prepare_runtime(inp)
+    state = jax.device_put(solver._initial_state(runtime.setup), devices[1])
+    _, residuals, _ = solver.evaluate_forces(state, runtime)
+    assert np.isfinite(float(residuals.fsqr))
