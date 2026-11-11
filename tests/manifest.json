@@ -133,11 +133,18 @@
   },
   "local_only": {
     "gpu-smoke": {
-      "reason": "needs an NVIDIA GPU; hosted CI has none and no self-hosted runner is registered, so the former manual GPU workflow was retired",
+      "reason": "the full GPU suite needs an NVIDIA GPU and minutes of compilation; CI runs only the short gpu-ci subset on the self-hosted GPU runners",
       "command": "pytest -q $(python tools/test_manifest.py select gpu-smoke)"
     }
   },
   "selectors": {
+    "gpu-ci": [
+      "tests/test_gpu_ci.py::test_gpu_is_default_without_platform_environment_pins",
+      "tests/test_gpu_ci.py::test_bounce_action_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_j_invariant_qi_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_maximum_j_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_trapped_fraction_value_and_gradient_cpu_gpu_parity"
+    ],
     "pr-device": [
       "tests/test_device.py::test_fixed_boundary_builds_runtime_in_device_context",
       "tests/test_device.py::test_multigrid_moves_residual_continuation_with_the_state",

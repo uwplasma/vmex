@@ -128,10 +128,10 @@ potential and surface-field tables. Omitting ``--run-vmec2000`` skips it.
 GPU checks
 ----------
 
-No CI runner has a GPU. The former ``Trusted GPU physics`` workflow ran on a
-self-hosted runner that was registered by hand for each use; none is
-registered now, it last passed on 2026-07-31, and it was retired so that no
-lane looks scheduled that cannot run. The GPU tests are the local-only
+CI runs a short subset (``gpu-ci`` in ``tests/manifest.json``) on the
+organization's self-hosted GPU runners for pull requests from this repository;
+fork pull requests never reach them. The check is advisory and is not part of
+``PR gate``. The full GPU tests are the local-only
 ``gpu-smoke`` lane in ``tests/manifest.json``. Run them on a machine with an
 NVIDIA driver 580 or newer, without ``JAX_PLATFORMS`` or
 ``JAX_PLATFORM_NAME`` set::

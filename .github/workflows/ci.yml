@@ -70,7 +70,7 @@ jobs:
         name: Select the parity lanes this change needs
         shell: bash
         env:
-          ALL: '[{"lane":"c2-mirror-eq","selector":"pr-parity-c2","parallel":"-n 4","serial":"pr-mirror-equilibrium","serial_parallel":""},{"lane":"misc-a-core","selector":"pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c6-gradient","selector":"pr-parity-c6 pr-gradient","parallel":"-n 4"},{"lane":"c3-c7","selector":"pr-parity-c3 pr-parity-c7","parallel":"-n 4"},{"lane":"a-free-c5","selector":"pr-parity-c5 pr-parity-e","parallel":"-n 4","serial":"pr-parity-a1","serial_parallel":"-n 2"},{"lane":"c4-mirror-spline","selector":"pr-parity-c4 pr-parity-f","parallel":"-n 4","serial":"pr-mirror-spline","serial_parallel":""},{"lane":"c1-d-mirror-field","selector":"pr-parity-c1 pr-parity-d","parallel":"-n 4","serial":"pr-mirror-field","serial_parallel":""}]'
+          ALL: '[{"lane":"c2-mirror-eq","selector":"pr-parity-c2","parallel":"-n 3","serial":"pr-mirror-equilibrium","serial_parallel":""},{"lane":"misc-a-core","selector":"pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 3"},{"lane":"c6-gradient","selector":"pr-parity-c6 pr-gradient","parallel":"-n 3"},{"lane":"c3-c7","selector":"pr-parity-c3 pr-parity-c7","parallel":"-n 3"},{"lane":"a-free-c5","selector":"pr-parity-c5 pr-parity-e","parallel":"-n 3","serial":"pr-parity-a1","serial_parallel":"-n 2"},{"lane":"c4-mirror-spline","selector":"pr-parity-c4 pr-parity-f","parallel":"-n 3","serial":"pr-mirror-spline","serial_parallel":""},{"lane":"c1-d-mirror-field","selector":"pr-parity-c1 pr-parity-d","parallel":"-n 3","serial":"pr-mirror-field","serial_parallel":""}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
@@ -186,13 +186,17 @@ jobs:
           path: coverage.fast
           retention-days: 3
 
+  # parity, device and desc run on the org's self-hosted macOS runners; the
+  # fork guard keeps fork pull requests off them (the lanes then skip, which
+  # PR gate accepts, and quality/fast/jax-compatibility still check the fork).
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
     if: >-
       needs.changes.outputs.run_tests == 'true' &&
-      needs.changes.outputs.parity != '[]'
-    runs-on: ubuntu-latest
+      needs.changes.outputs.parity != '[]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, macOS, uwplasma-cpu]
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
     # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
@@ -203,26 +207,23 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.parity) }}
     env:
+      # Self-hosted macOS: a per-job venv, never the machine's Python.
+      UV_SYSTEM_PYTHON: "0"
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
       XLA_LANE: parity-${{ matrix.lane }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: "3.12"
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: |
           uv pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
-      - name: Add XLA compile headroom
-        run: |
-          sudo fallocate -l 12G /mnt/vmex-swap
-          sudo chmod 600 /mnt/vmex-swap
-          sudo mkswap /mnt/vmex-swap
-          sudo swapon /mnt/vmex-swap
       - name: Fetch the golden digests
         run: python tools/fetch_assets.py --bundle golden-v1
       - *xla-key
@@ -257,24 +258,29 @@ jobs:
   device:
     name: Two-device placement and AD
     needs: changes
-    if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, macOS, uwplasma-cpu]
     # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
     # and hit the 10-minute cap at 10:17 with a heavier first draft of that
     # test.  The guard is now a two-iteration ladder, but a two-core runner has
     # little headroom left at 10.
     timeout-minutes: 15
     env:
+      # Self-hosted macOS: a per-job venv, never the machine's Python.
+      UV_SYSTEM_PYTHON: "0"
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
       XLA_LANE: device
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: "3.12"
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: |
@@ -304,18 +310,23 @@ jobs:
     # 8-minute fast lane cannot hold; without DESC those tests skip there.
     name: DESC interoperability
     needs: changes
-    if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, macOS, uwplasma-cpu]
     timeout-minutes: 15
     env:
+      # Self-hosted macOS: a per-job venv, never the machine's Python.
+      UV_SYSTEM_PYTHON: "0"
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
       XLA_LANE: desc
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: "3.12"
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: uv pip install . 'desc-opt>=0.17' pytest pytest-cov pytest-xdist
@@ -326,7 +337,7 @@ jobs:
         env:
           JAX_ENABLE_X64: "1"
         run: |
-          pytest -q -n 4 tests/test_desc.py --durations=10 --cov=vmex --cov-report=term
+          pytest -q -n 3 tests/test_desc.py --durations=10 --cov=vmex --cov-report=term
           mv .coverage coverage.desc
       - *xla-collect
       - *xla-save
@@ -416,6 +427,33 @@ jobs:
       - name: Enforce changed-line coverage
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
+
+  gpu:
+    # Short accelerator check on the org's self-hosted GPU runners. Advisory:
+    # not part of PR gate, so a GPU-box outage cannot block merges.
+    name: GPU smoke (CUDA)
+    needs: changes
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, uwplasma-gpu]
+    timeout-minutes: 5
+    env:
+      UV_SYSTEM_PYTHON: "0"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install with CUDA 12 JAX
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv venv --python 3.10 .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          uv pip install . pytest 'jax[cuda12]'
+      - name: Require the GPU backend
+        run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
+      - name: GPU tests
+        timeout-minutes: 1
+        run: pytest -q -x -m gpu $(python tools/test_manifest.py select gpu-ci) --durations=10
 
   install:
     # One cheap Linux cell plus the two platforms CI never otherwise touches.
