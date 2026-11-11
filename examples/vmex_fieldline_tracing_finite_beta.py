@@ -63,7 +63,9 @@ if ci_smoke:
     N_FIELDLINES, N_TOROIDAL_TURNS, N_SAMPLES, TRACE_TOLERANCE = 3, 2, 120, 1.0e-6
     TRACE_LENGTH = OUTSIDE_TRACE_LENGTH = 20.0
     USE_GRADED_QUADRATURE = True  # keep the graded path under test
-    NPHI, NTHETA, VC_DIGITS = 8, 8, 3
+    # Below 16 x 16 the surface data cannot resolve the graded rule 5 mm out; the
+    # exterior field is then noisy and the adaptive trace never finishes.
+    NPHI, NTHETA, VC_DIGITS = 16, 16, 3
     TRACE_PROGRESS = False
 
 print("Solving the finite-beta QA equilibrium and loading its matched ESSOS coils...")
