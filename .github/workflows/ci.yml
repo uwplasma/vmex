@@ -189,7 +189,7 @@ jobs:
           path: coverage.fast
           retention-days: 3
 
-  # parity runs on the org's shared macOS runners; the fork guard keeps
+  # parity runs on the org's shared CPU runners; the fork guard keeps
   # fork pull requests off them (the lanes then skip, which PR gate accepts,
   # and quality/fast/jax-compatibility still check the fork).
   parity:
@@ -199,7 +199,7 @@ jobs:
       needs.changes.outputs.run_tests == 'true' &&
       needs.changes.outputs.parity != '[]' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, macOS, uwplasma-cpu]
+    runs-on: [self-hosted, uwplasma-cpu]
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
     # Seven lanes of 10-12 warm minutes each (2026-10-15), packed into three
@@ -211,7 +211,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.changes.outputs.parity) }}
     env:
-      # Self-hosted macOS: a per-job venv, never the machine's Python.
+      # Self-hosted: a per-job venv, never the machine's Python.
       UV_SYSTEM_PYTHON: "0"
       LC_ALL: en_US.UTF-8
       LANG: en_US.UTF-8
