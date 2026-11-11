@@ -328,11 +328,11 @@ def test_nonlinear_integrations_are_full_but_linear_contracts_remain_in_pr() -> 
     assert not any("::test_solve_file_directives_reach_driver_once" in node for node in nodes)
 
 
-def _declared_lanes(job: str) -> set[str]:
+def _declared_lanes(job: str, variable: str = "ALL") -> list[str]:
     """Selectors the ``changes`` job declares for one computed matrix."""
     ci = (ROOT / ".github/workflows/ci.yml").read_text()
     block = ci.split(f"- id: {job}", 1)[1]
-    declaration = re.search(r"^\s*ALL:\s*'(\[.*\])'\s*$", block, re.M)
+    declaration = re.search(rf"^\s*{variable}:\s*'(\[.*\])'\s*$", block, re.M)
     assert declaration, f"the {job} matrix declaration is missing"
     return [selector
             for entry in json.loads(declaration.group(1))
@@ -343,6 +343,8 @@ def _declared_lanes(job: str) -> set[str]:
 def test_every_pr_lane_runs_once() -> None:
     lanes = _declared_lanes("parity")
     assert "pr-mirror-spline" in lanes
+    packed = _declared_lanes("parity", variable="PR_ALL")
+    assert sorted(packed) == sorted(lanes), "the pull-request packing must run every lane once"
     assert len(lanes) == len(set(lanes)), "a lane declared twice runs twice"
     # The complete primary selector includes the former separate output job.
     assert "tests/mirror/test_output.py" in test_manifest.select("pr-mirror-spline")

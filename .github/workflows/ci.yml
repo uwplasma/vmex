@@ -71,10 +71,13 @@ jobs:
         shell: bash
         env:
           ALL: '[{"lane":"c2-mirror-eq","selector":"pr-parity-c2","parallel":"-n 3","serial":"pr-mirror-equilibrium","serial_parallel":""},{"lane":"misc-a-core","selector":"pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 3"},{"lane":"c6-gradient","selector":"pr-parity-c6 pr-gradient","parallel":"-n 3"},{"lane":"c3-c7","selector":"pr-parity-c3 pr-parity-c7","parallel":"-n 3"},{"lane":"a-free-c5","selector":"pr-parity-c5 pr-parity-e","parallel":"-n 3","serial":"pr-parity-a1","serial_parallel":"-n 2"},{"lane":"c4-mirror-spline","selector":"pr-parity-c4 pr-parity-f","parallel":"-n 3","serial":"pr-mirror-spline","serial_parallel":""},{"lane":"c1-d-mirror-field","selector":"pr-parity-c1 pr-parity-d","parallel":"-n 3","serial":"pr-mirror-field","serial_parallel":""}]'
+          # Pull requests pack the lanes into three jobs so the shared Mac runners
+          # see three, not seven; pushes to main keep the seven lanes above.
+          PR_ALL: '[{"lane":"mirror-eq-spline","selector":"pr-parity-c2 pr-parity-c4 pr-parity-f","parallel":"-n 3","serial":"pr-mirror-equilibrium pr-mirror-spline","serial_parallel":""},{"lane":"field-gradient-core","selector":"pr-parity-c1 pr-parity-d pr-parity-c6 pr-gradient pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 3","serial":"pr-mirror-field","serial_parallel":""},{"lane":"free-c3-c7","selector":"pr-parity-c5 pr-parity-e pr-parity-c3 pr-parity-c7","parallel":"-n 3","serial":"pr-parity-a1","serial_parallel":"-n 2"}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
-              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+              python tools/ci_scope.py --null --matrix "$PR_ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
           else
             python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
           fi
@@ -186,9 +189,9 @@ jobs:
           path: coverage.fast
           retention-days: 3
 
-  # parity, device and desc run on the org's self-hosted macOS runners; the
-  # fork guard keeps fork pull requests off them (the lanes then skip, which
-  # PR gate accepts, and quality/fast/jax-compatibility still check the fork).
+  # parity runs on the org's shared macOS runners; the fork guard keeps
+  # fork pull requests off them (the lanes then skip, which PR gate accepts,
+  # and quality/fast/jax-compatibility still check the fork).
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
@@ -199,9 +202,10 @@ jobs:
     runs-on: [self-hosted, macOS, uwplasma-cpu]
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
-    # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
-    # cache roughly doubles a lane.
-    timeout-minutes: 35
+    # Seven lanes of 10-12 warm minutes each (2026-10-15), packed into three
+    # jobs of 22-32 warm minutes on pull requests; a cold compilation cache
+    # roughly doubles a lane.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -264,20 +268,14 @@ jobs:
   device:
     name: Two-device placement and AD
     needs: changes
-    if: >-
-      needs.changes.outputs.run_tests == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, macOS, uwplasma-cpu]
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
     # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
     # and hit the 10-minute cap at 10:17 with a heavier first draft of that
     # test.  The guard is now a two-iteration ladder, but a two-core runner has
     # little headroom left at 10.
     timeout-minutes: 15
     env:
-      # Self-hosted macOS: a per-job venv, never the machine's Python.
-      UV_SYSTEM_PYTHON: "0"
-      LC_ALL: en_US.UTF-8
-      LANG: en_US.UTF-8
       XLA_LANE: device
     steps:
       - uses: actions/checkout@v7.0.1
@@ -316,16 +314,10 @@ jobs:
     # 8-minute fast lane cannot hold; without DESC those tests skip there.
     name: DESC interoperability
     needs: changes
-    if: >-
-      needs.changes.outputs.run_tests == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, macOS, uwplasma-cpu]
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Self-hosted macOS: a per-job venv, never the machine's Python.
-      UV_SYSTEM_PYTHON: "0"
-      LC_ALL: en_US.UTF-8
-      LANG: en_US.UTF-8
       XLA_LANE: desc
     steps:
       - uses: actions/checkout@v7.0.1
