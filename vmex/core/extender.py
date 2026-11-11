@@ -371,7 +371,8 @@ class MagneticField:
         """
         if self._parameter_data_vjp is None:
             data_fn = cast(Callable[[Array], Any], self._parameter_data_fn)
-            data, pullback = jax.jit(lambda p: jax.vjp(data_fn, p))(self._parameters)
+            with jax.ensure_compile_time_eval():  # a first call under jit must not cache tracers
+                data, pullback = jax.jit(lambda p: jax.vjp(data_fn, p))(self._parameters)
             self._parameter_data_vjp = (data, jax.jit(pullback))
         return cast(tuple[Any, Callable[[Any], Any]], self._parameter_data_vjp)
 
