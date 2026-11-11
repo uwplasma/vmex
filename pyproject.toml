@@ -164,6 +164,17 @@ markers = [
 # (the ``vmex --turbulence`` driver).
 omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
 
+# Shards run on self-hosted macOS checkouts (/Users/.../_work/<repo>/<repo>) and
+# are combined on hosted Ubuntu (/home/runner/work/<repo>/<repo>); map every
+# absolute prefix onto the combining checkout so ``coverage combine`` finds sources.
+# vmex is installed non-editable in CI, so shard data points into site-packages.
+[tool.coverage.paths]
+source = [
+  "vmex",
+  "*/vmex",
+  "*/site-packages/vmex",
+]
+
 [tool.coverage.report]
 omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
 

@@ -225,7 +225,13 @@ jobs:
         run: |
           uv pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
       - name: Fetch the golden digests
-        run: python tools/fetch_assets.py --bundle golden-v1
+        # Per-job destination: three runners share one home directory, and the
+        # extraction is not atomic, so a shared ~/.cache/vmex/golden-v1 can be
+        # read half-written by a concurrent lane.  conftest.py reads
+        # VMEX_GOLDEN_DIR before any home-directory default.
+        run: |
+          python tools/fetch_assets.py --bundle golden-v1 --dest "$RUNNER_TEMP/vmex-assets"
+          echo "VMEX_GOLDEN_DIR=$RUNNER_TEMP/vmex-assets/golden" >> "$GITHUB_ENV"
       - *xla-key
       - *xla-restore
       - *xla-prepare
