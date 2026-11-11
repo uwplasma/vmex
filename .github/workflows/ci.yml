@@ -38,8 +38,9 @@ jobs:
       packaging: ${{ steps.packaging.outputs.changed }}
       parity: ${{ steps.parity.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - id: scope
         name: Classify changed paths
@@ -85,11 +86,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install
@@ -116,11 +119,13 @@ jobs:
     env:
       XLA_LANE: fast
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install
@@ -146,7 +151,7 @@ jobs:
         id: xla-restore
         # A lane restores the newest cache main saved for this CPU, Python and
         # jaxlib; entries are content-addressed, so a stale one is a miss.
-        uses: actions/cache/restore@v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/xla-cache
           key: xla-v1-${{ env.XLA_LANE }}-${{ steps.xla.outputs.fingerprint }}-${{ hashFiles('vmex/**', 'tests/**') }}
@@ -175,11 +180,11 @@ jobs:
         run: python tools/ci_compile_cache.py collect "$VMEX_CI_COMPILATION_CACHE" >> "$GITHUB_OUTPUT"
       - &xla-save
         if: success() && steps.xla-collect.outputs.entries > 0
-        uses: actions/cache/save@v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/xla-cache
           key: ${{ steps.xla-restore.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.python-version == '3.12'
         with:
           name: coverage-fast
@@ -205,13 +210,14 @@ jobs:
     env:
       XLA_LANE: parity-${{ matrix.lane }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install
@@ -248,7 +254,7 @@ jobs:
       - *xla-save
       - name: Stash coverage
         run: mv .coverage coverage.parity-${{ matrix.lane }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-parity-${{ matrix.lane }}
           path: coverage.parity-${{ matrix.lane }}
@@ -267,13 +273,14 @@ jobs:
     env:
       XLA_LANE: device
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install
@@ -293,7 +300,7 @@ jobs:
       - *xla-save
       - name: Stash coverage
         run: mv .coverage coverage.device
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-device
           path: coverage.device
@@ -310,11 +317,13 @@ jobs:
     env:
       XLA_LANE: desc
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install
@@ -330,7 +339,7 @@ jobs:
           mv .coverage coverage.desc
       - *xla-collect
       - *xla-save
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-desc
           path: coverage.desc
@@ -347,11 +356,13 @@ jobs:
       matrix:
         jax: ["0.9.2", "0.11.1"]
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - name: Install tested numerical versions
@@ -380,17 +391,18 @@ jobs:
       needs.device.result == 'success' &&
       needs.desc.result == 'success'
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           enable-cache: false
       - run: uv pip install coverage diff-cover
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-*
           merge-multiple: true
@@ -400,7 +412,7 @@ jobs:
           coverage report --include='*/vmex/mirror/*' --fail-under=90
           coverage xml
       - name: Publish combined coverage
-        uses: codecov/codecov-action@v5.5.5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           # OIDC upload 404s ("Repository not found") because the Codecov
           # project still carries the pre-rename vmec_jax identity, so the
@@ -432,8 +444,10 @@ jobs:
           - {os: macos-latest, python: "3.13", extra: "[all]"}
           - {os: windows-latest, python: "3.13", extra: "[all]"}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install, import and run the CLI
