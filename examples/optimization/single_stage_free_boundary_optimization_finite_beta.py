@@ -14,7 +14,12 @@ The objective is that of ``single_stage_free_boundary_optimization.py`` plus
     (1/2) (<beta> / TARGET_BETA - 1)^2
 
 which holds beta at its target while the coils, and so the field strength and
-the plasma volume, change.
+the plasma volume, change, and a cap on the total field |B| outside the
+plasma. The cap is read on a wall shell WALL_OFFSET outside the fitted seed
+with ``VmecExtender``, coils plus plasma, rebuilt from the solved state and
+the coils of every trial; the shell stays outside the free boundary and away
+from the coils, and the coil currents and the toroidal flux are fixed, so the
+cap cannot be met by weakening the field.
 
 The coils start as in the zero-beta example: fitted to the fixed-boundary
 seed with no equilibrium solve, the enclosed toroidal flux read off the
@@ -23,12 +28,14 @@ the target beta. One free-boundary solve then checks that the fitted coils
 confine that plasma before any optimization starts. Self-consistent bootstrap
 current and current-profile optimization are not part of this example.
 
-Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
-JAX cache and a load average near 10: 275 s, of which 102 s is JAX compilation.
-It takes 8 L-BFGS-B iterations and 17 trials, and every target is met. The
-minimum |iota| rises from 0.402 to 0.433, the aspect ratio falls from 6.044 to
-5.947, and beta ends at 0.488%. The coils move by up to 14 mm after the
-pre-fit, and the free boundary ends up to 0.07 m from the prescribed seed.
+Measured end to end at commit 1d7672bd on an Apple M3 Max laptop with a cold
+JAX cache: 318 s. It takes 15 L-BFGS-B iterations and 20 trials (2 rejected
+by the free-boundary solve), and every target is met on the re-solve at
+force residuals near 1e-12. The peak field on the wall shell falls from 0.949 T
+for the same example without the cap to 0.891 T; there the plasma adds under
+0.02% to the coil field, so the cap is a coil-geometry constraint at this
+beta. The minimum |iota| rises from 0.402 to 0.460, the aspect ratio falls
+from 6.044 to 5.955, and beta ends at 0.494%.
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
@@ -48,6 +55,8 @@ from scipy.optimize import minimize
 import vmex as vj
 from vmex import optimize as opt
 from vmex.core import implicit as im
+from vmex.core import virtual_casing as vc
+from vmex.core.extender import VmecExtender
 
 from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.fields import BiotSavart
@@ -75,6 +84,7 @@ BETA_TOLERANCE = 0.1              # relative, for the final check
 # Targets the finished design is checked against:
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 ASPECT_LIMIT = 6.0                # maximum aspect ratio
+WALL_FIELD_LIMIT = 0.90           # maximum |B| on the wall shell [T]
 COIL_SURFACE_DISTANCE_LIMIT = 0.15
 COIL_DISTANCE_LIMIT = 0.17
 CURVATURE_LIMIT = 7.0
@@ -87,6 +97,7 @@ IOTA_CONSTRAINT = 0.43
 ASPECT_CONSTRAINT = 5.97
 NORMAL_FIELD_CONSTRAINT = 0.008
 CURVATURE_OBJECTIVE_LIMIT = 6.9
+WALL_FIELD_CONSTRAINT = 0.89
 COIL_DISTANCE_CONSTRAINT = 0.19
 COIL_SURFACE_DISTANCE_CONSTRAINT = 0.16
 
@@ -122,15 +133,22 @@ NS = 16
 FTOL = 1.0e-10
 NITER = 1500
 
-# Budgets. One trial is one free-boundary solve plus one adjoint. The end
-# check, run on the saved iterates of a 15-iteration run, passes at iterations
-# 6, 8 and 10 and fails at 4 (aspect 6.032).
-MAXITER = 8
-MAX_TRIALS = 20
+# Budgets. One trial is one free-boundary solve plus one adjoint. With the wall
+# cap, 8 iterations stop at aspect 6.039; 15 meet every target.
+MAXITER = 15
+MAX_TRIALS = 30
 COIL_FIT_MAXITER = 200            # coil-only pre-fit, no equilibrium solves
 
 # Surface grid the coil terms use:
 NPHI, NTHETA = 37, 32
+
+# Wall shell: the seed pushed out by WALL_OFFSET (ESSOS normals point inward), sampled every
+# WALL_STRIDE grid points; virtual-casing source grid and digits of the field
+# read on it.
+WALL_OFFSET = 0.09
+WALL_STRIDE = 4
+WALL_SOURCE_GRID = 32
+WALL_DIGITS = 6
 
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
@@ -269,6 +287,22 @@ def field_from_u(u):
     return BiotSavart(coils_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u))
 
 
+wall_points = jnp.reshape(
+    (surface_seed.gamma - WALL_OFFSET * surface_seed.unitnormal)[::WALL_STRIDE, ::WALL_STRIDE], (-1, 3))
+
+
+def wall_field(equilibrium_state, u):
+    """|B| on the wall shell: coils plus plasma, rebuilt from this trial's state and coils."""
+    data = vc.surface_field_data_from_state(
+        inp, equilibrium_state, runtime=solver_context,
+        nphi=WALL_SOURCE_GRID, ntheta=WALL_SOURCE_GRID)
+    field = field_from_u(u)
+    outside = VmecExtender.from_surface_data(
+        data, external_field=lambda xyz: jax.vmap(field.B)(xyz),
+        digits=WALL_DIGITS, accuracy_check="off")
+    return jnp.linalg.norm(outside.B(wall_points), axis=1)
+
+
 params = im.params_from_input(inp)
 config = vj.make_free_boundary_config(
     inp, field0, ns=NS, ftol=FTOL, max_iterations=NITER,
@@ -322,13 +356,16 @@ def accepted_terms(equilibrium_state, u):
     """Every term after the solve, compiled once and reused by each trial."""
     qs_rows = qs.residuals_state(equilibrium_state, solver_context)
     beta_row = opt.volume_average_beta(equilibrium_state, solver_context) / TARGET_BETA - 1.0
-    penalty = hinge(jnp.stack([
-        opt.min_abs_iota(equilibrium_state, solver_context) / IOTA_CONSTRAINT - 1.0,
-        1.0 - opt.aspect_ratio(equilibrium_state, solver_context) / ASPECT_CONSTRAINT]))
+    wall = wall_field(equilibrium_state, u)
+    penalty = hinge(jnp.concatenate([
+        jnp.stack([
+            opt.min_abs_iota(equilibrium_state, solver_context) / IOTA_CONSTRAINT - 1.0,
+            1.0 - opt.aspect_ratio(equilibrium_state, solver_context) / ASPECT_CONSTRAINT]),
+        1.0 - wall / WALL_FIELD_CONSTRAINT]))
     coils = coils_from_x(jnp.asarray(x0) + jnp.asarray(scales) * u)
     costs = coil_costs(coils, boundary_surface(equilibrium_state))
     value = 0.5 * jnp.vdot(qs_rows, qs_rows) + 0.5 * beta_row**2 + penalty + jnp.sum(costs)
-    return value, (qs_rows, beta_row, penalty, costs)
+    return value, (qs_rows, beta_row, penalty, costs, wall)
 
 
 def objective(u):
@@ -352,6 +389,7 @@ def objective(u):
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
 monitor = opt.OptimizationMonitor()
 counts = {"trials": 0, "rejected": 0}
+trial_log = []
 # SciPy returns its last point, which can be a rejected trial carrying the
 # wall value; the result is the best trial whose free boundary converged.
 best = {"value": np.inf, "u": None}
@@ -359,7 +397,7 @@ best = {"value": np.inf, "u": None}
 
 def value_and_grad(u):
     counts["trials"] += 1
-    (value, (qs_rows, beta_row, penalty, costs, status)), gradient = \
+    (value, (qs_rows, beta_row, penalty, costs, wall, status)), gradient = \
         value_and_grad_jax(jnp.asarray(u))
     qs_rows = np.asarray(qs_rows)
     terms = {"quasisymmetry": 0.5 * float(qs_rows @ qs_rows),
@@ -367,6 +405,8 @@ def value_and_grad(u):
              "iota and aspect penalty": float(penalty)}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(costs))))
     counts["rejected"] += int(status) != 0
+    trial_log.append({"status": int(status), "value": float(value),
+                      "peak wall field": float(np.max(wall)) if int(status) == 0 else None})
     if int(status) == 0 and float(value) < best["value"]:
         best.update(value=float(value), u=np.array(u, dtype=float))
     terms["rejected trial"] = float(value) if int(status) else 0.0
@@ -427,6 +467,11 @@ wout = vj.wout_from_state(
     inp=final_input, state=free_result.state, fsqr=free_result.fsqr,
     fsqz=free_result.fsqz, fsql=free_result.fsql, niter=free_result.iterations,
     converged=free_result.converged, vacuum_output=free_result.vacuum)
+# The wall field again on that finer solve: ten digits and the graded rule.
+final_outside = VmecExtender.from_wout(
+    wout, external_field=lambda xyz: jax.vmap(field_final.B)(xyz), plasma="include",
+    digits=10, accuracy_check="off").with_graded_quadrature()
+final_wall_field = np.linalg.norm(np.asarray(final_outside.B(wall_points)), axis=1)
 
 surface_final = SurfaceRZFourier.from_wout_file(
     vj.write_wout("wout_single_stage_free_boundary_finite_beta_optimized.nc", wout),
@@ -440,6 +485,11 @@ coil_distance = min(
     for i in range(len(gamma)) for j in range(i + 1, len(gamma)))
 maximum_curvature = float(np.max(np.asarray(coils_final.curvature)))
 minimum_iota, final_aspect = final_values["min |iota|"], final_values["aspect"]
+peak_wall_field = float(final_wall_field.max())
+wall_boundary_distance = float(np.min(np.linalg.norm(
+    np.asarray(wall_points)[:, None] - points[None], axis=2)))
+wall_coil_distance = min(
+    float(np.linalg.norm(c[:, None] - np.asarray(wall_points)[None], axis=2).min()) for c in gamma)
 final_beta = final_values["beta"]
 
 ###############################################################################
@@ -456,6 +506,8 @@ print(f"Minimum coil-coil distance = {coil_distance:.4f} m "
       f"(target >= {COIL_DISTANCE_LIMIT:.4f} m)")
 print(f"Maximum curvature = {maximum_curvature:.4f} 1/m "
       f"(target <= {CURVATURE_LIMIT:.4f} 1/m)")
+print(f"Peak |B| on the wall shell = {peak_wall_field:.4f} T (target <= {WALL_FIELD_LIMIT:.4f} T); "
+      f"shell is {wall_boundary_distance:.3f} m from the free boundary and {wall_coil_distance:.3f} m from the coils")
 print(f"Minimum |iota| = {minimum_iota:.4f} (target >= {IOTA_FLOOR:.4f})")
 print(f"Aspect ratio = {final_aspect:.4f} (target <= {ASPECT_LIMIT:.4f})")
 print(f"Volume-average beta = {100 * final_beta:.4f}% (target {100 * TARGET_BETA:.2f}% "
@@ -467,6 +519,7 @@ checks = (
     ("minimum coil-surface distance", coil_surface_distance, COIL_SURFACE_DISTANCE_LIMIT, "below"),
     ("minimum coil-coil distance", coil_distance, COIL_DISTANCE_LIMIT, "below"),
     ("maximum curvature", maximum_curvature, CURVATURE_LIMIT, "above"),
+    ("peak wall field", peak_wall_field, WALL_FIELD_LIMIT, "above"),
     ("beta", final_beta, TARGET_BETA * (1 - BETA_TOLERANCE), "below"),
     ("beta", final_beta, TARGET_BETA * (1 + BETA_TOLERANCE), "above"),
 )
@@ -495,13 +548,19 @@ summary = {
               "coil-surface distance": coil_surface_distance,
               "coil-coil distance": coil_distance,
               "maximum curvature": maximum_curvature,
+              "peak wall field": peak_wall_field,
+              "wall-boundary distance": wall_boundary_distance,
+              "wall-coil distance": wall_coil_distance,
               "verification solve converged": final_converged},
     "targets": {"min |iota| >=": IOTA_FLOOR, "aspect <=": ASPECT_LIMIT,
                 "coil-surface distance >=": COIL_SURFACE_DISTANCE_LIMIT,
                 "coil-coil distance >=": COIL_DISTANCE_LIMIT,
                 "maximum curvature <=": CURVATURE_LIMIT,
+                "peak wall field <=": WALL_FIELD_LIMIT,
                 "beta": [TARGET_BETA * (1 - BETA_TOLERANCE),
                          TARGET_BETA * (1 + BETA_TOLERANCE)]},
+    "trials log": trial_log,
+    "final residuals": {k: float(getattr(free_result, k)) for k in ("fsqr", "fsqz", "fsql")},
     "unmet": unmet, "met": not unmet,
 }
 Path("single_stage_free_boundary_optimization_finite_beta_summary.json").write_text(
