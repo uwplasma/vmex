@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import warnings
 from dataclasses import dataclass, replace
@@ -173,6 +174,13 @@ def test_high_spatial_derivatives_and_parameter_vjps_are_exact():
         field.B_contravariant(jnp.ones(2))
     with pytest.raises(ValueError, match=r"shape \(3,\)"):
         field.to_xyz(jnp.ones(2))
+
+    # a shallow copy shares the pullback cache: its own points must not leak back
+    cotangent = jnp.ones((2, 3, 3))
+    first = factored.gradB_vjp(cotangent)
+    other = copy.copy(factored).set_points(points[:1] + 0.3)
+    other.gradB_vjp(jnp.ones((1, 3, 3)))
+    np.testing.assert_allclose(factored.gradB_vjp(cotangent), first, rtol=0, atol=0)
     new_points = points[:1] + 0.15
     factored.set_points_xyz(new_points)
     new_value = factored.B()
@@ -351,6 +359,10 @@ def test_exterior_vjp_combines_plasma_and_external_dofs(monkeypatch):
     np.testing.assert_allclose(field.B(), [[3.0, 6.0, 9.0]])
     np.testing.assert_allclose(field.B_vjp(jnp.ones((1, 3))), [0.0, 6.0])
     assert field.dof_names == ("boundary", "coil current")
+    copied = copy.copy(field)
+    copied.near_surface = "direct"  # a copy binds its own quadrature, not the original's
+    assert copied._B_from_data is not field._B_from_data
+    np.testing.assert_allclose(copied.B_vjp(jnp.ones((1, 3))), [0.0, 6.0])
 
     with pytest.raises(ValueError, match="provided together"):
         VmecExtender.from_parameterized_surface_data(
