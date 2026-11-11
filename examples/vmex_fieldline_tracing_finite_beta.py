@@ -4,13 +4,15 @@
 The commented ``Coils.from_simsopt`` line accepts a SIMSOPT coil JSON without
 changing the VMEX virtual-casing or ESSOS tracing workflow.
 
-With the research settings the plasma field outside the boundary is
-evaluated by the target-graded near-surface quadrature
-(``VmecExtender.with_graded_quadrature``), which keeps the virtual-casing field
-accurate a few millimetres off the boundary; the five-minute default uses the
-direct quadrature and short exterior traces, which show the workflow but not
-the exterior islands. The exterior traces still end at a stopping distance,
-and a finite trace does not by itself establish magnetic topology.
+The plasma field outside the boundary is evaluated by the target-graded
+near-surface quadrature (``VmecExtender.with_graded_quadrature``), which keeps
+the virtual-casing field accurate a few millimetres off the boundary. The
+default traces the exterior lines for 100 m, which shows the workflow but not
+the exterior islands; the research settings trace them for the full length.
+Measured at commit 2ec4069b on a 36-core Linux workstation under load: about 12
+minutes, of which 8.5 are the exterior traces. The exterior traces still end at
+a stopping distance, and a finite trace does not by itself establish magnetic
+topology.
 
 Outside the CI smoke run, the phi=0 Poincare panel pair is
 also written to the working directory as lossless WebP.
@@ -50,11 +52,12 @@ MAX_SURFACE_DISTANCE = 0.055
 NPHI, NTHETA, VC_DIGITS = 24, 24, 4
 # Each exterior step pays a near-surface quadrature, so the default traces the
 # exterior lines for OUTSIDE_TRACE_LENGTH metres (about 16 toroidal transits)
-# with the direct quadrature at OUTSIDE_TOLERANCE; that fits a 5-minute laptop
-# run. The README figure uses the research settings, days on a laptop:
-#   USE_GRADED_QUADRATURE, OUTSIDE_TRACE_LENGTH = True, TRACE_LENGTH
-#   OUTSIDE_TOLERANCE = TRACE_TOLERANCE
-USE_GRADED_QUADRATURE = False
+# with the graded rule at OUTSIDE_TOLERANCE. The direct rule is noisy 5 mm off
+# the boundary and the adaptive step collapses there (4% of the trace after 8
+# minutes, still slowing). The README figure uses the research settings, days
+# on a laptop:
+#   OUTSIDE_TRACE_LENGTH = TRACE_LENGTH; OUTSIDE_TOLERANCE = TRACE_TOLERANCE
+USE_GRADED_QUADRATURE = True
 GRADED_NODES = (64, 256)
 OUTSIDE_TRACE_LENGTH, OUTSIDE_TOLERANCE = 100.0, 1.0e-5
 TRACE_PROGRESS = True
@@ -62,7 +65,6 @@ ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     N_FIELDLINES, N_TOROIDAL_TURNS, N_SAMPLES, TRACE_TOLERANCE = 3, 2, 120, 1.0e-6
     TRACE_LENGTH = OUTSIDE_TRACE_LENGTH = 20.0
-    USE_GRADED_QUADRATURE = True  # keep the graded path under test
     # Below 16 x 16 the surface data cannot resolve the graded rule 5 mm out; the
     # exterior field is then noisy and the adaptive trace never finishes.
     NPHI, NTHETA, VC_DIGITS = 16, 16, 3
