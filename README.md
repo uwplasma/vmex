@@ -387,6 +387,10 @@ surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX fr
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
+![Exterior-field accuracy against distance, the plasma field around a QA boundary, its shape derivative against re-solved equilibria, and the plasma field outside a mirror](docs/_static/figures/readme_exterior_field.webp)
+
+`near_surface="auto"` (the default) switches to a target-graded rule within a few node spacings of the boundary, for `B` and its derivatives. (a) Error against an exact axis-filament field on the QA boundary at 32, 64 and 96 source samples per period (the estimate flags the first); the direct rule alone fails within 10% of a minor radius. (b) The plasma field at phi = 0. (c) `B_vjp` against central differences of re-solved equilibria. (d) A mirror (`examples/mirror/mirror_exterior_field.py`). Script: `docs/_static/figures/sources/make_exterior_field_figure.py`; parameters: [reference](https://vmex.readthedocs.io/en/latest/reference/exterior-field.html), [tutorial](https://vmex.readthedocs.io/en/latest/tutorials/exterior-field.html).
+
 ### Opt-in solver options
 
 Off by default, so VMEC2000 iteration parity is kept:
