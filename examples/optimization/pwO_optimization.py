@@ -259,7 +259,7 @@ print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}"
 
 final_total = report("final", final_equilibrium)["pwO total"]
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
-                   well_floor=MAGNETIC_WELL_TARGET)
+                   well_floor=MAGNETIC_WELL_TARGET or None, elongation_limit=ELONGATION_LIMIT)
 print(f"\npwO total {final_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

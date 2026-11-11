@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import ast
 import inspect
+import os
+import subprocess
+import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-EXAMPLES = sorted((Path(__file__).resolve().parents[1] / "examples").rglob("*.py"))
+ROOT = Path(__file__).resolve().parents[1]
+EXAMPLES = sorted((ROOT / "examples").rglob("*.py"))
 
 
 def _resolve(node, namespace):
@@ -45,3 +50,15 @@ def test_example_calls_match_vmex_signatures(path):
             inspect.signature(target).bind_partial(*args, **dict.fromkeys(keys))
         except TypeError as error:
             pytest.fail(f"{path.name}:{call.lineno} {target.__qualname__}: {error}")
+
+
+def test_pwo_example_optimization_stage_runs_and_lowers_its_cost(tmp_path):
+    """The shipped pwO script, up to its verification solve, at the CI budget."""
+    script = ROOT / "examples" / "optimization" / "pwO_optimization.py"
+    source = script.read_text().split("### Check the result")[0].replace("__file__", repr(str(script)))
+    code = source + "\nprint('COST', result.cost, 0.5 * np.sum(joint.residual(joint.x0) ** 2))\n"
+    env = dict(os.environ, VMEX_EXAMPLES_CI="1", JAX_ENABLE_X64="1")
+    run = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr[-3000:]
+    final, initial = map(float, run.stdout.split("COST")[-1].split())
+    assert np.isfinite(final) and final < initial
