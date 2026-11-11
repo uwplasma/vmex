@@ -4,7 +4,6 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- `solvax>=0.36.1`: on CUDA the radial tridiagonal solve runs as one fused Pallas kernel (SOLVAX#187), 1.5-1.7x faster warm iterations on an RTX A4000. CPU is unchanged.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09
