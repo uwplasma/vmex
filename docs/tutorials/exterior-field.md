@@ -68,7 +68,7 @@ Panel (a) of the figure uses a harder test with an exact answer. The boundary fi
 QA surface is replaced by that of a current filament on the magnetic axis, a source only one
 minor radius from the surface. With 32 samples per period (this lesson's default) the field is
 then good to `4e-4` next to the boundary and the estimate says so; at 64 samples it is good to
-`2e-6` and at 96 to `3e-9`, from 1e-4 of a minor radius to one, while the direct rule
+`1e-7` and at 96 to `1e-10`, from 1e-4 of a minor radius to one, while the direct rule
 alone is off by orders of magnitude within 10% of the minor radius.
 
 ```python
