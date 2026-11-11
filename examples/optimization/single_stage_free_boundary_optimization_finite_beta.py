@@ -300,6 +300,9 @@ def wall_field(equilibrium_state, u):
     outside = VmecExtender.from_surface_data(
         data, external_field=lambda xyz: jax.vmap(field.B)(xyz),
         digits=WALL_DIGITS, accuracy_check="off")
+    # The direct rule keeps the reverse pass finite on every trial surface; the
+    # shell is 0.07 m out, where it is good to the digits asked for.
+    outside.near_surface = "direct"
     return jnp.linalg.norm(outside.B(wall_points), axis=1)
 
 
