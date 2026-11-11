@@ -1380,3 +1380,14 @@ def test_traced_tvolume_rescaling_matches_run_setup(rfix):
     for name in ("rcon0", "zcon0"):
         np.testing.assert_allclose(np.asarray(getattr(rt_ref, name)),
                                    np.asarray(getattr(rt_p, name)), rtol=0.0, atol=1e-13)
+
+
+def test_cached_template_residual_does_not_depend_on_hold_m1(case):
+    """The template is built outside ``_holding_m1`` (``hold_m1=False``); at the held
+    fixed point the force it gives equals the one of a ``hold_m1`` runtime."""
+    _, _, _, _, x_star, rt, _ = case
+    assert rt.hold_m1 is False
+    held = solver.evaluate_forces(x_star, dataclasses.replace(rt, hold_m1=True))[0]
+    plain = solver.evaluate_forces(x_star, rt)[0]
+    for a, b in zip(jax.tree.leaves(held), jax.tree.leaves(plain)):
+        np.testing.assert_allclose(np.asarray(a), np.asarray(b), rtol=0.0, atol=1e-12)

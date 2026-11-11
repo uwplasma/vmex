@@ -178,8 +178,8 @@ Free boundary and restart
 
 An ``LFREEB = T`` deck with a readable ``MGRID_FILE`` (or
 ``MGRID_FILE = 'DIRECT_COILS'`` with ``--coils``) runs the free-boundary
-ladder; a missing mgrid file falls back to a fixed-boundary solve with a
-warning, as in VMEC2000.  See :doc:`/howto/free-boundary`.  ``--restart`` or
+ladder; a missing mgrid file is an input error (exit code 5), as in STELLOPT's
+VMEC.  See :doc:`/howto/free-boundary`.  ``--restart`` or
 the deck key ``RESTART_WOUT`` seeds a fixed- or free-boundary solve from a
 wout file (:doc:`/howto/restart-from-previous-run`).
 
