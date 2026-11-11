@@ -53,7 +53,7 @@ dependencies = [
   # Boozer spectra and differentiable geometry, including asymmetric fields.
   "booz_xform_jax>=0.5.1",
   # Checked tridiagonal solves support broadcast bands and preserve pivot diagnostics.
-  "solvax>=0.35.1",
+  "solvax>=0.36.1",
 ]
 
 [project.scripts]
