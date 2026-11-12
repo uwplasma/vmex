@@ -833,15 +833,15 @@
     },
     {
       "path": "docs/_static/figures/readme_pwo.webp",
-      "sha256": "dcfa5e7f4c23d7b79197ebaa06460ec76c5edf742b81dbc2079d07858c64a8fd",
-      "bytes": 156856,
+      "sha256": "f948fae31f1f4adf7f325ea0f5b276dc3f02d140f4f6aa744ebad2398d939906",
+      "bytes": 160462,
       "generator": "examples/plot_optimized_families.py",
       "command": "python examples/plot_optimized_families.py  (set PLOT_ONLY = \"pwo\" after running pwO_optimization.py)",
       "inputs": [
         "examples/data/input.minimal_seed_nfp3"
       ],
       "record": null,
-      "generated": "2026-11-02",
+      "generated": "2026-11-12",
       "hardware": null,
       "reproducible": "command",
       "bytes_verified": false,
@@ -865,7 +865,7 @@
       "used_in": [
         "README.md"
       ],
-      "note": "pwO_optimization.py with BOOTSTRAP_TERM None and band: |B| in Boozer coordinates and on the boundary, DKX <j.B> on five surfaces (I_bs -135 and -5 kA), and alpha losses (1000 particles, 5 ms, s = 0.3). WebP quality 70."
+      "note": "pwO_optimization.py (ASPECT_TARGET 6, ELONGATION_LIMIT 9, no IOTA_CEILING) with BOOTSTRAP_TERM None and band: |B| in Boozer coordinates and on the boundary, DKX <j.B> on five surfaces (I_bs -135 and -5 kA), and alpha losses (1000 particles, 5 ms, s = 0.3). WebP quality 70."
     }
   ]
 }

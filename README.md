@@ -290,11 +290,11 @@ The consistency error is taken on four kinetic surfaces, between which the profi
 
 ### Piecewise omnigenity
 
-[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion, elongation and edge Jacobian.
 
 ![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 
-From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 95% (6.4e-3 to 3.2e-4), at aspect ratio 7.03 and min |ι| = 0.64. The elongation ceiling of 5 and the |ι| ceiling of 0.9 keep the alpha losses (`vmex --trace`, 1000 alphas born at s = 0.3, 5 ms, ARIES-CS size) at 0.0%, 0.2% and 0.3% for seed amplitudes 0.05, 0.03 and 0.08, against 5.3% with a ceiling of 9 and no |ι| ceiling. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
 The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
 
