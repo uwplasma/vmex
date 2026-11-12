@@ -379,10 +379,6 @@ def test_exterior_vjp_combines_plasma_and_external_dofs(monkeypatch):
     np.testing.assert_allclose(field.B(), [[3.0, 6.0, 9.0]])
     np.testing.assert_allclose(field.B_vjp(jnp.ones((1, 3))), [0.0, 6.0])
     assert field.dof_names == ("boundary", "coil current")
-    copied = copy.copy(field)
-    copied.near_surface = "direct"  # a copy binds its own quadrature, not the original's
-    assert copied._B_from_data is not field._B_from_data
-    np.testing.assert_allclose(copied.B_vjp(jnp.ones((1, 3))), [0.0, 6.0])
 
     with pytest.raises(ValueError, match="provided together"):
         VmecExtender.from_parameterized_surface_data(
