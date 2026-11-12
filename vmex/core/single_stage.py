@@ -104,24 +104,27 @@ class CoilPenalty:
                 nphi=self.surface_grid[0], ntheta=self.surface_grid[1], close=False,
                 range_torus="full torus", rs=surface.rs, zc=surface.zc)
         if self.normalized:
-            # Worst sampled gaps/curvature are not diluted by extra coils or nodes.
+            # Smooth worst-case measures: the p = 8 power mean of the sampled violations tends to their
+            # maximum, is unchanged by extra nodes, and (unlike a min or max) leaves L-BFGS a gradient.
+            def worst(violation, p=8):
+                return (jnp.mean(violation**p) + 1e-40)**(1 / p)
+
             length = jnp.maximum(coils.length[:n] / self.length_target - 1, 0)
             curvature = jnp.maximum(coils.curvature[:n] / self.curvature_limit - 1, 0)
             gamma, points = coils.gamma, surface.gamma.reshape(-1, 3)
 
-            def distance(first, second):
-                return jnp.sqrt(jnp.min(jnp.sum((first[:, None] - second[None, :])**2, axis=-1)) + 1e-30)
+            def gap(first, second, limit):
+                distance = jnp.sqrt(jnp.min(jnp.sum((first[:, None] - second[None, :])**2, axis=-1), axis=1) + 1e-30)
+                return jnp.maximum(1 - distance / limit, 0)  # per node of ``first``
 
             pairs = jnp.triu_indices(len(coils), 1)
-            gap = (jnp.max(jnp.maximum(1 - jax.vmap(lambda i, j: distance(gamma[i], gamma[j]))(*pairs) / self.coil_distance, 0))
-                   if len(coils) > 1 else 0.)
-
-            surface_gap = jnp.max(jnp.maximum(
-                1 - jax.vmap(lambda curve: distance(curve, points))(gamma[:n]) / self.surface_distance, 0))
+            coil_gap = (worst(jax.vmap(lambda i, j: gap(gamma[i], gamma[j], self.coil_distance))(*pairs))
+                        if len(coils) > 1 else 0.)
+            surface_gap = worst(jax.vmap(lambda curve: gap(curve, points, self.surface_distance))(gamma[:n]))
             return .5 * jnp.asarray([
                 self.length_weight * jnp.mean(length**2),
-                self.curvature_weight * jnp.max(curvature**2),
-                self.distance_weight * gap**2, self.surface_weight * surface_gap**2])
+                self.curvature_weight * worst(curvature)**2,
+                self.distance_weight * coil_gap**2, self.surface_weight * surface_gap**2])
         length = jnp.sqrt(self.length_weight) * jnp.maximum(coils.length[:n] - self.length_target, 0)
         curvature = jnp.sqrt(self.curvature_weight) * jnp.maximum(
             coils.curvature[:n] - self.curvature_limit, 0)
