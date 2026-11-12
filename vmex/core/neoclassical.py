@@ -40,7 +40,7 @@ def diagnostic_neo_config():
     ``s = 0.25, 0.5, 0.75`` is 2.5% median and 10% at the 90th percentile, and
     it ranks them like the reference (Spearman 0.995). The coarser 24 x 24,
     12-particle, 6-steps-per-period set is 18% median and ranked ten nearby
-    QI candidates with Spearman 0.60.  Pass a ``neo_jax.NeoConfig`` to
+    QI candidates with Spearman 0.60 (this configuration: 1.00).  Pass a ``neo_jax.NeoConfig`` to
     :func:`epsilon_effective_from_wout` for publication calculations.
     """
     NeoConfig, _ = _neo_imports()
