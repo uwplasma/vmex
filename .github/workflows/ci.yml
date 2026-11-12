@@ -114,7 +114,9 @@ jobs:
     name: Fast API tests (py${{ matrix.python-version }})
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    # The 3.12 entry runs on the org's Mac runners for pushes and same-repo pull
+    # requests. Fork pull requests and the other entries stay hosted.
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && matrix.python-version == '3.12')) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
     timeout-minutes: 8
     strategy:
       fail-fast: false
@@ -122,18 +124,26 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     env:
       XLA_LANE: fast
+      UV_SYSTEM_PYTHON: "0"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: ${{ matrix.python-version }}
+      - &mac-locale
+        name: Use a locale the Mac runner has
+        if: runner.os == 'macOS'
+        run: |
+          echo "LC_ALL=en_US.UTF-8" >> "$GITHUB_ENV"
+          echo "LANG=en_US.UTF-8" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: |
           uv pip install . pytest pytest-cov pytest-xdist
       - name: Check repository size
+        # GNU du only; the size does not depend on the host.
+        if: runner.os == 'Linux'
         run: |
           size_kb=$(du -sk --exclude=.git . | cut -f1)
           echo "working tree: ${size_kb} KiB"
@@ -201,7 +211,9 @@ jobs:
       github.event_name != 'pull_request' &&
       needs.changes.outputs.run_tests == 'true' &&
       needs.changes.outputs.parity != '[]'
-    runs-on: ubuntu-latest
+    # Two lanes (c3-c7 and c6-gradient) run on the org's Mac runners; the others
+    # stay hosted. The parity lanes never run on pull requests.
+    runs-on: ${{ contains(fromJSON('["c3-c7","c6-gradient"]'), matrix.lane) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
     # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
@@ -213,27 +225,35 @@ jobs:
         include: ${{ fromJSON(needs.changes.outputs.parity) }}
     env:
       XLA_LANE: parity-${{ matrix.lane }}
+      UV_SYSTEM_PYTHON: "0"
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
+      - *mac-locale
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: "3.12"
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: |
           uv pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
       - name: Add XLA compile headroom
+        # Hosted runners only: no sudo or fallocate on the Mac.
+        if: runner.os == 'Linux'
         run: |
           sudo fallocate -l 12G /mnt/vmex-swap
           sudo chmod 600 /mnt/vmex-swap
           sudo mkswap /mnt/vmex-swap
           sudo swapon /mnt/vmex-swap
       - name: Fetch the golden digests
-        run: python tools/fetch_assets.py --bundle golden-v1
+        # Per-job destination: the Mac runners share one home directory, so a
+        # shared ~/.cache/vmex/golden-v1 could be read half-extracted by a
+        # concurrent job. conftest.py reads VMEX_GOLDEN_DIR first.
+        run: |
+          python tools/fetch_assets.py --bundle golden-v1 --dest "$RUNNER_TEMP/vmex-assets"
+          echo "VMEX_GOLDEN_DIR=$RUNNER_TEMP/vmex-assets/golden" >> "$GITHUB_ENV"
       - *xla-key
       - *xla-restore
       - *xla-prepare
@@ -314,17 +334,20 @@ jobs:
     name: DESC interoperability
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    # On the org's Mac runners for pushes and same-repo pull requests; fork pull
+    # requests stay hosted.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       XLA_LANE: desc
+      UV_SYSTEM_PYTHON: "0"
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
-        with:
-          python-version: "3.12"
+      - *mac-locale
       - uses: astral-sh/setup-uv@v10.2.0
         with:
+          python-version: "3.12"
+          activate-environment: true
           enable-cache: false
       - name: Install
         run: uv pip install . 'desc-opt>=0.17' pytest pytest-cov pytest-xdist
