@@ -31,20 +31,24 @@ NFP = 3
 print(f"finite-beta pwO optimization, NFP = {NFP}")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Deterministic seed: boundary modes (n, m) given a rotating-ellipse perturbation of
-# this amplitude, RBC(n, m) = -a and ZBS(n, m) = +a. One or two modes kickstart the
-# optimizer from the circular seed; None leaves INPUT_FILE as it is, to continue a
-# saved stage:
-SEED_MODES = {(-1, 1): 0.05}
+# Deterministic seed: boundary modes (n, m) given a rotating-ellipse perturbation, RBC(n, m) = -a
+# and ZBS(n, m) = +a, with a this fraction of the seed's minor radius. One or two modes
+# kickstart the optimizer from the circular seed; None leaves INPUT_FILE as it is, to
+# continue a saved stage:
+SEED_MODES = {(-1, 1): 0.5}
 
 # Volume-averaged beta of the last stage, and the beta each stage runs at as a
 # fraction of it (see BETA_FRACTIONS below):
 TARGET_BETA = 0.03
-BETA_WEIGHT = 100.0               # on the relative beta error
+BETA_WEIGHT = 1.0e4               # on the relative beta error
 
-# Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
+# Flux surfaces the pwO residual is evaluated on, and its resolution: the loop uses
+# 8 x 8 Boozer modes, no oversampling and a 16 x 16 quadrature, which rank designs like
+# the converged residual at an eighth of the cost; the final design is
+# reported with 16 x 16 modes, oversample 2 and a 32 x 32 quadrature:
 SURFACES = np.linspace(0.1, 0.9, 5)
-MBOZ = 16
+LOOP_PWO = dict(mboz=8, nboz=8, oversample=1, ngamma=16, neta=16)
+FINAL_PWO = dict(mboz=16, nboz=16, oversample=2, ngamma=32, neta=32)
 
 # Initial values of the pwO map (a, b, c, eta_min), and which of them the
 # optimizer may change; remove a name to hold it fixed:
@@ -55,7 +59,7 @@ FREE_MAP = ("a", "b", "c", "eta_min")
 # removes the term. The well and Mercier hinges act at finite beta only: the
 # pressure itself deepens the well, so the vacuum stages keep the pwO geometry:
 MAGNETIC_WELL_FLOOR = 0.01        # hinge on the magnetic well
-MAGNETIC_WELL_WEIGHT = 1.0e3
+MAGNETIC_WELL_WEIGHT = 1.0e5
 MERCIER_MARGIN = 0.3              # DMerc floor on the optimizer grid; the final grid differs
 MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
 MERCIER_WEIGHT = 100.0
@@ -72,16 +76,16 @@ ARIES_MINOR_RADIUS = 1.7044       # metres
 ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te = Ti (1 - s) in eV
 
 # The last GAMMA_C_FINAL_STAGES stages also minimize the smooth fast-ion proxy
-# GammaC on GAMMA_C_SURFACES (0 = off):
+# GammaC on GAMMA_C_SURFACES, which ranks alpha losses best (0 = off):
 GAMMA_C_FINAL_STAGES = 0
 GAMMA_C_SURFACES = tuple(SURFACES[1:])
-GAMMA_C_WEIGHT = 100.0
+GAMMA_C_WEIGHT = 1.0e4
 
 # Stage ladder: highest boundary mode number varied in each stage, its beta as a
 # fraction of TARGET_BETA, and the residual evaluations it may spend:
-MAX_MODES = [1, 2, 3, 3, 3]
-BETA_FRACTIONS = [0.0, 0.0, 0.0, 0.5, 1.0]
-MAX_NFEV = [15, 15, 15, 20, 30]
+MAX_MODES = [1, 2, 3, 3, 3, 3]
+BETA_FRACTIONS = [0.0, 0.0, 0.0, 0.33, 0.67, 1.0]
+MAX_NFEV = [15, 15, 15, 15, 20, 30]
 NS_ARRAY = np.array([35])
 NITER_ARRAY = np.array([20000])
 FTOL_ARRAY = np.array([1e-12])
@@ -97,7 +101,7 @@ AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magneti
 ELONGATION_LIMIT = 6.0
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
-BETA_PWO_WEIGHT = 1.0e5           # at finite beta the hinges otherwise win and the transport degrades
+BETA_PWO_WEIGHT = 1.0e6           # at finite beta the hinges otherwise win and the transport degrades
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
@@ -135,7 +139,8 @@ if ci_smoke:
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(inp.mpol, MINIMUM_MPOL)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-for (n, m), amplitude in (SEED_MODES or {}).items():
+for (n, m), fraction in (SEED_MODES or {}).items():
+    amplitude = fraction * inp.rbc[inp.ntor, 1]
     rbc[inp.ntor + n, m], zbs[inp.ntor + n, m] = -amplitude, amplitude
 major_radius = float(inp.rbc[inp.ntor, 0])
 # Optionally hold the plasma volume that gives the target aspect ratio at the seed's major radius:
@@ -187,14 +192,15 @@ def mercier(equilibrium_state, solver_context):
 
 def stage_terms(beta, with_dkx, with_gamma_c):
     """The objective rows of one stage; the beta, well and Mercier rows exist only at finite beta."""
+    scale = BETA_PWO_WEIGHT / PWO_WEIGHT if beta > 0 else 1.0  # the shape limits keep pace with the pwO weight
     terms = [
         (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
-        (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-        (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-        (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, MIRROR_WEIGHT),
-        (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
-        (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
-        (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
+        (opt.aspect_ratio, ASPECT_TARGET, scale * ASPECT_WEIGHT),
+        (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, scale * IOTA_WEIGHT),
+        (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, scale * MIRROR_WEIGHT),
+        (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, scale * 100.0),
+        (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, scale * 100.0),
+        (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, scale * 10.0),
     ]
     if beta > 0:
         terms.append((opt.volume_average_beta, beta, BETA_WEIGHT / beta**2))
@@ -209,10 +215,9 @@ def stage_terms(beta, with_dkx, with_gamma_c):
     return terms
 
 
-pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
-                        **MAP_PARAMETERS)
+pwo = MappedPwOResidual(SURFACES, limit_map=True, **LOOP_PWO, **MAP_PARAMETERS)
 report = opt.EquilibriumReporter(
-    ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
+    ("pwO total", lambda equilibrium: pwo.total(equilibrium), ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("beta", opt.volume_average_beta, ".3%"), ("min |iota|", opt.min_abs_iota, ".4f"),
     ("magnetic well", opt.magnetic_well, ".4f"),
     ("min DMerc", lambda state, rt: jnp.min(dmerc(state, rt)), ".3e"),
@@ -297,6 +302,7 @@ final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
 
 ### Print, plot and save ######################################################
 
+pwo = MappedPwOResidual(SURFACES, limit_map=True, **FINAL_PWO, **MAP_PARAMETERS)  # the final design at full resolution
 final = report("final", final_equilibrium)
 beta_bounds = [("beta", final["beta"], 0.9 * TARGET_BETA, "min"), ("beta", final["beta"], 1.1 * TARGET_BETA, "max")]
 mercier_bound = [] if MERCIER_MARGIN is None else [("min DMerc", final["min DMerc"], 0.0, "min")]

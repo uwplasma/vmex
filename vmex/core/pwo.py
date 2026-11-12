@@ -342,7 +342,8 @@ class FreeMapProblem:
             out = mapped_pwo_residual_from_boozer(
                 bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[ns*nm:],
                 nfp=nfp, a=a, b=b, c=c, eta_min=eta_min, weights=mapped.weights, limit_map=True,
-                nband=nband if band_weight > 0 else 0)
+                nband=nband if band_weight > 0 else 0,
+                **{k: v for k, v in mapped.options.items() if k in ("ngamma", "neta")})
             area = jnp.sqrt(100.)*jnp.maximum(area_floor-out["mapped_area_fraction"], 0.)
             band = jnp.sqrt(band_weight)*out["band_residuals1d"] if band_weight > 0 else jnp.zeros(0)
             return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area, band))
