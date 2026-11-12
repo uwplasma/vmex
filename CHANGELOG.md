@@ -4,7 +4,6 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- **Second adiabatic invariant panel of `--plot`.** `J` is drawn as filled contours with percentile color limits on 33 resampled surfaces, lines run long enough to hold a full well, shallow ripple wells are skipped, and branch jumps are masked rather than drawn; the panel takes 0.8 to 1.6 s warm instead of 7 to 14 s, and the Boozer line synthesis of `trace_boozer_field_lines` is about 50 times cheaper.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09
@@ -192,7 +191,9 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## 0.11.2 - 2026-09-24
 
-A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or `VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one (#449): nodes with different CPU features no longer recompile on every run.
+A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
+`VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
+(#449): nodes with different CPU features no longer recompile on every run.
 
 ## 0.11.1 and earlier
 
