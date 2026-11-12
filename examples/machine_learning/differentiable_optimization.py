@@ -59,6 +59,19 @@ def metrics(equilibrium):
                      for f in (opt.mean_iota, opt.aspect_ratio)])
 
 
+def plot_training(losses, values, path):
+    """Plot the training loss and physical targets in one figure."""
+    fig, axes = plt.subplots(1, 3, figsize=(11, 3.2), constrained_layout=True)
+    axes[0].semilogy(losses, "o-")
+    axes[0].set(xlabel="Adam step", ylabel="Dimensionless loss")
+    for index, (label, target) in enumerate(zip(("Mean rotational transform", "Aspect ratio"),
+                                             (IOTA_TARGET, ASPECT_TARGET))):
+        axes[index + 1].plot(np.asarray(values)[:, index], "o-")
+        axes[index + 1].axhline(target, color="black", linestyle="--", linewidth=1)
+        axes[index + 1].set(xlabel="Adam step", ylabel=label)
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
 started = perf_counter()
 problem = opt.VmecProblem.from_loss(
     inp, physical_loss, max_mode=MAX_MODE, vary_major_radius=False,
@@ -159,22 +172,12 @@ np.savez(
     metrics_history=metrics_history, dof_names=DOF_NAMES, step=BOUNDARY_STEP,
     targets=[IOTA_TARGET, ASPECT_TARGET], scales=[IOTA_SCALE, ASPECT_SCALE],
     best_index=best_index, verification_metrics=verification_metrics, verification_loss=verification_loss,
-    rbc_seed=inp.rbc, zbs_seed=inp.zbs, x_seed=np.asarray(x_seed), ntor=NTOR, nfp=inp.nfp,
     directional_ad=ad, directional_fd=fd_derivatives[1], fd_step=FD_STEPS[1],
     fd_steps=FD_STEPS, fd_derivatives=fd_derivatives, fd_errors=fd_errors,
     refined_metrics=refined_metrics, refined_loss=refined_loss, ns_verify=NS_VERIFY,
     provenance=json.dumps(provenance, default=lambda a: a.tolist()),
     cold_gradient_seconds=cold_gradient_seconds, warm_gradient_seconds=warm_gradient_seconds,
 )
-fig, axes = plt.subplots(1, 3, figsize=(11, 3.2), constrained_layout=True)
-axes[0].semilogy(loss_history, "o-")
-axes[0].set(xlabel="Adam step", ylabel="Dimensionless loss")
-for index, (label, target) in enumerate(zip(("Mean rotational transform", "Aspect ratio"),
-                                         (IOTA_TARGET, ASPECT_TARGET))):
-    axes[index + 1].plot(np.asarray(metrics_history)[:, index], "o-")
-    axes[index + 1].axhline(target, color="black", linestyle="--", linewidth=1)
-    axes[index + 1].set(xlabel="Adam step", ylabel=label)
-fig.savefig(OUTPUT_DIR / "differentiation.png", dpi=160)
-plt.close(fig)
+plot_training(loss_history, metrics_history, OUTPUT_DIR / "differentiation.png")
 print(f"Independent loss check: {verification_loss[0]:.6e} -> {verification_loss[1]:.6e}")
 print(f"Wrote {OUTPUT_DIR / 'differentiation.npz'} and differentiation.png in {perf_counter() - started:.1f} s")

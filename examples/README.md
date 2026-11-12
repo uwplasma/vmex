@@ -30,8 +30,10 @@ that research budget as one commented set of constants next to the default.
     checks a directional derivative with independent solves, and re-solves the
     selected boundary on a finer radial grid. Install `vmex[optimizers]`.
   - `stellarator_optimization.ipynb` introduces the geometry, objective choices,
-    plots and experiments. Run it from an editable checkout; it runs the scripts
-    when their results are absent. Outputs go to `results/machine_learning/`.
+    plots and experiments. It is self-contained and runs against an editable
+    checkout of `main`, using existing parameter and plotting APIs. Plot formatting
+    lives in one optional setup cell. Script outputs go to `results/machine_learning/`;
+    the notebook writes to `results/ml_notebook/`.
     These are local learning examples, not validated reactor designs.
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
