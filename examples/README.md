@@ -19,6 +19,20 @@ With its default settings every script finishes in under five minutes on a
 around long compilations and solves). Where a longer run gives a better answer, the script keeps
 that research budget as one commented set of constants next to the default.
 
+- `machine_learning/`: a first stellarator design problem for readers who train
+  models. Both scripts vary the same six boundary coefficients of a vacuum QA
+  seed, with fixed size and flux, and target mean iota and aspect ratio.
+  - `database_optimization.py` builds a small labelled database, fits a quadratic
+    surrogate with a held-out test split, and verifies its proposal with VMEX.
+    QS and magnetic well are reported by default; QI, hard Gamma_c, mapped pwO,
+    and NEO effective ripple are optional labels with separate resolution controls.
+  - `differentiable_optimization.py` uses `jax.value_and_grad` and Optax Adam,
+    checks a directional derivative with independent solves, and re-solves the
+    selected boundary on a finer radial grid. Install `vmex[optimizers]`.
+  - `stellarator_optimization.ipynb` introduces the geometry, objective choices,
+    plots and experiments. Run it from an editable checkout; it runs the scripts
+    when their results are absent. Outputs go to `results/machine_learning/`.
+    These are local learning examples, not validated reactor designs.
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.

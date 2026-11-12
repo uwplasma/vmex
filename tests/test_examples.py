@@ -152,6 +152,8 @@ UNTESTED_EXAMPLES = {
 #: their symmetric namesakes: none of them had ever run, and
 #: ``QH_optimization.py`` exited non-zero when it finally did.
 EXECUTED_EXAMPLES = {
+    "examples/machine_learning/database_optimization.py",
+    "examples/machine_learning/differentiable_optimization.py",
     "examples/epsilon_effective.py",
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
@@ -1556,3 +1558,52 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000
+
+
+@pytest.mark.parametrize("name", ["database", "differentiable"])
+def test_machine_learning_examples(name, tmp_path):
+    """The ML entry points preserve usable labels and verify proposed improvements."""
+    if name == "differentiable":
+        pytest.importorskip("optax")
+    _run_example(EXAMPLES / "machine_learning" / f"{name}_optimization.py", tmp_path, timeout=600)
+    output = tmp_path / "results" / "machine_learning"
+    if name == "database":
+        with np.load(output / "database.npz", allow_pickle=False) as data:
+            assert data["X"].shape[1] == 6
+            assert data["Y"].shape == data["valid"].shape == data["errors"].shape
+            assert np.array_equal(data["valid"], np.isfinite(data["Y"]))
+            assert data["valid"][:, :4].all()
+            assert not data["valid"][:, 4:].any()
+            assert set(data["split"]) == {"train", "test"}
+            assert np.isfinite(data["proposal_y"][:4]).all()
+            assert np.max(np.abs(data["selected_x"])) <= 1.0
+            assert np.all(data["rmse"][:2] < data["baseline_rmse"][:2])
+            assert json.loads(str(data["provenance"]))["ns"] == 21
+        assert (output / "database.png").is_file()
+    else:
+        with np.load(output / "differentiation.npz", allow_pickle=False) as data:
+            assert np.max(np.abs(data["x_history"])) <= 1.0
+            assert np.isfinite(data["loss_history"]).all()
+            assert data["verification_loss"][1] < data["verification_loss"][0]
+            assert data["refined_loss"][1] < data["refined_loss"][0]
+            np.testing.assert_allclose(data["directional_ad"], data["directional_fd"], rtol=1e-3, atol=1e-6)
+        assert (output / "differentiation.png").is_file()
+
+
+def test_machine_learning_database_preserves_failed_solves(tmp_path, monkeypatch):
+    """A failed sampling run saves missing labels and reasons before refusing to fit."""
+    import runpy
+    from vmex import optimize as opt
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("deliberately failed equilibrium")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(opt, "solve_equilibrium", fail)
+    with pytest.raises(RuntimeError, match="Seed/core labels failed"):
+        runpy.run_path(str(EXAMPLES / "machine_learning" / "database_optimization.py"))
+    with np.load(tmp_path / "results/machine_learning/database.npz", allow_pickle=False) as data:
+        assert not data["valid"].any()
+        assert np.isnan(data["Y"]).all()
+        assert all("deliberately failed equilibrium" in error for error in data["errors"].flat)
+        assert "test_predictions" not in data
