@@ -1572,10 +1572,16 @@ def test_machine_learning_examples(name, tmp_path):
             assert data["X"].shape[1] == 6
             assert data["Y"].shape == data["valid"].shape == data["errors"].shape
             assert np.array_equal(data["valid"], np.isfinite(data["Y"]))
-            assert data["valid"][:, :4].all()
+            assert data["valid"][:, :4].all(axis=1).mean() > 0.8
+            assert np.all(data["errors"][~data["valid"][:, 0], 0] != "")
+            count = int(data["initial_count"])
+            assert np.all(data["split"][count:] == "train")
+            assert np.count_nonzero(data["split"] == "test") == 16
             assert not data["valid"][:, 4:].any()
             assert set(data["split"]) == {"train", "test"}
             assert np.isfinite(data["proposal_y"][:4]).all()
+            assert data["proposal_y"][1] < data["Y"][0, 1] - 0.5
+            assert data["proposal_loss"] < 0.1*data["seed_loss"]
             assert np.max(np.abs(data["selected_x"])) <= 1.0
             assert np.all(data["rmse"][:2] < data["baseline_rmse"][:2])
             assert json.loads(str(data["provenance"]))["ns"] == 21
@@ -1585,7 +1591,8 @@ def test_machine_learning_examples(name, tmp_path):
             assert np.max(np.abs(data["x_history"])) <= 1.0
             assert np.isfinite(data["loss_history"]).all()
             assert data["verification_loss"][1] < data["verification_loss"][0]
-            assert data["refined_loss"][1] < data["refined_loss"][0]
+            assert data["refined_loss"][1] < 0.01*data["refined_loss"][0]
+            assert data["verification_metrics"][1, 1] < data["verification_metrics"][0, 1] - 0.5
             np.testing.assert_allclose(data["directional_ad"], data["directional_fd"], rtol=1e-3, atol=1e-6)
         assert (output / "differentiation.png").is_file()
 

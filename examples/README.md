@@ -21,18 +21,24 @@ that research budget as one commented set of constants next to the default.
 
 - `machine_learning/`: a first stellarator design problem for readers who train
   models. Both scripts vary the same six boundary coefficients of a vacuum QA
-  seed, with fixed size and flux, and target mean iota and aspect ratio.
+  seed, with fixed major-radius coefficient and flux. A 5 cm coefficient range allows
+  visible shape changes toward mean iota 0.45 and aspect ratio 5.
   - `database_optimization.py` builds a small labelled database, fits a quadratic
-    surrogate with a held-out test split, and verifies its proposal with VMEX.
+    surrogate with a held-out test split, and refines it through sequential
+    acquisition with bounded multistart optimization and independent VMEX evaluations.
     QS and magnetic well are reported by default; QI, hard Gamma_c, mapped pwO,
     and NEO effective ripple are optional labels with separate resolution controls.
-  - `differentiable_optimization.py` uses `jax.value_and_grad` and Optax Adam,
+  - `differentiable_optimization.py` uses `jax.value_and_grad` with selectable L-BFGS-B or Optax Adam,
     checks a directional derivative with independent solves, and re-solves the
     selected boundary on a finer radial grid. Install `vmex[optimizers]`.
   - `stellarator_optimization.ipynb` introduces the geometry, objective choices,
     plots and experiments. It is self-contained and runs against an editable
     checkout of `main`, using existing parameter and plotting APIs. Plot formatting
-    lives in one optional setup cell. Script outputs go to `results/machine_learning/`;
+    lives in optional setup cells. Advanced sections run sequential acquisition,
+    compare optimizers, and optimize QA with a Fourier-mode continuation from
+    a rotating ellipse, including independent radial/angular refinement.
+    The compactness-only objective can severely worsen QA; both diagnostics
+    are reported so a lower loss is not confused with better confinement. Script outputs go to `results/machine_learning/`;
     the notebook writes to `results/ml_notebook/`.
     These are local learning examples, not validated reactor designs.
 - Top-level scripts demonstrate common workflows (start with
