@@ -138,7 +138,7 @@ print(f"[solve] {joint.counts['trials']} trials ({joint.counts['rejected']} reje
 
 prefix = "single_stage_QH"
 equilibrium, surface, metrics, free = verify_design(
-    joint, u, prefix=prefix, ns=31 if ci_smoke else 101, ftol=1e-10 if ci_smoke else 1e-12,
+    joint, u, prefix=prefix, ns=31 if ci_smoke else 101, ftol=1e-10 if ci_smoke else 1e-13,
     free_ns=[16] if ci_smoke else [16, 51], free_ftol=1e-10 if ci_smoke else 1e-12,
     free_mpol=None if ci_smoke else FREE_MPOL, verbose=not ci_smoke)
 report("final", equilibrium)
