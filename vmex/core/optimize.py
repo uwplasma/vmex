@@ -59,6 +59,7 @@ reduced ``[0, pi]`` grid.
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import dataclasses
 import functools
 import inspect
@@ -1981,6 +1982,7 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2067,6 +2069,12 @@ def make_problem(
     ``refine_tol`` is the frozen fixed-point residual required before
     implicit differentiation. The default preserves strict gradients;
     ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+
+    ``probe_workers`` is the number of threads that split the colored forward-mode probes
+    of each block factorization, the dominant cost of a residual evaluation on a CPU (one
+    XLA:CPU program does not use more than a few cores).  ``None`` takes the CPU count,
+    at most 8, on a CPU device and one program on an accelerator; ``1`` keeps one
+    program.  The factors are the same to round-off.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -2155,7 +2163,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
-            refine_tol=refine_tol,
+            refine_tol=refine_tol, probe_workers=probe_workers,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -2208,6 +2216,7 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2349,7 +2358,7 @@ def least_squares(
                 current_dofs=current_dofs, jac=jac,
                 jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
                 adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
                 hot_restart=hot_restart,
                 warm_start=warm_start, use_ess=use_ess,
                 ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
@@ -2378,7 +2387,7 @@ def least_squares(
             current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2459,6 +2468,7 @@ def minimize(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
@@ -2514,7 +2524,7 @@ def minimize(
         current_dofs=current_dofs, jac_solver="reverse",
         warm_start=("state" if hot_restart else None),
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
         solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
         minimize_method=method, **scipy_kwargs)
 
@@ -2690,6 +2700,7 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2819,6 +2830,7 @@ def _least_squares_implicit(
     # cache (_template_runtime, the residual lane, _LAST_SOLVE) on repeated
     # problem construction with identical content.
     cfg = imp._canonical_config(dataclasses.replace(cfg, device=jac_device))
+    imp.set_probe_workers(cfg, probe_workers)
     if initial_state is not None:
         imp._HOT_CACHE[cfg] = initial_state
 
@@ -3280,7 +3292,7 @@ def _least_squares_implicit(
     else:
         probe_chunk = chunk
 
-    def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None):
+    def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None, columns=None):
         """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
 
         Same Jacobian as the default path to ``cfg.adjoint_tol`` (the GMRES
@@ -3290,11 +3302,13 @@ def _least_squares_implicit(
         perturbation warm-start linearization, same contract as
         ``jacobian_rows``).  ``bands`` are the config's shared block
         factorization at ``state`` (``imp._block_bands``); a traced caller
-        omits them and the graph builds its own.
+        omits them and the graph builds its own.  ``columns`` selects the dofs
+        (default all) when the host splits the column chunks over threads.
         """
         _, tangent_of, _, column_of, (params, frozen, _, _) = \
             _jac_parts(x, state, data)
-        tangent_batch = jax.vmap(tangent_of)(tangent_stack)
+        stack = tangent_stack if columns is None else tuple(t[columns] for t in tangent_stack)
+        tangent_batch = jax.vmap(tangent_of)(stack)
         tangent_chunk = ndof if chunk is None else chunk
         dz0, report = imp._implicit_evolved_tangent_multi_rhs(
             params, cfg, frozen, mask_const, tangent_batch,
@@ -3308,9 +3322,7 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(
-            column, (tangent_stack, dz0), chunk_size=tangent_chunk
-        )
+        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
         return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):
@@ -3325,6 +3337,29 @@ def _least_squares_implicit(
         problem_jit_key, "jac", lambda: jax.jit(jac_impl))
     gmres_jit = _problem_jit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
+
+    def block_columns(x, state, roots, bands):
+        """``jac_jit`` with its column chunks split over the config's probe threads.
+
+        The slices hold whole chunks, so every thread runs one compiled program and the
+        columns, state responses and certificate are those of a single call.
+        """
+        width = ndof if chunk is None else chunk
+        chunks = ndof // width
+        split = max((k for k in range(1, imp.probe_workers(cfg) + 1) if chunks % k == 0), default=1)
+        if jac_impl is not jacobian_rows_block or ndof % width or split == 1:
+            return jac_jit(x, state, roots, bands)
+        slices = np.split(np.arange(ndof), split)
+        with concurrent.futures.ThreadPoolExecutor(split) as pool:
+            parts = list(pool.map(lambda c: jac_jit(x, state, roots, bands, c), slices))
+        certificates = np.stack([np.asarray(part[2]) for part in parts])
+        worst = np.argmax(certificates[:, 2] / np.maximum(certificates[:, 3], np.finfo(float).tiny))
+        summary = np.array([
+            certificates[:, 0].max(), certificates[:, 1].sum(), certificates[worst, 2],
+            certificates[worst, 3], certificates[:, 4].sum(), certificates[:, 5].sum()])
+        return (jnp.concatenate([part[0] for part in parts], axis=1),
+                jax.tree.map(lambda *leaves: jnp.concatenate(leaves), *[part[1] for part in parts]),
+                summary)
     reverse_width = ndof if chunk is None else chunk
 
     def reverse_pullback(x, state, status, cotangent_of, count, data):
@@ -3553,7 +3588,7 @@ def _least_squares_implicit(
                 bands = (imp._block_bands(
                     cfg, jax.tree.map(_place, params_np), state, mask_const)
                     if jac_impl is jacobian_rows_block else None)
-                rows, dz_cols, summary = jac_jit(
+                rows, dz_cols, summary = block_columns(
                     _place(x), state, with_roots(x, state, problem_data), bands)
                 jac = np.asarray(jax.device_get(rows), dtype=float)
                 _record_linear_response(holder, summary, cfg)
