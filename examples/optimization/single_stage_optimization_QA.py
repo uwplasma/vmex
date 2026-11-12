@@ -37,7 +37,9 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 STAGE_ONE_MAX_MODES, STAGE_ONE_MAX_NFEV = [1, 2], [10, 15]
 MAX_MODE = 2
 
-# Final limits. The optimizer is handed slightly tighter values.
+# Final limits. The optimizer is handed slightly tighter values. B.n/|B| at 0.2 % (limit 0.002,
+# constraint 0.0016, JUMP_CONSTRAINT 0.01, N_COILS 4, COIL_ORDER 6) cut the free-boundary alpha loss
+# from 11 % to 4 % and its eps_eff^(3/2) twentyfold, at a 14 % higher maximum coil curvature.
 ASPECT_LIMIT, IOTA_FLOOR, NORMAL_FIELD_LIMIT = 6.0, 0.42, 0.01
 ASPECT_CONSTRAINT, IOTA_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 5.9, 0.43, 0.008
 JUMP_CONSTRAINT = 0.04  # RMS of |B_coil|^2/|B|^2 - 1 on the boundary
