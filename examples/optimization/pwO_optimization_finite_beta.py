@@ -1,12 +1,15 @@
 #!/usr/bin/env python
-"""Continue a vacuum pwO boundary to finite beta, with p proportional to 1-s.
+"""Optimize a boundary for piecewise omnigenity at finite beta, from the plain seed.
 
-Run ``pwO_optimization.py`` first with its commented line
-``MAGNETIC_WELL_TARGET = 0.01`` enabled (and ELONGATION_LIMIT = 6.0 at NFP 1):
-from a vacuum magnetic hill this continuation does not reach a well. Pressure is calibrated at fixed toroidal flux, then the
-workflow is that of the vacuum example with beta and Mercier stability added
-to the residual vector. NEO compares the vacuum start at this pressure with
-the result. Requires vmex[neoclassical].
+The pressure is p proportional to 1-s. Each stage names its boundary mode
+number and its volume-averaged beta, so one run climbs the mode ladder in
+vacuum and then ramps beta to the target: the circular seed needs no
+vacuum optimization first. SciPy nonlinear least squares varies the boundary,
+and the residual vector holds the mapped pwO variance, aspect ratio,
+rotational transform floor, mirror ratio and shaping limits. Three physics
+terms are independent switches below: the magnetic well, Mercier stability
+(both hinges) and bootstrap-current control. NEO compares the seed at this
+pressure with the result. Requires vmex[neoclassical].
 """
 
 import os
@@ -23,15 +26,21 @@ from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 from vmex.core.restart import restart_state
 
-# Number of field periods, and the vacuum result this script continues:
+# Number of field periods, and the seed deck the boundary is shaped from:
 NFP = 3
 print(f"finite-beta pwO optimization, NFP = {NFP}")
-VACUUM_NAME = f"pwO_optimized_nfp{NFP}_well0.01"
-INPUT_FILE = Path(f"input.{VACUUM_NAME}")
-WOUT_FILE = Path(f"wout_{VACUUM_NAME}.nc")
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Volume-averaged beta the pressure is calibrated to:
-TARGET_BETA = 0.005
+# Rotating-ellipse amplitude added to the circular seed (None leaves INPUT_FILE as
+# it is, to continue a saved stage), plus relative random noise on its m <= 2
+# coefficients (SEED_NOISE = 0 turns it off):
+SEED_PERTURBATION = 0.05
+SEED_NOISE = 0.0
+SEED_RANDOM_STATE = 0
+
+# Volume-averaged beta of the last stage, and the beta each stage runs at as a
+# fraction of it. Stages 1-2 run in vacuum, as the vacuum example does:
+TARGET_BETA = 0.03
 BETA_WEIGHT = 100.0               # on the relative beta error
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
@@ -43,10 +52,37 @@ MBOZ = 16
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
-# Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend. Higher vacuum modes stay fixed:
-MAX_MODES = [1, 2, 3]
-MAX_NFEV = [20, 20, 40]
+# Physics terms, each independent. A floor of None (or a bootstrap term of None)
+# removes the term. The well and Mercier hinges act at finite beta only: the
+# pressure itself deepens the well, so the vacuum stages keep the pwO geometry:
+MAGNETIC_WELL_FLOOR = 0.01        # hinge on the magnetic well
+MAGNETIC_WELL_WEIGHT = 1.0e3
+MERCIER_MARGIN = 0.3              # DMerc floor on the optimizer grid; the final grid differs
+MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
+MERCIER_WEIGHT = 100.0
+# Zero bootstrap current. "band" flattens B across the unmapped band where B_max
+# lives (cheap, geometric); the last DKX_FINAL_STAGES stages also drive the DKX
+# bootstrap <J.B> on DKX_SURFACES to zero (0 = off). None leaves the current free:
+BOOTSTRAP_TERM = None
+BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4
+DKX_FINAL_STAGES = 0
+DKX_SURFACES = (0.25, 0.55, 0.85)
+DKX_WEIGHT = 30.0
+DKX_RESOLUTION = dict(Ntheta=15, Nzeta=21, Nxi=48, NL=4, Nx=5)
+ARIES_MINOR_RADIUS = 1.7044       # metres
+ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te = Ti (1 - s) in eV
+
+# The last GAMMA_C_FINAL_STAGES stages also minimize the smooth fast-ion proxy
+# GammaC on GAMMA_C_SURFACES (0 = off):
+GAMMA_C_FINAL_STAGES = 0
+GAMMA_C_SURFACES = tuple(SURFACES[1:])
+GAMMA_C_WEIGHT = 100.0
+
+# Stage ladder: highest boundary mode number varied in each stage, its beta as a
+# fraction of TARGET_BETA, and the residual evaluations it may spend:
+MAX_MODES = [1, 2, 3, 3, 3]
+BETA_FRACTIONS = [0.0, 0.0, 0.0, 0.5, 1.0]
+MAX_NFEV = [15, 15, 15, 20, 30]
 NS_ARRAY = np.array([35])
 NITER_ARRAY = np.array([20000])
 FTOL_ARRAY = np.array([1e-12])
@@ -56,14 +92,10 @@ ASPECT_TARGET = 6.0
 ASPECT_WEIGHT = 10.0
 IOTA_FLOOR = 0.31 if NFP == 1 else 0.42  # minimum |iota| over the profile
 IOTA_WEIGHT = 1.0e4
-MAGNETIC_WELL_FLOOR = 0.01
-MAGNETIC_WELL_WEIGHT = 1.0e3
-MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
-MERCIER_MARGIN = 0.1              # DMerc floor on the optimizer grid; the final grid differs
-MERCIER_WEIGHT = 100.0
 MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+MIRROR_WEIGHT = 1.0e3
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
-ELONGATION_LIMIT = 9.0
+ELONGATION_LIMIT = 6.0
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
 
@@ -73,10 +105,10 @@ PARAMETER_STEP = 0.05
 MAX_PARAMETER_CHANGE = 5.0
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
+HOLD_VOLUME = False               # fix the plasma volume at the target aspect ratio's
 
 # Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
-# but never below the vacuum deck's or MINIMUM_MPOL. DMerc needs more modes
-# than the boundary: at NFP 1 its geodesic term is 10x too large at mpol 7.
+# but never below MINIMUM_MPOL. DMerc needs more modes than the boundary:
 MINIMUM_MPOL = 13 if NFP == 1 else 7
 
 # Verification solve of the optimized boundary:
@@ -90,7 +122,7 @@ OUTPUT_NAME = f"pwO_finite_beta_nfp{NFP}"
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
-    MAX_MODES, MAX_NFEV = [1], [4]
+    MAX_MODES, BETA_FRACTIONS, MAX_NFEV, DKX_FINAL_STAGES, GAMMA_C_FINAL_STAGES = [1], [0.0], [4], 0, 0
     FINAL_NS, FINAL_FTOL = [31], 1.0e-10
 
 ###############################################################################
@@ -99,16 +131,40 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
+# VmecInput is frozen, so copy its arrays before shaping the seed boundary.
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(inp.mpol, MINIMUM_MPOL)
-inp = replace(inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4),
-              am=np.array([1.0, -1.0]), pres_scale=1.0, ns_array=NS_ARRAY,
-              ftol_array=FTOL_ARRAY, niter_array=NITER_ARRAY)
-calibration = opt.solve_equilibrium(
-    inp, initial_state=restart_state(vj.read_wout(WOUT_FILE), inp),
-    raise_on_max_iterations=True)
-inp = replace(inp, pres_scale=TARGET_BETA / float(calibration.wout.betatotal))
-inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)  # hold the seed plasma volume
+rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+if SEED_PERTURBATION is not None:
+    rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
+    noise = SEED_NOISE * SEED_PERTURBATION * np.random.default_rng(SEED_RANDOM_STATE).standard_normal((2,) + rbc.shape)
+    noise[:, :, 3:] = 0.0                                         # m <= 2
+    noise[:, : inp.ntor - 2], noise[:, inp.ntor + 3:] = 0.0, 0.0  # |n| <= 2
+    noise[:, inp.ntor, 0] = 0.0                                   # not the major radius
+    rbc, zbs = rbc + noise[0], zbs + noise[1]
+major_radius = float(inp.rbc[inp.ntor, 0])
+# Optionally hold the plasma volume that gives the target aspect ratio at the seed's major radius:
+volume = 2 * np.pi**2 * major_radius**3 / ASPECT_TARGET**2 if HOLD_VOLUME else 0.0
+inp = replace(inp, rbc=rbc, zbs=zbs, am=np.array([1.0, -1.0]), pres_scale=0.0, ns_array=NS_ARRAY,
+              ftol_array=FTOL_ARRAY, niter_array=NITER_ARRAY, lvolume_rfix=HOLD_VOLUME, delt=0.5,
+              tvolume=volume).change_resolution(
+    mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+
+if DKX_FINAL_STAGES:
+    from dkx.bootstrap import KineticBootstrapMismatch
+    from vmex.core.bootstrap import KineticProfiles
+    size = major_radius / ASPECT_TARGET / ARIES_MINOR_RADIUS  # seed minor / ARIES-CS
+    kinetic = KineticBootstrapMismatch(
+        KineticProfiles(ARIES_DENSITY / size * np.array([1, 0, 0, 0, 0, -1.]),
+                        ARIES_TEMPERATURE * np.array([1, -1.]), ARIES_TEMPERATURE * np.array([1, -1.])),
+        DKX_SURFACES, mismatch=False, collision_model="pas+momentum_correction",
+        resolution=DKX_RESOLUTION, spectral_angles=True)
+
+    def dkx_j_dot_B(equilibrium_state, solver_context):
+        """DKX <J.B> in MA T/m^2 at ARIES-CS size."""
+        return kinetic.residuals_state(equilibrium_state, solver_context) * size**2
+
+    kinetic._setup(int(NS_ARRAY[-1]), int(inp.nfp))  # DKX builds its host-side operators eagerly, not under a trace
 
 ### Set up the objective ######################################################
 
@@ -134,22 +190,32 @@ def mercier(equilibrium_state, solver_context):
     return jnp.log1p(opt.Hinge(dmerc, floor=MERCIER_MARGIN)(equilibrium_state, solver_context))
 
 
-# Each term is (function, target, weight).
+def stage_terms(beta, with_dkx, with_gamma_c):
+    """The objective rows of one stage; the beta, well and Mercier rows exist only at finite beta."""
+    terms = [
+        (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
+        (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
+        (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
+        (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, MIRROR_WEIGHT),
+        (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
+        (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
+        (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
+    ]
+    if beta > 0:
+        terms.append((opt.volume_average_beta, beta, BETA_WEIGHT / beta**2))
+        if MAGNETIC_WELL_FLOOR is not None:
+            terms.append((opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT))
+        if MERCIER_MARGIN is not None:
+            terms.append((mercier, 0.0, MERCIER_WEIGHT))
+    if with_gamma_c:
+        terms.append((opt.GammaCSmooth(GAMMA_C_SURFACES), 0.0, GAMMA_C_WEIGHT))
+    if with_dkx:
+        terms.append((dkx_j_dot_B, 0.0, DKX_WEIGHT))
+    return terms
+
+
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
                         **MAP_PARAMETERS)
-objective_function_terms = [
-    (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
-    (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT),
-    (mercier, 0.0, MERCIER_WEIGHT),
-    (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
-    (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
-    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
-    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
-    (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT / TARGET_BETA**2),
-]
-
 report = opt.EquilibriumReporter(
     ("pwO total", pwo.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("beta", opt.volume_average_beta, ".3%"), ("min |iota|", opt.min_abs_iota, ".4f"),
@@ -161,38 +227,43 @@ monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################
 
+# The plain seed carries no pressure: it cannot hold the target beta, so the NEO comparison is in vacuum.
 seed_input = inp
-equilibrium = seed = opt.solve_equilibrium(inp, initial_state=calibration.solution)
+equilibrium = seed_vacuum = opt.solve_equilibrium(inp)
 report("seed", equilibrium)
-# Stages that share a boundary resolution share ONE problem, as in
+# Stages that share a boundary resolution and beta share ONE problem, as in
 # QA_optimization.py: every jitted graph is compiled once for the whole group.
-# The resolution never drops below the deck's, which holds the higher vacuum modes.
-resolution_of = {max_mode: max(max_mode + 2, inp.mpol) for max_mode in MAX_MODES}
-group_max_mode = {
-    max_mode: max(other for other in MAX_MODES
-                  if resolution_of[other] == resolution_of[max_mode])
-    for max_mode in MAX_MODES}
-problem, mpol = None, None
-for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
-    print(f"\n===== finite-beta pwO stage, max_mode = {max_mode} =====")
-    if resolution_of[max_mode] != mpol:
-        mpol = resolution_of[max_mode]
-        inp = replace(inp, delt=0.5).change_resolution(
-            mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+n_stage = len(MAX_MODES)
+dkx_stage = [i >= n_stage - DKX_FINAL_STAGES for i in range(n_stage)]
+gamma_c_stage = [i >= n_stage - GAMMA_C_FINAL_STAGES for i in range(n_stage)]
+resolution_of = [max(max_mode + 2, inp.mpol) for max_mode in MAX_MODES]
+group_of = [(resolution_of[i], BETA_FRACTIONS[i], dkx_stage[i], gamma_c_stage[i]) for i in range(n_stage)]
+problem, group = None, None
+for i, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
+    beta = BETA_FRACTIONS[i] * TARGET_BETA
+    print(f"\n===== finite-beta pwO stage {i}, max_mode = {max_mode}, beta = {beta:.2%} =====")
+    if group_of[i] != group:
+        group = group_of[i]
+        mpol = group[0]
+        inp = inp.change_resolution(mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+        if beta > 0:  # pressure that gives this beta on the current boundary
+            unit = opt.solve_equilibrium(replace(inp, pres_scale=1.0), initial_state=restart_state(equilibrium.wout, inp))
+            inp = replace(inp, pres_scale=beta / float(unit.wout.betatotal))
+        last = max(j for j in range(n_stage) if group_of[j] == group)
         problem = opt.VmecProblem.from_tuples(
-            inp, objective_function_terms, max_mode=group_max_mode[max_mode],
+            inp, stage_terms(beta, dkx_stage[i], gamma_c_stage[i]), max_mode=max(MAX_MODES[i:last + 1]),
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
-            ess_alpha=ESS_ALPHA, restart_from=equilibrium,
-            progress=True)
+            ess_alpha=ESS_ALPHA, restart_from=equilibrium, progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT)
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
+                           band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
-    step = np.concatenate((PARAMETER_STEP * stage.scales, np.full(len(FREE_MAP), 0.5)))
+    step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
     result = least_squares(
         joint.residual, joint.x0, jac=joint.residual_jac,
@@ -204,14 +275,15 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"map = {MAP_PARAMETERS}")
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
-    report(f"mode {max_mode}", equilibrium)
+    report(f"stage {i}", equilibrium)
+    inp.to_indata(f"input.{OUTPUT_NAME}_stage{i}")
 
 ### Check the result ##########################################################
 
 # The optimizer's grid is not the certificate: re-solve the optimized boundary
 # and the seed on a finer radial grid to a tighter tolerance and quote that.
 final_resolution = dict(ftol_array=np.array([FINAL_FTOL]), niter_array=np.array([FINAL_NITER]))
-final_equilibrium = equilibrium
+final_equilibrium, seed = equilibrium, seed_vacuum
 for ns in FINAL_NS:
     final_input = replace(inp, ns_array=np.array([ns]), **final_resolution)
     final_equilibrium = opt.solve_equilibrium(
@@ -230,11 +302,10 @@ final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
 ### Print, plot and save ######################################################
 
 final = report("final", final_equilibrium)
+beta_bounds = [("beta", final["beta"], 0.9 * TARGET_BETA, "min"), ("beta", final["beta"], 1.1 * TARGET_BETA, "max")]
+mercier_bound = [] if MERCIER_MARGIN is None else [("min DMerc", final["min DMerc"], 0.0, "min")]
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
-                   well_floor=0.0,
-                   extra=[("min DMerc", final["min DMerc"], 0.0, "min"),
-                          ("beta", final["beta"], 0.9 * TARGET_BETA, "min"),
-                          ("beta", final["beta"], 1.1 * TARGET_BETA, "max")])
+                   well_floor=MAGNETIC_WELL_FLOOR, extra=mercier_bound + beta_bounds)
 print(f"\npwO total {final['pwO total']:.3e}")
 print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 

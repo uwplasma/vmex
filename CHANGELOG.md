@@ -5,6 +5,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 ## Unreleased
 
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
+- **Finite-beta pwO from the plain seed.** `pwO_optimization_finite_beta.py` climbs a mode and beta ladder with no saved vacuum result; the magnetic well, Mercier stability, GammaC and the bootstrap band or DKX terms are independent switches at the top, and each stage saves its input.
 
 ## 0.14.0 - 2026-11-09
 
@@ -15,8 +16,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 ## 0.13.0 - 2026-11-03
 
 - **Self-consistent bootstrap at the ambipolar E_r.** `examples/optimization/QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to DKX's `<j.B>` at each surface's ambipolar `E_r` (`KineticBootstrapMismatch(ambipolar=True)`) with QI shape stages, and asserts that the final equilibrium current matches DKX within 5 % rms on the kinetic surfaces. `self_consistent_bootstrap` gains `current_model` and `initial_state`. Needs `dkx>=2.12.0`, now the floor of the `dkx` extra.
-- Add pwO vacuum, finite-beta and coil examples with independent transport checks.
-- Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid; fix constructed-QI first-wall interpolation under a shifted toroidal origin.
+- Add pwO vacuum, finite-beta and coil examples with independent transport checks. Skip vacuum virtual casing; verify single-stage free-boundary convergence on the final grid; fix constructed-QI first-wall interpolation under a shifted toroidal origin.
 - `make_free_boundary_config` now defaults to `adjoint_solver="boundary_schur"`.
 
 ## 0.12.0 - 2026-10-21

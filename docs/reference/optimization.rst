@@ -682,16 +682,25 @@ with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
 boundary.
 
-Continue the saved vacuum shape to finite pressure with::
+Optimize at finite pressure from the plain seed with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
-Run the vacuum example first, with the same ``NFP`` and the magnetic well enabled
-(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.01`` and its WOUT; from a
-vacuum hill it does not reach a well). The zero-current pressure is
-proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
-and the beta error and a Mercier floor join the objective list. It uses the same
-``MAX_MODES`` ladder.
+The script needs no saved vacuum result. Each stage of its ladder names a boundary
+mode number and a volume-average beta (``MAX_MODES``, ``BETA_FRACTIONS``,
+``TARGET_BETA``): the first stages run in vacuum, as the vacuum example does, and the
+last two bring the zero-current pressure ``p`` proportional to ``1-s`` to the target.
+Pressure is calibrated at fixed toroidal flux, and a beta row holds the target. The
+magnetic well and Mercier stability are hinges that act at finite beta only, where the
+pressure itself deepens the well; ``MAGNETIC_WELL_FLOOR = None`` or
+``MERCIER_MARGIN = None`` removes one. ``BOOTSTRAP_TERM = "band"`` and
+``DKX_FINAL_STAGES`` control the bootstrap current as in the vacuum example, and
+``GAMMA_C_FINAL_STAGES`` adds the GammaC proxy to the last stages. The elongation
+ceiling is 6. Holding the plasma volume (``HOLD_VOLUME = True``) stalls the NFP 4
+ladder. Each stage writes ``input.<name>_stage<k>``; set ``INPUT_FILE`` to one,
+``SEED_PERTURBATION = None``, ``MAP_PARAMETERS`` to its printed map and trim the ladder
+lists to resume after an interruption. The seed baseline of the NEO comparison is the
+plain seed in vacuum, which cannot hold the target pressure.
 
 ``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
 pressure, and runs one finite-beta plasma stage with the pwO map free. It then
