@@ -90,7 +90,6 @@ from .solver import (
     prepare_runtime,
     resolution_from_input,
 )
-from .fields import surface_currents
 from .stability import (
     d_merc_state,
     glasser_d_r_state,
@@ -111,10 +110,10 @@ from .stability import (
 from .statephysics import (
     _as_1d,
     _field_chain,
+    _full_surface_values,
     _half_grid,
     _interp_half_grid,
-    _iotas_half as _iotas_half,  # unused here; kept importable for back compat
-    _iotas_half_from_fields,
+    _half_mesh_profiles,
     _lgradb_grid,
     _lgradb_state_tables,
     _mode_matrix,
@@ -572,10 +571,10 @@ class QuasisymmetryRatioResidual:
         tables = {}
         for name in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
             tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn))
+        lasym = bool(getattr(wout, "lasym", False))
         for name in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsupumns", "bsupvmns"):
-            optional = not bool(getattr(wout, "lasym", False))
             tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn, optional=True)
-                                if not optional else jnp.zeros((ns, mn)))
+                                if lasym else jnp.zeros((ns, mn)))
 
         theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, self.ntheta, endpoint=False)
         phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, self.nphi, endpoint=False)
@@ -671,33 +670,18 @@ class QuasisymmetryRatioResidual:
         nfp = int(rt.resolution.nfp)
         _, jacobian, _, fields, _ = _field_chain(state, rt)
 
-        # Mirror the reduced [0, pi] grid to the full theta circle.
-        ntheta2 = int(np.shape(fields.total_pressure)[1])
-        nzeta = int(np.shape(fields.total_pressure)[2])
-        if bool(setup.lasym):
-            ntheta1 = ntheta2
+        # Half-mesh fields on the full theta circle, axis row dropped.
+        lasym = bool(setup.lasym)
 
-            def full(a):
-                return jnp.asarray(a)[1:]
-        else:
-            ntheta1 = max(2 * (ntheta2 - 1), 1)
-            i_full = np.arange(ntheta1)
-            i_src = np.where(i_full < ntheta2, i_full, ntheta1 - i_full)
-            k = np.arange(nzeta)
-            k_src = np.where(i_full[:, None] < ntheta2, k[None, :],
-                             (nzeta - k[None, :]) % nzeta)
-            i_src = np.broadcast_to(i_src[:, None], (ntheta1, nzeta))
-
-            def full(a):
-                # Drop the zeroed axis row before singular divisions: keeping
-                # it poisons reverse AD with 0 * inf although it is unused.
-                return jnp.asarray(a)[1:, i_src, k_src]
+        def full(a):
+            return _full_surface_values(a, lasym=lasym)
 
         # ``|B|`` on the half-mesh internal grid (bcovar.f: bsq = ``|B|``^2/2 + p).
         bsq2 = 2.0 * (jnp.asarray(fields.total_pressure)
                       - jnp.asarray(fields.pressure)[:, None, None])
         tiny = jnp.asarray(jnp.finfo(bsq2.dtype).tiny, dtype=bsq2.dtype)
         bmag = jnp.sqrt(jnp.maximum(full(bsq2), tiny))
+        ntheta1, nzeta = int(bmag.shape[1]), int(bmag.shape[2])
 
         # FFT spectral differentiation on the full periodic (theta, zeta) grid;
         # zeta spans one field period, so d/dphi carries the nfp factor.
@@ -707,15 +691,8 @@ class QuasisymmetryRatioResidual:
         dB_dtheta = jnp.real(jnp.fft.ifft2(1j * kt[None, :, None] * bhat, axes=(1, 2)))
         dB_dphi = jnp.real(jnp.fft.ifft2(1j * kz[None, None, :] * bhat, axes=(1, 2)))
 
-        # Profiles: iota (add_fluxes.f), Boozer covariant averages G/I (fbal.f).
-        iota = _iotas_half_from_fields(setup, fields)
-        cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
-                               trig=rt.trig, s=s, signgs=setup.signgs)
-        G, I = jnp.asarray(cur.bvco), jnp.asarray(cur.buco)  # noqa: E741
-
-        # d(psi)/ds = -phi_edge / (2 pi), wout sign convention.
-        hs = s[1] - s[0]
-        d_psi_d_s = -float(setup.signgs) * hs * jnp.sum(jnp.asarray(setup.phipf)[1:])
+        iota_h, G_h, I_h, phi_edge = _half_mesh_profiles(rt, fields)
+        d_psi_d_s = -phi_edge
 
         gsqrt = full(jacobian.sqrt_g)
         gsqrt_safe = jnp.where(gsqrt != 0.0, gsqrt, jnp.ones_like(gsqrt))
@@ -724,7 +701,6 @@ class QuasisymmetryRatioResidual:
             d_psi_d_s * (full(fields.bsubu) * dB_dphi - full(fields.bsubv) * dB_dtheta)
             / gsqrt_safe)
         nn = self.helicity_n * nfp
-        iota_h, G_h, I_h = iota[1:], G[1:], I[1:]      # match the sliced grid
         f = (B_cross_grad_B_dot_grad_psi * (nn - iota_h[:, None, None] * self.helicity_m)
              - B_dot_grad_B * (self.helicity_m * G_h + nn * I_h)[:, None, None]) / bmag ** 3
 
