@@ -1028,92 +1028,32 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - 0.996, 2.5 %
      - not available
 
-The pwO residual converges fastest because the mapped field only needs the
-leading Boozer harmonics: 8 x 8 modes change the total by 0.01 %, and the
-quadrature (16 x 16) by a further 0.1 %. The constructed-QI residual is
-limited by its field-line sampling (``n_bounce``, ``nphi``), not by the Boozer
-resolution: ``mboz`` 6 to 24 change it by less than 0.5 %, while the sampling
+The constructed-QI residual is limited by its field-line sampling, not by the
+Boozer resolution (``mboz`` 6 to 24 change it by less than 0.5 %); the sampling
 set above is 34 % from the converged value yet ranks equilibria at 0.98, so
-report the validation set. For :math:`\Gamma_c` the sampling noise is real:
-shifting the field-line origin ``zeta0`` changes the hard value by 5 to 13 %
-and reorders near-equal candidates (Spearman 0.72 to 0.75 against the
-reference on the QI perturbations, 0.96 to 0.99 on the QH ones); the smooth
-surrogate is steadier (0.86 to 0.92 on the QI perturbations). Between
-distinct designs the ordering is stable at every budget tested.
+report the validation set. The sampling noise of :math:`\Gamma_c` is real:
+shifting the field-line origin changes the hard value by 5 to 13 % and can
+reorder near-equal candidates; between distinct designs the order is stable.
 
 **Which metric predicts the alpha loss.** Across the 39 optimized equilibria
 the Spearman coefficient between the metric and the alpha loss is 0.93 for
 :math:`\Gamma_c`, 0.64 for :math:`\epsilon_{\mathrm{eff}}^{3/2}`, 0.66 for the
-mapped pwO residual and 0.05 for the constructed-QI residual; inside the QI
-runs it is 0.86, 0.47, -0.27 and 0.39. The loss follows :math:`\Gamma_c` almost
-linearly (log-log slope 1.0 to 1.1), but the leave-one-out error of that map
-is 60 to 80 % of the spread of the losses, so :math:`\Gamma_c` ranks designs and
-does not predict a fraction. Surfaces held out of the calibration rank as well
-as the ones used (0.92 against 0.93; the two sets of :math:`\Gamma_c` agree at
-0.99), and the four QI runs that lose less than 2 % have a mean over the six
-surfaces between 0.007 and 0.011, the next best 0.031 (10 % lost). Inside the ten
-QH perturbations :math:`\epsilon_{\mathrm{eff}}^{3/2}` has no rank
-correlation with the loss (0.02) and :math:`\Gamma_c` has 0.6, in line with
-Velasco et al. 2021 and with the advice to keep both.
+mapped pwO residual and 0.05 for the constructed-QI residual. The loss follows
+:math:`\Gamma_c` almost linearly, but the leave-one-out error of that map is 60
+to 80 % of the spread of the losses, so :math:`\Gamma_c` ranks designs and does
+not predict a fraction. Among ten QH perturbations
+:math:`\epsilon_{\mathrm{eff}}^{3/2}` has no rank correlation with the loss
+(0.02) and :math:`\Gamma_c` has 0.6: keep both.
 
-**Alpha tracing.** Losses of the first :math:`N` alphas at the first
-:math:`t` of the 2000-alpha, 10 ms run give the following ranks of the 39
-equilibria (the subsets are drawn from the reference, so these are optimistic
-for independent samples):
+**Alpha tracing.** 500 alphas for 5 ms rank the 39 equilibria at 0.99 for a
+quarter of the cost of 2000 alphas for 10 ms; candidates whose losses differ
+by 1 to 2 % need the 2000-alpha run.
 
-.. list-table::
-   :header-rows: 1
-
-   * - alphas
-     - 1 ms
-     - 2 ms
-     - 5 ms
-     - 10 ms
-   * - 100
-     - 0.92
-     - 0.93
-     - 0.96
-     - 0.96
-   * - 200
-     - 0.95
-     - 0.96
-     - 0.97
-     - 0.98
-   * - 500
-     - 0.95
-     - 0.97
-     - 0.99
-     - 0.99
-   * - 1000
-     - 0.95
-     - 0.96
-     - 0.995
-     - 0.998
-
-500 alphas for 5 ms (root-mean-square error of the loss 1.5 %, at most a
-quarter of the cost of 2000 for 10 ms, since the cost is proportional to the
-number of alphas) is enough to order designs a few percent apart; within one family of
-candidates whose losses differ by 1 to 2 % (the QI perturbations) no
-affordable sample resolves the order (0.8 to 0.9), and the final comparison
-needs 2000 alphas.
-
-**Kinetic bootstrap current.** The DKX row is the least settled of the
-metrics. On the six decks solved with the full Fokker-Planck operator at
-ARIES-CS scale (``dkx.bootstrap.KineticBootstrapCurrent``, a
-:math:`15 \times 21 \times 48 \times 5` grid as reference), the
-:math:`13 \times 19 \times 32 \times 5` Fokker-Planck grid is 8 % away at the
-median, pure pitch-angle scattering on the same grid 74 % away and the coarse
-:math:`11 \times 11 \times 48 \times 4` pitch-angle grid 190 % away, with sign
-changes on the QI decks. The traced row with the momentum-restoring correction
-(``collision_model="pas+momentum_correction"``) is 1.2 to 1.5 times smaller
-in magnitude than pure scattering on the NFP 4 QH deck, and its Boozer
-resolution is converged at ``mboz=6`` (``mboz`` 8 to 16 agree to 1e-9; 4 is
-13 % off). Spectral angles change the current by 8 to 19 % and the finer
-:math:`15 \times 21 \times 48 \times 5` spectral grid by a further 4 to 21 %,
-at sixty times the cost (24 s to 1460 s for three surfaces). On an aspect-3.5 QI deck
-with :math:`|\iota| \approx 1.1` the Fokker-Planck current at :math:`s = 0.55`
-takes values from -7 to +8 MA T/m\ :sup:`2` as the angular grid changes, so a
-DKX term is only as trustworthy as a refinement check of the optimum on the
-same equilibrium: optimize with the cheap traced row, then compare a
+**Kinetic bootstrap current.** On six decks solved with the full Fokker-Planck
+operator (``dkx.bootstrap.KineticBootstrapCurrent``), the
+:math:`13 \times 19 \times 32 \times 5` grid is 8 % from the
+:math:`15 \times 21 \times 48 \times 5` reference at the median, pure
+pitch-angle scattering 74 % and the coarse pitch-angle grid 190 %, with sign
+changes on the QI decks. Optimize with the cheap traced row, then compare a
 Fokker-Planck solve on the finest affordable grid and refine until it stops
 moving.
