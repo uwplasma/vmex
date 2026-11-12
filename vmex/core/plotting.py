@@ -1159,7 +1159,6 @@ def _j_invariant_map(
     *,
     pitch: float | None = None,
     pitch_fraction: float = 0.25,
-    drift_surfaces: bool = False,
     nalpha: int = 96,
     points_per_period: int = 64,
     quadrature_order: int = 32,
@@ -1260,16 +1259,15 @@ def _j_invariant_map(
     # motion in vmex.core.maxj.drift_orbits), launched on the trapped surfaces.
     rows = np.flatnonzero(np.all(np.isfinite(j_map) & np.isfinite(tau_map), axis=1))
     orbits = None
-    if drift_surfaces and rows.size >= 4:
+    if rows.size >= 4:
         from .maxj import drift_orbits
         # Launch off the axis, where the polar map resolves alpha poorly, and
         # inside the edge, where every drift surface would start lost.
         launch = np.asarray(booz["s_b"])[rows]
         launch = launch[(launch >= 0.2) & (launch <= 0.85)]
         launch = launch[:: max(1, launch.size // 5)]
-        if launch.size:
-            orbits = {key: np.asarray(value) for key, value in drift_orbits(
-                j_map, tau_map, booz["s_b"], alpha, launch, length=8.0, nsteps=512).items()}
+        orbits = {key: np.asarray(value) for key, value in drift_orbits(
+            j_map, tau_map, booz["s_b"], alpha, launch, length=8.0, nsteps=512).items()}
     return {
         "alpha": alpha,
         "s_b": booz["s_b"],
@@ -1365,10 +1363,12 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     """Polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
 
-    Filled contours show the invariant. When requested, dark drift surfaces
-    are solid if they stay inside the LCFS and dashed red if they reach it;
-    dots mark their launch points. The title gives the pitch as ``v_par/v``
-    where ``|B|`` is smallest.
+    The colored curves are ``J`` contours. The dark curves drawn over them
+    are drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
+    about one precession turn, solid if they close inside the LCFS and dashed
+    red if they reach it; dots mark the launch points. Where an orbit follows
+    a contour, the colored curve shows along its edges. The title gives the
+    pitch as ``v_par/v`` where ``|B|`` is smallest.
     """
     length_scale = abs(float(r_major))
     if not np.isfinite(length_scale) or length_scale <= np.finfo(float).tiny:
@@ -1388,17 +1388,21 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     periodic = np.ma.concatenate([masked, masked[:, :1]], axis=1)
     alpha2d, s2d = np.meshgrid(alpha, j_info["s_b"])
     x, y = s2d * np.cos(alpha2d), s2d * np.sin(alpha2d)
-    levels = np.linspace(float(periodic.min()), float(periodic.max()), 15)
-    filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
-    ax.contour(x, y, periodic, levels=levels, colors="0.25", linewidths=0.35, alpha=0.65)
-    fig.colorbar(filled, ax=ax, pad=0.02,
+    levels = np.linspace(float(periodic.min()), float(periodic.max()), 12)
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=3.2)
+    # A continuous bar reads better than twelve stripes; the contours sample it.
+    mappable = ScalarMappable(Normalize(levels[0], levels[-1]), cmap=_CMAP_J)
+    fig.colorbar(mappable, ax=ax, pad=0.02,
                  label=r"second adiabatic invariant $J\,/\,(v R_0)$")
+    from matplotlib import colormaps
     from matplotlib.lines import Line2D
     from matplotlib.patches import Circle
     circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.8))
     # Drift surfaces: black if the orbit closes inside the LCFS, red if lost.
     orbits = j_info.get("orbits")
-    handles = [Line2D([], [], color="0.25", linewidth=0.7,
+    handles = [Line2D([], [], color=colormaps[_CMAP_J](0.6), linewidth=3.2,
                       label=r"contours of $J$ (second adiabatic invariant)"),
                Line2D([], [], color="0.15", linewidth=2.8, label="last closed flux surface")]
     for s_orbit, a_orbit in zip(*(orbits["s"], orbits["alpha"])) if orbits else ():
@@ -1433,8 +1437,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     # particle, sqrt(1 - Bmin/Bmax) the barely trapped one.
     b_min = float(np.nanmin(j_info["b_min"]))
     xi = np.sqrt(max(0.0, 1.0 - b_min / j_info["pitch_inverse"]))
-    title = "second adiabatic invariant" + (" and drift surfaces" if orbits else "")
-    ax.set_title(title + "\n"
+    ax.set_title("second adiabatic invariant and drift surfaces\n"
                  rf"trapped particles with $v_\parallel/v={xi:.2f}$ at $B_{{\min}}$")
 
 
@@ -1680,7 +1683,6 @@ def _boundary_3d_panel(ax, wout, *, ntheta: int, nzeta: int):
 
 def _summary_figure(
     wout, *, s_plot_ignore: float = 0.2, j_pitch: float | None = None,
-    drift_surfaces: bool = False,
 ):
     """Build the 3x3 summary figure; returns ``(fig, meta)`` for inspection."""
     plt = _import_matplotlib()
@@ -1767,7 +1769,7 @@ def _summary_figure(
         # 2 + 4. Boozer-based panels: J(alpha, s) map and |B| contours.
         if booz is not None:
             try:
-                j_info = _j_invariant_map(booz, pitch=j_pitch, drift_surfaces=drift_surfaces)
+                j_info = _j_invariant_map(booz, pitch=j_pitch)
                 meta["j_map"] = j_info
                 _j_map_panel(axes[1, 2], fig, j_info, float(wout.Rmajor_p))
             except Exception as exc:  # noqa: BLE001
@@ -1818,7 +1820,6 @@ def _summary_figure(
 def plot_summary(
     wout, out_path: str | Path, *, s_plot_ignore: float = 0.2,
     j_pitch: float | None = None,
-    drift_surfaces: bool = False,
 ) -> Path:
     """Write the 3x3 publication summary figure of one equilibrium.
 
@@ -1870,8 +1871,6 @@ def plot_summary(
         so pass the pitch an optimization targeted to certify it at the same
         value.  By default a ``B*`` a quarter of the way into the trapping band common to
         every plotted surface is chosen automatically.
-    drift_surfaces:
-        Overlay bounce-centre drift surfaces on the invariant map (default: off).
 
     Returns
     -------
@@ -1879,8 +1878,7 @@ def plot_summary(
     the Agg backend and closed; nothing is displayed.
     """
     plt = _import_matplotlib()
-    fig, _meta = _summary_figure(
-        wout, s_plot_ignore=s_plot_ignore, j_pitch=j_pitch, drift_surfaces=drift_surfaces)
+    fig, _meta = _summary_figure(wout, s_plot_ignore=s_plot_ignore, j_pitch=j_pitch)
     out_path = Path(out_path)
     _save_figure(fig, out_path, dpi=_DPI)
     plt.close(fig)
@@ -2221,7 +2219,6 @@ def plot_wout(
     *,
     name: str | None = None,
     j_pitch: float | None = None,
-    drift_surfaces: bool = False,
 ) -> dict[str, Path]:
     """Write the requested diagnostic figures for a WOUT file.
 
@@ -2240,8 +2237,6 @@ def plot_wout(
         Optional physical pitch ``lambda`` for the summary's ``J(alpha, s)``
         panel. This is useful for certifying a maximum-J optimization at the
         same pitch; by default a common trapped pitch is selected automatically.
-    drift_surfaces:
-        Overlay bounce-centre drift surfaces on the summary invariant map.
 
     Returns a mapping from figure key to the written PNG path.
     """
@@ -2254,7 +2249,7 @@ def plot_wout(
     results: dict[str, Path] = {}
     for key in which:
         suffix, fn = _WOUT_FIGURES[key]
-        kwargs = {"j_pitch": j_pitch, "drift_surfaces": drift_surfaces} if key == "summary" else {}
+        kwargs = {"j_pitch": j_pitch} if key == "summary" else {}
         results[key] = fn(data, outdir / f"{label}_{suffix}.png", **kwargs)
     return results
 

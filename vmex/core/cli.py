@@ -226,10 +226,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--drift-surfaces", action="store_true",
-        help="Overlay bounce-centre drift surfaces on the invariant map; requires --plot of a toroidal equilibrium.",
-    )
-    p.add_argument(
         "--booz",
         action="store_true",
         help=(
@@ -1005,8 +1001,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 
     plot_dir = outdir if outdir is not None else input_path.parent
     if args.plot is not None:
-        _plot_wout_file(wout_path, plot_dir, emit=emit, quiet=bool(args.quiet),
-                        drift_surfaces=args.drift_surfaces)
+        _plot_wout_file(wout_path, plot_dir, emit=emit, quiet=bool(args.quiet))
     if bool(args.booz):
         _run_booz(
             wout_path, args, plot_dir,
@@ -1028,14 +1023,12 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
 # ---------------------------------------------------------------------------
 
 
-def _plot_wout_file(
-    wout_path: Path, outdir: Path, *, emit, quiet: bool, drift_surfaces: bool = False,
-) -> None:
+def _plot_wout_file(wout_path: Path, outdir: Path, *, emit, quiet: bool) -> None:
     from .plotting import plot_wout
 
     if not quiet:
         emit(f" Plotting WOUT {wout_path.name} -> {outdir}/")
-    for key, path in plot_wout(wout_path, outdir=outdir, drift_surfaces=drift_surfaces).items():
+    for key, path in plot_wout(wout_path, outdir=outdir).items():
         if not quiet:
             emit(f"   Saved {key}: {path}")
     # Memory policy lives here, not in the diagnostic libraries: after every
@@ -1512,8 +1505,6 @@ def _solve_mirror_file(input_path: Path, outdir: Path | None, *, plot: bool, emi
 
 
 def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
-    if args.drift_surfaces and args.plot is None:
-        parser.error("--drift-surfaces requires --plot")
     if args.scale_factors and not args.scale:
         parser.error("scale factors require --scale")
     if bool(args.doctor):
@@ -1577,8 +1568,6 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
 
     if (_is_boozmn_path(input_path) or _is_mout_path(input_path)) and (args.trace or args.neoclassical):
         parser.error("--trace and --neoclassical require toroidal wout_*.nc inputs")
-    if args.drift_surfaces and (_is_boozmn_path(input_path) or _is_mout_path(input_path)):
-        parser.error("--drift-surfaces requires a toroidal WOUT or input deck")
     if _is_boozmn_path(input_path):
         if not plot_requested:
             parser.error("boozmn_*.nc inputs are plot-only; use --plot boozmn_*.nc")
@@ -1598,8 +1587,7 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             parser.error("wout_*.nc inputs require --plot, --booz, --trace, --turbulence, "
                          "and/or --neoclassical")
         if plot_requested:
-            _plot_wout_file(input_path, plot_outdir, emit=emit, quiet=quiet,
-                            drift_surfaces=args.drift_surfaces)
+            _plot_wout_file(input_path, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.booz):
             _run_booz(input_path, args, plot_outdir, plot=plot_requested, emit=emit, quiet=quiet)
         if bool(args.trace):
@@ -1613,8 +1601,6 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
     from vmex.mirror.free_boundary import is_mirror_input
 
     if is_mirror_input(input_path):
-        if args.drift_surfaces:
-            parser.error("--drift-surfaces requires a toroidal WOUT or input deck")
         if args.booz or args.trace or args.neoclassical:
             parser.error("--booz, --trace and --neoclassical require toroidal inputs, not &MIRROR decks")
         return _solve_mirror_file(input_path, outdir, plot=plot_requested, emit=emit, quiet=quiet)

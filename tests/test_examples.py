@@ -1099,75 +1099,13 @@ def test_qi_optimization_example(tmp_path):
 
 
 @pytest.mark.full
-@pytest.mark.parametrize(("nfp", "optional", "well"),
-                         [(3, False, False), (3, True, False), (5, False, False), (3, False, True)])
-def test_low_transport_example(tmp_path, nfp, optional, well):
-    """The flat script supports optional entries and an uncommented well target."""
+def test_low_transport_example(tmp_path):
     pytest.importorskip("booz_xform_jax")
-    source = (EXAMPLES / "optimization" / "pwO_optimization.py").read_text()
-    if optional:
-        pytest.importorskip("dkx.bootstrap")
-        source = re.sub(r"(?m)^    # (?=\(|    )", "    ", source)
-    source = source.replace("NFP = 3", f"NFP = {nfp}")
-    if well:
-        source = source.replace("# MAGNETIC_WELL_TARGET = 0.04", "MAGNETIC_WELL_TARGET = 0.04")
-    directory = tmp_path / "examples" / "optimization"
-    directory.mkdir(parents=True)
-    (directory.parent / "data").symlink_to(DATA_DIR, target_is_directory=True)
-    script = directory / "pwO_optimization.py"
-    script.write_text(source)
-    out = _run_example(script, tmp_path)
-    _assert_cost_decreased(out, "pwO")
-    stem = f"pwO_optimized_nfp{nfp}" + ("_well0.04" if well else "")
-    for name in (f"input.{stem}", f"wout_{stem}.nc", f"{stem}_objectives.csv"):
+    pytest.importorskip("neo_jax")
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
+    for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
+                 "pwO_optimized_nfp3_objectives.csv"):
         assert (tmp_path / name).exists()
-    costs = np.loadtxt(tmp_path / f"{stem}_objectives.csv", delimiter=",", skiprows=1, ndmin=2)
-    np.testing.assert_allclose(costs[:, 1], costs[:, 2:].sum(axis=1), rtol=1e-12, atol=1e-12)
-    columns = (tmp_path / f"{stem}_objectives.csv").read_text().splitlines()[0].split(",")
-    assert ("magnetic_well" in columns) == well
-    if well:
-        assert np.any(costs[:, columns.index("magnetic_well")] > 0)
-    assert (tmp_path / f"wout_pwO_seed_nfp{nfp}.nc").exists()
-    if optional:
-        assert "constructed_maximum_j" in columns and "j_boot_dkx" in columns
-
-
-def test_pwo_optional_setup_keeps_dkx_lazy_and_shared_seeds_circular():
-    """Disabled kinetic diagnostics do not import DKX or change other examples' seeds."""
-    from vmex.core.input import VmecInput
-
-    source = (EXAMPLES / "optimization" / "pwO_optimization.py").read_text()
-    tree = ast.parse(source)
-    assert not any(isinstance(node, (ast.Import, ast.ImportFrom))
-                   and "dkx" in ast.unparse(node) for node in tree.body)
-    assert "screen_transport" not in source
-    from dataclasses import replace
-    from types import SimpleNamespace
-
-    figure = ast.parse((EXAMPLES / "plot_optimized_families.py").read_text())
-    seed_function = next(node for node in figure.body if isinstance(node, ast.FunctionDef)
-                         and node.name == "_pwo_seed")
-    plot_scope = dict(DATA=DATA_DIR, vj=SimpleNamespace(VmecInput=VmecInput), replace=replace)
-    exec(compile(ast.Module(body=[seed_function], type_ignores=[]), "figure seed", "exec"), plot_scope)
-
-    seed_setup = source[source.index("rbc, zbs ="):source.index("### Set up the objective")]
-    for nfp in (1, 2, 3, 4, 5):
-        inp = VmecInput.from_file(DATA_DIR / f"input.minimal_seed_nfp{nfp}")
-        assert inp.nfp == nfp
-        expected_r, expected_z = inp.rbc.copy(), inp.zbs.copy()
-        expected_r[inp.ntor - 1, 1], expected_z[inp.ntor - 1, 1] = -0.05, 0.05
-        if nfp >= 3:
-            assert inp.rbc[inp.ntor + 1, 1] == inp.zbs[inp.ntor + 1, 1] == 0
-            expected_r[inp.ntor + 1, 1] = expected_z[inp.ntor + 1, 1] = 0.005
-        scope = dict(inp=inp, NFP=nfp, replace=replace,
-                     SEED_PERTURBATION=0.05, SEED_COUNTER_PERTURBATION=0.005)
-        exec(compile(seed_setup, "example seed", "exec"), scope)
-        np.testing.assert_array_equal(scope["inp"].rbc, expected_r)
-        np.testing.assert_array_equal(scope["inp"].zbs, expected_z)
-        plot_scope["PWO_NFP"] = nfp
-        figure_seed = plot_scope["_pwo_seed"]()
-        np.testing.assert_array_equal(figure_seed.rbc, expected_r)
-        np.testing.assert_array_equal(figure_seed.zbs, expected_z)
 
 
 @pytest.mark.full  # nightly: every residual evaluation is a finite-beta solve

@@ -1,21 +1,18 @@
 #!/usr/bin/env python
-"""Optimize a boundary for piecewise omnigenity.
+"""Optimize a boundary for piecewise omnigenity with a magnetic well.
 
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number.
 The residual vector holds the mapped pwO contour
-variance, the aspect ratio, a floor on the rotational transform and a ceiling
-on the mirror ratio, and VMEX supplies its exact Jacobian.
-The final boundary is re-solved on a finer radial ladder before it is saved.
-Uncomment the well target to add a magnetic well.
-The commented objectives add a constructed-field maximum-J continuation
-proxy and a kinetic bootstrap response to prescribed low-beta test profiles.
+variance, the aspect ratio, a floor on the rotational transform, the magnetic
+well and a ceiling on the mirror ratio, and VMEX supplies its exact Jacobian.
+The verified boundary is then compared with the seed by a matched NEO
+calculation of epsilon_eff^(3/2). Requires vmex[neoclassical].
 """
 
 import os
 from dataclasses import replace
 from pathlib import Path
-from importlib import import_module  # noqa: F401 - optional kinetic entry below
 
 import jax.numpy as jnp
 import numpy as np
@@ -23,8 +20,7 @@ from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.bootstrap import KineticProfiles
-from vmex.core.maxj import ConstructedMaximumJResidual, common_trapped_pitches_state  # noqa: F401 - optional entry
+from vmex.core.neoclassical import screen_transport
 from vmex.core.pwo import FreeMapProblem, MappedPwOResidual
 
 # Number of field periods, and the seed deck the boundary is shaped from:
@@ -32,10 +28,9 @@ NFP = 3
 print(f"pwO optimization, NFP = {NFP}")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Rotating-ellipse amplitude added to the seed. The exactly circular
+# Rotating-ellipse amplitude added to the circular seed. The exactly circular
 # torus has zero first-order iota sensitivity; this gives the optimizer a basin:
 SEED_PERTURBATION = 0.05
-SEED_COUNTER_PERTURBATION = 0.005  # additional counter-helicity for NFP >= 3
 
 # Flux surfaces the pwO residual is evaluated on, and its Boozer resolution:
 SURFACES = np.linspace(0.1, 0.9, 8)
@@ -56,15 +51,15 @@ BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2, 3, 4, 5]
+MAX_MODES = [1, 2, 3]
 MAX_NFEV = [15]*len(MAX_MODES)
 ASPECT_TARGET = 6.0
-MAGNETIC_WELL_TARGET = 0.0
-# MAGNETIC_WELL_TARGET = 0.04  # enable a well for finite-beta continuation
-MAGNETIC_WELL_WEIGHT = 1e2
-ELONGATION_LIMIT = 10.0
+MAGNETIC_WELL_TARGET = 0          # 0 turns the well off
+# MAGNETIC_WELL_TARGET = 0.01  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
+MAGNETIC_WELL_WEIGHT = 1e3
+ELONGATION_LIMIT = 9.0
 NS_ARRAY = np.array([35])
-NITER_ARRAY = np.array([6000])
+NITER_ARRAY = np.array([5000])
 FTOL_ARRAY = np.array([1e-12])
 STAGE_FTOL = [FTOL_ARRAY]*len(MAX_MODES)
 
@@ -91,26 +86,10 @@ DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
 
 # Targets:
 IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
-MIRROR_LIMIT = 0.24               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
+MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
-
-# Optional constructed maximum-J continuation proxy: fixed pitches [1/T].
-MAXJ_SURFACES = np.array([0.3, 0.5, 0.7])
-MAXJ_PITCH_GRID = dict(nalpha=5, points_per_period=32, num_periods=24)
-MAXJ_QI_GRID = dict(nphi=65, nalpha=5, n_bounce=7)
-MAXJ_WEIGHT = 1.0
-
-# Optional kinetic response of this vacuum geometry to low-beta test profiles.
-# Densities are m^-3; temperatures are eV; Er=0. This is not the vacuum current
-# or a self-consistent finite-pressure equilibrium. Needs vmex[neoclassical].
-BOOTSTRAP_PROFILES = KineticProfiles(
-    1.0e18 * np.array([1.0, -0.8]), 1.0e3 * np.array([1.0, -0.8]),
-    1.0e3 * np.array([1.0, -0.8]))
-BOOTSTRAP_SURFACES = (0.25, 0.5, 0.75)
-BOOTSTRAP_RESOLUTION = dict(Ntheta=11, Nzeta=11, Nxi=16, NL=4, Nx=4)
-BOOTSTRAP_CURRENT_SCALE = 0.1     # <j.B> in MA T/m^2: a 100 kA T/m^2 scale
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
@@ -125,8 +104,8 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
-FINAL_FTOL = 1.0e-13
-FINAL_NITER = 8000
+FINAL_FTOL = 1.0e-10
+FINAL_NITER = 30000
 
 # Every output file name contains this:
 OUTPUT_NAME = f"pwO_optimized_nfp{NFP}" + (f"_well{MAGNETIC_WELL_TARGET}" if MAGNETIC_WELL_TARGET > 0 else "")
@@ -147,8 +126,6 @@ if ci_smoke:
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
 rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-if NFP >= 3:
-    rbc[inp.ntor + 1, 1], zbs[inp.ntor + 1, 1] = SEED_COUNTER_PERTURBATION, SEED_COUNTER_PERTURBATION
 inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################
@@ -162,9 +139,6 @@ def boozer_spectrum(equilibrium_state, solver_context):
     """The field and iota the map reads; FreeMapProblem turns these rows into the pwO residual."""
     return pwo.spectrum_state(equilibrium_state, solver_context)
 
-equilibrium = opt.solve_equilibrium(inp)
-vj.write_wout(f"wout_pwO_seed_nfp{NFP}.nc", equilibrium.wout)
-
 
 # Each term is (function, target, weight).
 pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=True,
@@ -177,19 +151,6 @@ objective_function_terms = [
     (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
     (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
-    # Penalize positive dJ/ds in a constructed field, not absolute J.
-    # This continuation proxy needs an actual-field well/maximum-J check afterward.
-    # (ConstructedMaximumJResidual(MAXJ_SURFACES, common_trapped_pitches_state(
-    #     equilibrium.state, equilibrium.runtime, MAXJ_SURFACES, mboz=MBOZ, nboz=MBOZ,
-    #     **MAXJ_PITCH_GRID), mboz=MBOZ, nboz=MBOZ, quadrature_order=24,
-    #     qi_options=MAXJ_QI_GRID), 0.0, MAXJ_WEIGHT),
-    # A prescribed-profile kinetic current response, in MA T/m^2, with momentum
-    # restoration. A finite-beta design needs an independent kinetic recheck.
-    # (import_module("dkx.bootstrap").KineticBootstrapMismatch(
-    #     BOOTSTRAP_PROFILES, surfaces=BOOTSTRAP_SURFACES, mismatch=False,
-    #     resolution=BOOTSTRAP_RESOLUTION, collision_model="pas+momentum_correction",
-    #     spectral_angles=True, mboz=MBOZ, nboz=MBOZ, tol=1.0e-9),
-    #     0.0, 1.0 / BOOTSTRAP_CURRENT_SCALE**2),
 ]
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
@@ -218,14 +179,12 @@ report = opt.EquilibriumReporter(
     ("axis excursion", opt.axis_excursion, ".4f"), ("magnetic well", opt.magnetic_well, ".3f"),
     ("max mirror", lambda state, rt: jnp.max(max_mirror(state, rt)), ".3f"))
 monitor = opt.OptimizationMonitor()
-report("seed", equilibrium)
-# Build optional kinetic templates outside JAX tracing.
-for term, _, _ in objective_function_terms:
-    if hasattr(term, "residuals_state"):
-        term.residuals_state(equilibrium.state, equilibrium.runtime)
 
 ### Run the optimization ######################################################
 
+seed_input = inp
+equilibrium = opt.solve_equilibrium(inp)
+report("seed", equilibrium)
 # Stages that share a boundary resolution and objective share ONE problem, as in
 # QA_optimization.py: every jitted graph is compiled once for the whole group.
 group_of = {max_mode: (max(max_mode + 2, MINIMUM_MPOL), gamma_c, dkx)
@@ -250,7 +209,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
             max_mode=group_max_mode[max_mode],
             vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True,
             ess_alpha=ESS_ALPHA, restart_from=equilibrium,
-            jacobian_batch_size=1, progress=True)
+            progress=True)
         x = problem.x0
         monitor.problem = problem
         if not ci_smoke:
@@ -259,7 +218,6 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     print(f"dof_names = {stage.dof_names}")
     joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
                            band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
-    monitor.problem = joint
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
@@ -286,6 +244,16 @@ for ns in FINAL_NS:
     final_equilibrium = opt.solve_equilibrium(
         final_input, initial_state=final_equilibrium.solution,
         verbose=not ci_smoke, raise_on_max_iterations=True)
+
+# Matched NEO: the seed on the same radial grid, the same half-mesh surfaces.
+seed_equilibrium = opt.solve_equilibrium(
+    replace(seed_input, ns_array=np.array([FINAL_NS[-1]]), **final_resolution),
+    verbose=False, raise_on_max_iterations=True)
+half_mesh = (np.arange(FINAL_NS[-1] - 1) + 0.5) / (FINAL_NS[-1] - 1)
+neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
+seed_Q = screen_transport(seed_equilibrium.wout, neo_surfaces)
+final_Q = screen_transport(final_equilibrium.wout, neo_surfaces)
+print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}")
 
 ### Print, plot and save ######################################################
 

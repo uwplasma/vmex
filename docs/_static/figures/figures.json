@@ -833,22 +833,22 @@
     },
     {
       "path": "docs/_static/figures/readme_pwo.webp",
-      "sha256": "306cfa0e07d45720f09f9a0928db3eda86b8a94a2a73e4f798d33ff131343c24",
-      "bytes": 156354,
+      "sha256": "dcfa5e7f4c23d7b79197ebaa06460ec76c5edf742b81dbc2079d07858c64a8fd",
+      "bytes": 156856,
       "generator": "examples/plot_optimized_families.py",
-      "command": "Run examples/optimization/pwO_optimization.py, trace both saved WOUTs with vmex --trace --trace-particles 1024 --trace-seed 42 --trace-tmax 0.01, then set PLOT_ONLY = \"pwo\" in examples/plot_optimized_families.py and run it.",
+      "command": "python examples/plot_optimized_families.py  (set PLOT_ONLY = \"pwo\" after running pwO_optimization.py)",
       "inputs": [
         "examples/data/input.minimal_seed_nfp3"
       ],
       "record": null,
-      "generated": "2026-11-06",
+      "generated": "2026-11-02",
       "hardware": null,
-      "reproducible": "external-data",
+      "reproducible": "command",
       "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "NFP 3 vacuum modes 1-5, 15 evaluations per stage, well objective off, soft mirror ceiling 0.24. Saved seed ns35 and final ns71: boundary cuts, boundary field, Boozer contours, native CLI loss curves and iota. The independent 1024-particle, seed42, 10ms ARIES-CS traces give 35.16% and 7.91% loss, zero failures and maximum relative energy error 4.06e-4. README paired 4096-birth results use a separate tighter-tolerance, common-birth importance-weighted comparison. External run outputs are required; no transport or long-term confinement certificate."
+      "note": "NFP 3 vacuum pwO_optimization.py defaults (modes 1-3, no magnetic well) against its near-circular seed, both re-solved at ns 71: boundary cross sections, |B| on the boundary, Boozer contours, NEO effective ripple and |iota| profiles."
     },
     {
       "path": "docs/_static/figures/readme_pwo_bootstrap.webp",

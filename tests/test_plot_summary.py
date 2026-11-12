@@ -110,12 +110,10 @@ def test_summary_panel_inventory(summary_figure):
 
 
 def test_summary_contours_and_colormaps(summary_figure):
-    """J has filled contours; Boozer |B| retains jet-mapped line contours."""
+    """J and Boozer |B| contours are unfilled; |B| is jet-mapped."""
     _, meta = summary_figure
     j_sets = _contour_sets(meta["axes"]["j_invariant"])
-    assert j_sets and any(cs.filled for cs in j_sets)
-    assert meta["j_map"]["orbits"] is None
-    assert "drift surfaces" not in meta["axes"]["j_invariant"].get_title()
+    assert j_sets and not any(cs.filled for cs in j_sets)
     for name in ("boozer_mid", "boozer_lcfs"):
         sets = _contour_sets(meta["axes"][name])
         assert sets, f"panel {name!r} has no contour set"
@@ -802,30 +800,6 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         plotting._j_invariant_map(booz, pitch=0.5, nalpha=4)
 
 
-    import vmex.core.maxj as maxj
-
-    calls = []
-    def orbits(j_map, tau_map, surfaces, alpha, launch, **kwargs):
-        calls.append(launch)
-        return {"s": np.array([[.3, .4]]), "alpha": np.array([[0., 1.]])}
-
-    monkeypatch.setattr(maxj, "drift_orbits", orbits)
-    # Enough valid surfaces to launch orbits: the default must still skip them.
-    many = dict(booz, bmnc_b=np.repeat(booz["bmnc_b"][:1], 5, axis=0),
-                iota_b=np.full(5, .5), G_b=np.ones(5), I_b=np.zeros(5),
-                s_b=np.linspace(.1, .9, 5))
-    assert plotting._j_invariant_map(many, nalpha=4)["orbits"] is None
-    assert not calls
-    result = plotting._j_invariant_map(many, nalpha=4, drift_surfaces=True)
-    assert result["orbits"] is not None and len(calls) == 1
-    np.testing.assert_allclose(calls[0], [.3, .5, .7])
-    assert plotting._j_invariant_map(booz, nalpha=4, drift_surfaces=True)["orbits"] is None
-    assert len(calls) == 1  # too few surfaces must not launch drift orbits
-    near_axis = dict(many, s_b=np.linspace(.01, .09, 5))
-    assert plotting._j_invariant_map(near_axis, nalpha=4, drift_surfaces=True)["orbits"] is None
-    assert len(calls) == 1  # no launch radius lies inside the admissible interval
-
-
 def test_j_map_panel_separates_lost_from_confined_drift_surfaces():
     """An orbit that reaches the LCFS is drawn dashed and counted as lost."""
     import matplotlib.pyplot as plt
@@ -843,7 +817,6 @@ def test_j_map_panel_separates_lost_from_confined_drift_surfaces():
     assert "drift surface, confined (1)" in labels and "drift surface, reaches the LCFS (1)" in labels
     styles = sorted(line.get_linestyle() for line in ax.lines if len(line.get_xdata()) > 1)
     assert styles == ["-", "--"]
-    assert any(contour.filled for contour in _contour_sets(ax))
     plt.close(fig)
 
 
