@@ -224,21 +224,26 @@ def essos_tracing_fields(wout: Any, coils: Any = None, *, wall: float | None = 0
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE,
                  angle_grid: int | None = 6):
     """Run ``booz_xform_jax`` on every surface of ``wout`` and return
-    ``(essos.boozer.BoozerField, Booz_xform)``."""
+    ``(essos.boozer.BoozerField, Booz_xform)``; ``bx.rmnc_b``, ``zmns_b`` and ``numns_b`` (and their
+    asymmetric partners) hold the outermost surface only."""
+    from inspect import signature
+
     from booz_xform_jax import Booz_xform
     from essos.boozer import BoozerField
 
     if bool(wout.lasym):
-        from inspect import signature
-
         if "bmns" not in signature(BoozerField.from_booz).parameters:
             raise ImportError("Non-symmetric tracing requires ESSOS sine-spectrum support; upgrade ESSOS")
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
     bx.read_wout_data(wout, flux=False)
-    # One jitted batched pass over every half-mesh surface; the spectra are stored as bx.run() stores them.
-    out = bx.run_jax()
-    asym = bool(bx.asym)
-    for name in ("bmnc_b", "rmnc_b", "zmns_b", "numns_b") + (("bmns_b", "rmns_b", "zmnc_b", "numnc_b") if asym else ()):
+    # The orbits need |B|, G and I on every surface: one jitted magnetic-only batched pass. R, Z and nu are
+    # needed only on the outermost surface (the trajectory plots), where the host transform is cheap.
+    bx.compute_surfs = [int(bx.ns_in) - 1]
+    bx.run()
+    bx.compute_surfs = None
+    # booz_xform_jax releases before magnetic_only existed compute (and discard) the geometry as well.
+    out = bx.run_jax(**({"magnetic_only": True} if "magnetic_only" in signature(bx.run_jax).parameters else {}))
+    for name in ("bmnc_b", "bmns_b") if bx.asym else ("bmnc_b",):
         setattr(bx, name, np.asarray(out[name]).T)
     bx.Boozer_G, bx.Boozer_I, bx.s_b = np.asarray(out["bvco_b"]), np.asarray(out["buco_b"]), np.asarray(bx.s_in)
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.

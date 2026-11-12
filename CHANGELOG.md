@@ -4,6 +4,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
+- **Magnetic-only Boozer pass for tracing.** The tracing setup runs the batched Boozer transform with `magnetic_only=True` (`booz_xform_jax` after #30) on every surface and the host transform only on the outermost one, where the trajectory plots need R, Z and nu. |B| spectra, G and I are unchanged to 2e-16; setup memory roughly halves and the steady setup time drops by about a quarter.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09

@@ -64,7 +64,7 @@ def test_counts_are_consistent(traced):
 
 
 def test_boozer_field_matches_the_host_transform(solovev_wout):
-    """The jitted batched transform stores the same spectra the surface-by-surface host loop does."""
+    """The magnetic-only batched transform stores the |B| spectra the surface-by-surface host loop does."""
     from booz_xform_jax import Booz_xform
     from vmex.core import tracing
 
@@ -73,8 +73,10 @@ def test_boozer_field_matches_the_host_transform(solovev_wout):
     host = Booz_xform(verbose=0, mboz=8, nboz=8)
     host.read_wout_data(wout, flux=False)
     host.run()
-    for name in ("bmnc_b", "rmnc_b", "zmns_b", "numns_b", "Boozer_G", "Boozer_I", "s_b", "xm_b", "xn_b"):
+    for name in ("bmnc_b", "Boozer_G", "Boozer_I", "s_b", "xm_b", "xn_b"):
         np.testing.assert_allclose(getattr(bx, name), getattr(host, name), rtol=0, atol=1e-12, err_msg=name)
+    for name in ("rmnc_b", "zmns_b", "numns_b"):  # geometry is kept for the outermost surface only
+        np.testing.assert_allclose(getattr(bx, name)[:, -1], getattr(host, name)[:, -1], rtol=0, atol=1e-12, err_msg=name)
 
 
 def test_trace_timing_separates_setup_from_orbits(solovev_wout, traced, monkeypatch):
@@ -1051,8 +1053,9 @@ def test_angular_table_control_is_forwarded_and_saved(monkeypatch, angle_grid, t
         def __new__(cls, **kwargs):
             return bx
     bx.read_wout_data = lambda *args, **kwargs: None
-    bx.run_jax = lambda: {name: np.ones((1, 1)) for name in (
-        "bmnc_b", "rmnc_b", "zmns_b", "numns_b")} | {"bvco_b": np.ones(1), "buco_b": np.ones(1)}
+    bx.ns_in = 1
+    bx.run = lambda: setattr(bx, "rmnc_b", np.ones((1, 1))) or setattr(bx, "zmns_b", np.ones((1, 1))) or setattr(bx, "numns_b", np.ones((1, 1)))
+    bx.run_jax = lambda magnetic_only: {"bmnc_b": np.ones((1, 1)), "bvco_b": np.ones(1), "buco_b": np.ones(1)}
     monkeypatch.setattr(booz_xform_jax, "Booz_xform", Transform)
     def construct(booz, psi0, mode_tolerance, *, angle_grid):
         calls["angle_grid"] = angle_grid
