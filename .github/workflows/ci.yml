@@ -277,6 +277,7 @@ jobs:
     timeout-minutes: 15
     env:
       XLA_LANE: device
+      UV_SYSTEM_PYTHON: "0"
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -319,6 +320,7 @@ jobs:
     timeout-minutes: 15
     env:
       XLA_LANE: desc
+      UV_SYSTEM_PYTHON: "0"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
