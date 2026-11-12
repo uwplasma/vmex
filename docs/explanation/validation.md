@@ -478,7 +478,7 @@ RUN_FULL=1 pytest -q $(python tools/test_manifest.py select full-core-d-f0)
 
 Four pytest markers gate the slower evidence: `full` (needs `RUN_FULL=1`),
 `weekly` (high-resolution campaigns, excluded from nightly), `gpu` (needs a
-real device; no CI runner has one, so the `gpu-smoke` lane is local-only) and
+real device; CI runs only the short `gpu-ci` subset on self-hosted runners, so the full `gpu-smoke` lane is local-only) and
 `vmec2000_live` (needs `--run-vmec2000` and a local `xvmec2000`). There is no `nightly`, `slow` or `live` marker. Passing
 `--vmex-report PATH` writes a machine-readable record of what ran, what was
 slowest, and — importantly for reading a green run — every test that skipped
