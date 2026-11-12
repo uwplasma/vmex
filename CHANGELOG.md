@@ -6,6 +6,8 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
+- **Switchable well and stability rows in the finite-beta quasisymmetry examples.** `QA_optimization_finite_beta.py` gains `USE_WELL` and `USE_MERCIER`, `QH_` and `QP_optimization_finite_beta.py` are new, and the stability rows are hinges on the dimensionless PHIEDGE^2 DMerc and PHIEDGE^2 D_R that enter after the quasisymmetric basin (`STABILITY_SCALE`). On four QA seeds the result is Mercier stable with QS 2.5e-3 to 7.9e-3 and eps_eff^(3/2) 6e-6 to 2e-4 (was unstable, QS 2.1e-2 to 5.1e-2, 2e-4 to 8e-3).
+
 ## 0.14.0 - 2026-11-09
 
 - **pwO bootstrap control.** `pwO_optimization.py` gains `BOOTSTRAP_TERM = "band"`, which flattens |B| across the unmapped B_max band (DKX current -135 to -5 kA at NFP 3), and optional DKX stages at the end; `BootstrapFiniteNuResidual` reports the equivalent-ripple spread as a diagnostic.
@@ -39,12 +41,10 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 - `boozer_spectrum_state(..., geometry=True)` returns the Boozer R, Z, nu and
   Jacobian spectra (#610). Tracing takes explicit energy, mass and charge (#540).
 - JAX 0.12 support: the on-axis coil field stays differentiable (#620).
-- Every example finishes in under five minutes on a laptop and prints
-  progress (#562). README and docs restructured, with ballooning, polishing
-  and MRX sections and a CLI reference (#605, #617, #540).
-- CI runs all seven VMEC2000 golden-digest cases on every PR (#616); a
-  packaging-triggered and weekly install check covers Linux, macOS and Windows
-  (#588). `neo-jax>=1.0.6` (#588). About 880 fewer source lines (#601, #602).
+- Every example finishes in under five minutes on a laptop and prints progress (#562). README and docs restructured,
+  with ballooning, polishing and MRX sections and a CLI reference (#605, #617, #540).
+- CI runs all seven VMEC2000 golden-digest cases on every PR (#616); a packaging-triggered and weekly install check
+  covers Linux, macOS and Windows (#588). `neo-jax>=1.0.6` (#588). About 880 fewer source lines (#601, #602).
 
 ## 0.11.11 - 2026-10-18
 

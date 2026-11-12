@@ -50,7 +50,8 @@ from vmex.core.scaling import input_minor_radius
 NFP = 4
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Rotating-ellipse amplitude added to the circular seed:
+# Rotating-ellipse amplitude added to the circular seed (0.06 to 0.12 find the
+# QH basin at finite beta; 0.16 does not, although the vacuum script does):
 SEED_PERTURBATION = 0.12
 
 # Volume-averaged beta that the toroidal flux is chosen to give at ASPECT_TARGET:
