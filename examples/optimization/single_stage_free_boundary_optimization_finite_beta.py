@@ -392,7 +392,6 @@ def objective(u):
 value_and_grad_jax = jax.value_and_grad(objective, has_aux=True)
 monitor = opt.OptimizationMonitor()
 counts = {"trials": 0, "rejected": 0}
-trial_log = []
 # SciPy returns its last point, which can be a rejected trial carrying the
 # wall value; the result is the best trial whose free boundary converged.
 best = {"value": np.inf, "u": None}
@@ -400,7 +399,7 @@ best = {"value": np.inf, "u": None}
 
 def value_and_grad(u):
     counts["trials"] += 1
-    (value, (qs_rows, beta_row, penalty, costs, wall, status)), gradient = \
+    (value, (qs_rows, beta_row, penalty, costs, _wall, status)), gradient = \
         value_and_grad_jax(jnp.asarray(u))
     qs_rows = np.asarray(qs_rows)
     terms = {"quasisymmetry": 0.5 * float(qs_rows @ qs_rows),
@@ -408,8 +407,6 @@ def value_and_grad(u):
              "iota and aspect penalty": float(penalty)}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(costs))))
     counts["rejected"] += int(status) != 0
-    trial_log.append({"status": int(status), "value": float(value),
-                      "peak wall field": float(np.max(wall)) if int(status) == 0 else None})
     if int(status) == 0 and float(value) < best["value"]:
         best.update(value=float(value), u=np.array(u, dtype=float))
     terms["rejected trial"] = float(value) if int(status) else 0.0
@@ -562,7 +559,6 @@ summary = {
                 "peak wall field <=": WALL_FIELD_LIMIT,
                 "beta": [TARGET_BETA * (1 - BETA_TOLERANCE),
                          TARGET_BETA * (1 + BETA_TOLERANCE)]},
-    "trials log": trial_log,
     "final residuals": {k: float(getattr(free_result, k)) for k in ("fsqr", "fsqz", "fsql")},
     "unmet": unmet, "met": not unmet,
 }
