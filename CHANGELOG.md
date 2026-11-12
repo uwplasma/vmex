@@ -4,7 +4,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- **Quasisymmetry examples that converge from perturbed seeds.** `QA_`, `QH_` and `QP_optimization.py` share a three-stage ladder and `opt.Hinge` rows (QH gains the iota floor and the well; QP's lighter shape-limit hinges remove a stall at twice the residual). Over four seeds QA ends at QS 3e-5 to 7e-5 (was 4e-4 to 8e-4) with a tenfold lower effective ripple, QH at one optimum, 2.6e-3 (was 5e-3 to 8e-3), and QP at 1.2e-2 to 1.3e-2 on s = 0.5 to 0.9 (was 2e-2 to 3e-2).
+- **Quasisymmetry examples that converge from perturbed seeds.** `QA_`, `QH_` and `QP_optimization.py` share a three-stage ladder and `opt.Hinge` rows (QH gains the iota floor and the well; QP's lighter shape-limit hinges remove a stall at twice the residual). Over four deterministic seeds QA ends at QS 5e-5 to 9e-5 (was 4e-4 to 8e-4) with a tenfold lower effective ripple, QH at one optimum, 2.6e-3 (was 5e-3 to 0.13), and QP at 1.4e-2 to 1.9e-2 on s = 0.5 to 0.9 (was 3e-2).
 
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
