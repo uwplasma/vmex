@@ -27,12 +27,14 @@ import vmex as vj
 from vmex import optimize as opt
 from vmex.core.qi import ConstructedQIResidual
 
-# Seed: the circular torus of this field-period count with a rotating ellipse of
-# this amplitude added. The exactly circular torus has no first-order iota
-# response; 0.05 to 0.06 converges, while 0.04 settles at zero transform and
-# the opposite sign settles at aspect 12 with a mirror ratio of 0.26:
+# Seed: the circular torus of this field-period count, with these boundary
+# coefficients added, keyed (family, n, m). A rotating ellipse gives the torus
+# the first-order iota response it lacks. Amplitudes 0.03 to 0.07 all reach QI
+# 1.4e-3 to 1.6e-3, as does 0.05 with a 0.2 helical axis excursion
+# ("zbs", 1, 0); the opposite ellipse sign settles at aspect 12 with a mirror
+# ratio of 0.27, and a 0.1 axis excursion ends near 6e-3:
 NFP = 2
-SEED_PERTURBATION = 0.05
+SEED_MODES = {("rbc", -1, 1): -0.05, ("zbs", -1, 1): 0.05}
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Radial grid every optimizer trial is solved on:
@@ -51,7 +53,8 @@ SURFACES = np.linspace(0.1, 1.0, 6)
 STAGES = [(1, 15, 30.0), (1, 30, 1.0), (2, 30, 1.0), (3, 30, 1.0)]
 
 # Boozer resolution the QI residual is optimized on, and the finer one the
-# finished boundary is re-scored with:
+# finished boundary is re-scored with. Optimizing on mboz = nboz = 8, nphi = 41,
+# nalpha = 12, n_bounce = 13 ends at fine-grid QI 9.6e-3, seven times worse:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 
@@ -60,9 +63,9 @@ VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
 QI_WEIGHT, ASPECT_WEIGHT, IOTA_WEIGHT, MIRROR_WEIGHT, ELONGATION_WEIGHT = 300.0, 0.3, 10.0, 1000.0, 10.0
 
 # Targets and limits:
-ASPECT_TARGET = 8.0
+ASPECT_TARGET = 8.0               # 6.0 stalls at aspect 6.6 and QI 7.6e-3
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
-MIRROR_LIMIT = 0.21
+MIRROR_LIMIT = 0.21               # 0.16 also converges, to QI 2.0e-3
 ELONGATION_LIMIT = 8.0
 
 # A finite-weight hinge settles just above its threshold, and the final
@@ -80,7 +83,7 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = 71
-FINAL_FTOL = 1.0e-14
+FINAL_FTOL = 1.0e-13
 FINAL_NITER = 8000
 
 # Every output file name contains this:
@@ -102,7 +105,8 @@ if ci_smoke:
 
 inp = vj.VmecInput.from_file(INPUT_FILE)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
+for (family, n, m), amplitude in SEED_MODES.items():
+    {"rbc": rbc, "zbs": zbs}[family][inp.ntor + n, m] += amplitude
 inp = replace(inp, rbc=rbc, zbs=zbs, ns_array=np.array([STAGE_NS]),
               ftol_array=np.array([STAGE_FTOL]), niter_array=np.array([STAGE_NITER]))
 

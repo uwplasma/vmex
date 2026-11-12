@@ -113,7 +113,7 @@ that research budget as one commented set of constants next to the default.
 
   `QI_optimization.py` starts from the circular NFP 2 torus with a rotating ellipse and spends
   about 100 residual evaluations in four stages, so it runs longer than the five-minute budget
-  above (28 min on a loaded 36-core workstation); `VMEX_EXAMPLES_CI=1` runs one 5-evaluation stage.
+  above (25 to 30 min on a loaded 36-core workstation); `VMEX_EXAMPLES_CI=1` runs one 5-evaluation stage.
 
   `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
   1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
