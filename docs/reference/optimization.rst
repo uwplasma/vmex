@@ -686,7 +686,7 @@ Optimize at finite pressure from the plain seed with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
-The script needs no saved vacuum result. Each stage of its ladder names a boundary
+The script needs no saved vacuum result: ``SEED_MODES`` perturbs one or two boundary modes of the circular seed. Each stage of its ladder names a boundary
 mode number and a volume-average beta (``MAX_MODES``, ``BETA_FRACTIONS``,
 ``TARGET_BETA``): the first stages run in vacuum, as the vacuum example does, and the
 last two bring the zero-current pressure ``p`` proportional to ``1-s`` to the target.
@@ -698,7 +698,7 @@ pressure itself deepens the well; ``MAGNETIC_WELL_FLOOR = None`` or
 ``GAMMA_C_FINAL_STAGES`` adds the GammaC proxy to the last stages. The elongation
 ceiling is 6. Holding the plasma volume (``HOLD_VOLUME = True``) stalls the NFP 4
 ladder. Each stage writes ``input.<name>_stage<k>``; set ``INPUT_FILE`` to one,
-``SEED_PERTURBATION = None``, ``MAP_PARAMETERS`` to its printed map and trim the ladder
+``SEED_MODES = None``, ``MAP_PARAMETERS`` to its printed map and trim the ladder
 lists to resume after an interruption. The seed baseline of the NEO comparison is the
 plain seed in vacuum, which cannot hold the target pressure.
 

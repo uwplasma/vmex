@@ -6,10 +6,10 @@ number and its volume-averaged beta, so one run climbs the mode ladder in
 vacuum and then ramps beta to the target: the circular seed needs no
 vacuum optimization first. SciPy nonlinear least squares varies the boundary,
 and the residual vector holds the mapped pwO variance, aspect ratio,
-rotational transform floor, mirror ratio and shaping limits. Three physics
-terms are independent switches below: the magnetic well, Mercier stability
-(both hinges) and bootstrap-current control. NEO compares the seed at this
-pressure with the result. Requires vmex[neoclassical].
+rotational transform floor, mirror ratio and shaping limits. The magnetic well,
+Mercier stability (both hinges), GammaC and bootstrap-current control are
+independent switches below. NEO compares the vacuum seed with the result.
+Requires vmex[neoclassical].
 """
 
 import os
@@ -31,15 +31,14 @@ NFP = 3
 print(f"finite-beta pwO optimization, NFP = {NFP}")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Rotating-ellipse amplitude added to the circular seed (None leaves INPUT_FILE as
-# it is, to continue a saved stage), plus relative random noise on its m <= 2
-# coefficients (SEED_NOISE = 0 turns it off):
-SEED_PERTURBATION = 0.05
-SEED_NOISE = 0.0
-SEED_RANDOM_STATE = 0
+# Deterministic seed: boundary modes (n, m) given a rotating-ellipse perturbation of
+# this amplitude, RBC(n, m) = -a and ZBS(n, m) = +a. One or two modes kickstart the
+# optimizer from the circular seed; None leaves INPUT_FILE as it is, to continue a
+# saved stage:
+SEED_MODES = {(-1, 1): 0.05}
 
 # Volume-averaged beta of the last stage, and the beta each stage runs at as a
-# fraction of it. Stages 1-2 run in vacuum, as the vacuum example does:
+# fraction of it (see BETA_FRACTIONS below):
 TARGET_BETA = 0.03
 BETA_WEIGHT = 100.0               # on the relative beta error
 
@@ -105,7 +104,7 @@ PARAMETER_STEP = 0.05
 MAX_PARAMETER_CHANGE = 5.0
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
 VARY_MAJOR_RADIUS = False         # True optimizes RBC(0,0) instead of fixing it
-HOLD_VOLUME = False               # fix the plasma volume at the target aspect ratio's
+HOLD_VOLUME = False               # True fixes the volume at the target aspect ratio's; it stalls NFP 4
 
 # Equilibrium resolution: poloidal and toroidal mode numbers are max_mode + 2,
 # but never below MINIMUM_MPOL. DMerc needs more modes than the boundary:
@@ -113,7 +112,7 @@ MINIMUM_MPOL = 13 if NFP == 1 else 7
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
-FINAL_FTOL = 1.0e-10
+FINAL_FTOL = 1.0e-13
 FINAL_NITER = 30000
 
 # Every output file name contains this:
@@ -135,13 +134,8 @@ if ci_smoke:
 inp = vj.VmecInput.from_file(INPUT_FILE)
 mpol = max(inp.mpol, MINIMUM_MPOL)
 rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
-if SEED_PERTURBATION is not None:
-    rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
-    noise = SEED_NOISE * SEED_PERTURBATION * np.random.default_rng(SEED_RANDOM_STATE).standard_normal((2,) + rbc.shape)
-    noise[:, :, 3:] = 0.0                                         # m <= 2
-    noise[:, : inp.ntor - 2], noise[:, inp.ntor + 3:] = 0.0, 0.0  # |n| <= 2
-    noise[:, inp.ntor, 0] = 0.0                                   # not the major radius
-    rbc, zbs = rbc + noise[0], zbs + noise[1]
+for (n, m), amplitude in (SEED_MODES or {}).items():
+    rbc[inp.ntor + n, m], zbs[inp.ntor + n, m] = -amplitude, amplitude
 major_radius = float(inp.rbc[inp.ntor, 0])
 # Optionally hold the plasma volume that gives the target aspect ratio at the seed's major radius:
 volume = 2 * np.pi**2 * major_radius**3 / ASPECT_TARGET**2 if HOLD_VOLUME else 0.0
