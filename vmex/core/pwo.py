@@ -371,7 +371,8 @@ class FreeMapProblem:
             jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]), jnp.asarray(full[:self.nspec])))
         rest = np.hstack((full[self.nspec:], np.zeros((full.shape[0]-self.nspec, free.shape[1]))))
         jacobian = np.vstack((np.hstack((boundary, free)), rest))
-        return jacobian if np.isfinite(jacobian).all() else np.zeros_like(jacobian)
+        mapped = self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))
+        return jacobian if np.isfinite(jacobian).all() and np.isfinite(mapped).all() else np.zeros_like(jacobian)
 
     def values(self, z):
         """Return the map parameters at ``z`` as a dictionary."""
