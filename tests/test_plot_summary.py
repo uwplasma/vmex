@@ -890,7 +890,7 @@ def test_j_map_panel_separates_lost_from_confined_drift_surfaces():
     fig, ax = plt.subplots()
     plotting._j_map_panel(ax, fig, info, 1.0)
     labels = [text.get_text() for text in ax.get_legend().get_texts()]
-    assert "drift surface, confined (1)" in labels and "drift surface, reaches the LCFS (1)" in labels
+    assert labels == ["drift surfaces: confined (1) / lost (1)"]
     styles = sorted(line.get_linestyle() for line in ax.lines if len(line.get_xdata()) > 1)
     assert styles == ["-", "--"]
     plt.close(fig)

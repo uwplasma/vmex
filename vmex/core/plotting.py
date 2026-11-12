@@ -1463,7 +1463,7 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     surfaces and branch jumps (:func:`_branch_outliers`). The dark curves are
     drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
     about one precession turn, solid if they close inside the LCFS and dashed
-    red if they reach it; dots mark the launch points. The title gives the
+    red if they reach it. The title gives the
     pitch as ``v_par/v`` where ``|B|`` is smallest.
     """
     length_scale = abs(float(r_major))
@@ -1495,17 +1495,19 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     fig.colorbar(filled, ax=ax, pad=0.02, ticks=levels[::2],
                  label=r"second adiabatic invariant $J\,/\,(v R_0)$")
     from matplotlib import patheffects
+    from matplotlib.legend_handler import HandlerTuple
     from matplotlib.lines import Line2D
     from matplotlib.patches import Circle, Patch
     halo = [patheffects.withStroke(linewidth=3.4, foreground="white")]
     circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.8))
     # Drift surfaces: black if the orbit closes inside the LCFS, red if lost.
     orbits = j_info.get("orbits")
-    handles = [Line2D([], [], color="0.15", linewidth=2.8, label="last closed flux surface")]
+    handles, labels = [], []
     # Gray under the filled map shows through the axis hole and wherever J is masked.
     ax.add_patch(Circle((0.0, 0.0), 1.0, facecolor="0.88", edgecolor="none", zorder=0))
     if np.ma.getmaskarray(masked).any():
-        handles.append(Patch(facecolor="0.88", edgecolor="0.5", label="no single well resolved"))
+        handles.append(Patch(facecolor="0.88", edgecolor="0.5"))
+        labels.append("no single well resolved")
     for s_orbit, a_orbit in zip(*(orbits["s"], orbits["alpha"])) if orbits else ():
         outside = np.abs(s_orbit) >= 1.0
         lost = bool(outside.any())
@@ -1517,18 +1519,14 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
         ax.plot(s_orbit[:end] * np.cos(a_orbit[:end]), s_orbit[:end] * np.sin(a_orbit[:end]),
                 color=color, linewidth=1.8, linestyle="--" if lost else "-",
                 clip_path=circle, path_effects=halo)
-        ax.plot(s_orbit[0] * np.cos(a_orbit[0]), s_orbit[0] * np.sin(a_orbit[0]),
-                "o", color=color, markersize=7, markeredgecolor="white")
     if orbits:
         lost = np.any(np.abs(orbits["s"]) >= 1.0, axis=-1)
-        handles += [Line2D([], [], color="black", linewidth=1.6,
-                           label=f"drift surface, confined ({int((~lost).sum())})"),
-                    Line2D([], [], color="#c0392b", linewidth=1.6, linestyle="--",
-                           label=f"drift surface, reaches the LCFS ({int(lost.sum())})"),
-                    Line2D([], [], color="black", linestyle="none", marker="o", markersize=7,
-                           markeredgecolor="white", label="bounce centre at launch")]
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.2),
-              ncol=1, framealpha=1.0, edgecolor="0.7")
+        handles.insert(0, (Line2D([], [], color="black", linewidth=1.6),
+                           Line2D([], [], color="#c0392b", linewidth=1.6, linestyle="--")))
+        labels.insert(0, f"drift surfaces: confined ({int((~lost).sum())}) / lost ({int(lost.sum())})")
+    if handles:
+        ax.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, -0.12), framealpha=1.0,
+                  edgecolor="0.7", handler_map={tuple: HandlerTuple(ndivide=None)})
     radius = 1.08
     ax.set_xlim(-radius, radius); ax.set_ylim(-radius, radius)
     ax.set_aspect("equal", adjustable="box")
