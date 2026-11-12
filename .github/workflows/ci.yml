@@ -116,7 +116,7 @@ jobs:
     if: needs.changes.outputs.run_tests == 'true'
     # The 3.12 entry runs on the org's Mac runners for pushes and same-repo pull
     # requests. Fork pull requests and the other entries stay hosted.
-    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && matrix.python-version == '3.12')) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && matrix.python-version == '3.12')) && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 8
     strategy:
       fail-fast: false
@@ -213,7 +213,7 @@ jobs:
       needs.changes.outputs.parity != '[]'
     # Two lanes (c3-c7 and c6-gradient) run on the org's Mac runners; the others
     # stay hosted. The parity lanes never run on pull requests.
-    runs-on: ${{ contains(fromJSON('["c3-c7","c6-gradient"]'), matrix.lane) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
+    runs-on: ${{ contains(fromJSON('["c3-c7","c6-gradient"]'), matrix.lane) && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-latest' }}
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
     # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
@@ -336,7 +336,7 @@ jobs:
     if: needs.changes.outputs.run_tests == 'true'
     # On the org's Mac runners for pushes and same-repo pull requests; fork pull
     # requests stay hosted.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","uwplasma-cpu"]') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       XLA_LANE: desc
