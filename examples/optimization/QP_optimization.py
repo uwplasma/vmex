@@ -7,16 +7,17 @@ holds the quasisymmetry ratio, the aspect ratio, and one-sided hinges on the
 rotational transform, the mirror ratio and the elongation; VMEX supplies its
 exact Jacobian.
 
-Unlike the QA and QH scripts, each stage starts a fresh problem from the
-current boundary rather than restarting from the previous converged
-equilibrium, and the optimizer runs unbounded on the scaled variables.
+Quasi-poloidal symmetry is the hard member of the family: the first-order
+near-axis field is helical, so the residual is evaluated on s >= 0.5, and the
+shape limits bind (the elongation hinge sits at its limit in the result).
+Loosening the limits lowers the residual at the price of an extremely shaped
+boundary.
 """
 
 import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -40,18 +41,19 @@ SURFACES = np.array([0.5, 0.7, 0.9])
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 3]
-MAX_NFEV = [6, 8]
-
-# A gentler ladder that starts from lower modes:
-#   MAX_MODES = [1, 2, 3]
-#   MAX_NFEV = [20, 20, 20]
+MAX_MODES = [1, 2, 3]
+MAX_NFEV = [10, 15, 20]
 
 # Targets and limits:
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
+
+# Hinge weights. Heavy hinges on the shape limits make the trust region crawl
+# along the active constraints (a perturbed seed stalled at twice the residual):
+IOTA_WEIGHT = 10.0
+SHAPE_WEIGHT = 1.0
 
 # Step control:
 ESS_ALPHA = 1.2                   # smaller values let high Fourier modes move more
@@ -94,35 +96,14 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5,
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
-
-
 # Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 100.0),
-    (mirror_excess, 0.0, 10.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
+    (opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_LIMIT), 0.0, SHAPE_WEIGHT),
+    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, SHAPE_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(

@@ -16,7 +16,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -36,13 +35,17 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_MODES = [1, 2, 3]
+MAX_NFEV = [10, 15, 20]
 
 # Targets:
 ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
+
+# Hinge weights for the iota floor and the well; a hinge costs nothing once met:
+IOTA_WEIGHT = 10.0
+WELL_WEIGHT = 10.0
 
 # Alternative settings for a larger design space:
 #   MAX_MODES = [1, 3, 5, 7, 9]
@@ -89,22 +92,13 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 # Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
-    (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
+    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_TARGET), 0.0, WELL_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
