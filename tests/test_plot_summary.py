@@ -110,10 +110,10 @@ def test_summary_panel_inventory(summary_figure):
 
 
 def test_summary_contours_and_colormaps(summary_figure):
-    """J and Boozer |B| contours are unfilled; |B| is jet-mapped."""
+    """J is filled with line contours on top; Boozer |B| is unfilled and jet-mapped."""
     _, meta = summary_figure
     j_sets = _contour_sets(meta["axes"]["j_invariant"])
-    assert j_sets and not any(cs.filled for cs in j_sets)
+    assert any(cs.filled for cs in j_sets) and any(not cs.filled for cs in j_sets)
     for name in ("boozer_mid", "boozer_lcfs"):
         sets = _contour_sets(meta["axes"][name])
         assert sets, f"panel {name!r} has no contour set"
@@ -770,7 +770,7 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
     import vmex.core.bounce as bounce
 
     def _fake_bounce(*, alpha, pitch, **_kwargs):
-        shape = (1, len(alpha), 1, 1)
+        shape = (_kwargs["bmnc_b"].shape[0], len(alpha), 1, 1)
         return {"action": jax.numpy.broadcast_to(pitch, shape),
                 "bounce_time": jax.numpy.ones(shape),
                 "well_left": jax.numpy.zeros(shape),
@@ -783,21 +783,97 @@ def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
         "iota_b": np.array([0.5, 0.5]), "G_b": np.ones(2), "I_b": np.zeros(2),
         "s_b": np.array([0.25, 0.75]),
     }
-    result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4)
+    result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4, nsurf=None)
     np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
     np.testing.assert_allclose(result["j_map"], result["pitch"])
 
-    result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4)
+    result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4, nsurf=None)
     np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
     np.testing.assert_allclose(result["pitch_inverse"], 1.05)
 
-    result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4)
+    result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4, nsurf=None)
     np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
     np.testing.assert_array_equal(result["trapped_surface"], [True, False])
     assert np.all(np.isfinite(result["j_map"][0]))
     assert np.all(np.isnan(result["j_map"][1]))
     with pytest.raises(ValueError, match="not trapped"):
-        plotting._j_invariant_map(booz, pitch=0.5, nalpha=4)
+        plotting._j_invariant_map(booz, pitch=0.5, nalpha=4, nsurf=None)
+
+
+def _tokamak_booz(shallow_ripple: float = 0.0):
+    """Axisymmetric Boozer field: J is independent of alpha and decreases with eps."""
+    s_b = np.linspace(0.1, 0.98, 8)
+    eps = 0.1 + 0.15 * s_b
+    bmnc = np.stack([np.ones_like(s_b), -eps, np.full_like(s_b, shallow_ripple)], axis=1)
+    return {
+        "bmnc_b": bmnc * np.array([1.0, 1.0, 1.0]), "bmns_b": None,
+        "xm_b": np.array([0, 1, 6]), "xn_b": np.array([0, 0, 0]), "nfp": 2,
+        "iota_b": np.full(8, 0.45), "G_b": np.full(8, 1.0), "I_b": np.zeros(8), "s_b": s_b,
+    }
+
+
+def test_j_invariant_map_axisymmetric_field_is_alpha_independent_and_radially_resolved():
+    """A tokamak has J(alpha) = const; a shallow ripple well never replaces the main well."""
+    clean = plotting._j_invariant_map(_tokamak_booz(), nalpha=24, nsurf=15)
+    assert clean["s_b"].size == 15 and clean["j_map"].shape == (15, 24)
+    spread = np.ptp(clean["j_map"], axis=1) / np.nanmedian(clean["j_map"], axis=1)
+    assert np.nanmax(spread[np.isfinite(spread)]) < 5e-3
+    assert clean["num_periods"] >= 2 and clean["masked_fraction"] == 0.0
+    rippled = plotting._j_invariant_map(_tokamak_booz(0.01), nalpha=24, nsurf=15)
+    both = np.isfinite(clean["j_map"]) & np.isfinite(rippled["j_map"])
+    assert both.sum() > 100
+    np.testing.assert_allclose(rippled["j_map"][both], clean["j_map"][both], rtol=0.15)
+
+
+def test_booz_on_grid_reproduces_axis_scaling_and_profiles():
+    """Resampling is exact for B_mn = s^(m/2) f(s) with f polynomial, and for iota(s)."""
+    s_old = np.linspace(0.08, 0.98, 10)
+    s_new = np.linspace(0.08, 1.0, 17)
+    m = np.array([0, 1, 4])
+
+    def spectra(s):
+        return np.stack([1.0 + 0.1 * s, 0.2 * np.sqrt(s) * (1.0 + s), 0.05 * s**2 * (1.0 - s)], axis=1)
+
+    booz = {"s_b": s_old, "xm_b": m, "bmnc_b": spectra(s_old), "bmns_b": spectra(s_old) * 0.5,
+            "iota_b": 0.4 + 0.3 * s_old**2, "G_b": 1.0 + s_old, "I_b": s_old,
+            "b_min": 0.9 - s_old, "b_max": 1.1 + s_old}
+    new = plotting._booz_on_grid(booz, s_new)
+    np.testing.assert_allclose(new["bmnc_b"], spectra(s_new), atol=2e-5)
+    np.testing.assert_allclose(new["bmns_b"], 0.5 * spectra(s_new), atol=1e-5)
+    np.testing.assert_allclose(new["iota_b"], 0.4 + 0.3 * s_new**2, atol=1e-4)
+    np.testing.assert_array_equal(new["s_b"], s_new)
+
+
+def test_branch_outliers_flag_jumps_and_spikes_but_not_smooth_maps():
+    alpha = np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False)
+    smooth = np.linspace(1.0, 2.0, 20)[:, None] + 0.1 * np.cos(alpha)[None, :]
+    assert not plotting._branch_outliers(smooth).any()
+    spike = smooth.copy()
+    spike[10, 5] += 3.0
+    flagged = plotting._branch_outliers(spike)
+    assert flagged[10, 5] and flagged.sum() < 12
+    step = smooth.copy()
+    step[:, 20:] += 1.0  # a well swap: two branches side by side
+    flagged = plotting._branch_outliers(step)
+    assert flagged[:, 19:21].all() and not flagged[:, 5:15].any()
+
+
+def test_j_map_panel_marks_masked_samples_and_clips_colors_to_percentiles():
+    import matplotlib.pyplot as plt
+
+    alpha = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
+    s_b = np.linspace(0.2, 0.95, 9)
+    j_map = s_b[:, None] * (1.0 + 0.1 * np.cos(alpha))
+    j_map[4, 3] = np.nan
+    j_map[6, 8] = 50.0  # one wild well must not wash out the color scale
+    info = {"alpha": alpha, "s_b": s_b, "j_map": j_map, "orbits": None,
+            "b_min": np.array([0.9, 1.0]), "pitch_inverse": 1.2}
+    fig, ax = plt.subplots()
+    plotting._j_map_panel(ax, fig, info, 1.0)
+    filled = [cs for cs in _contour_sets(ax) if cs.filled]
+    assert filled and max(filled[0].levels) < 5.0
+    assert "no single well resolved" in [t.get_text() for t in ax.get_legend().get_texts()]
+    plt.close(fig)
 
 
 def test_j_map_panel_separates_lost_from_confined_drift_surfaces():

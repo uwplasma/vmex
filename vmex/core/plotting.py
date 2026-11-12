@@ -42,6 +42,7 @@ from __future__ import annotations
 import dataclasses
 import textwrap
 import time
+import warnings
 import weakref
 from collections import OrderedDict
 from pathlib import Path
@@ -1154,13 +1155,94 @@ def _boozer_surface_modB(booz: dict[str, Any], k: int, theta: np.ndarray, zeta: 
     return _eval_modes(booz["bmnc_b"][k], bmns, booz["xm_b"], booz["xn_b"], theta, zeta)
 
 
+def _booz_on_grid(booz: dict[str, Any], s_new: np.ndarray) -> dict[str, Any]:
+    """Resample the Boozer spectra onto ``s_new`` with cubic splines.
+
+    ``B_mn`` scales as ``s^(m/2)`` near the axis, so each harmonic is
+    interpolated as ``B_mn / sqrt(s)^m``, a smooth function of ``sqrt(s)``;
+    the profiles ``iota``, ``G``, ``I`` and the range of ``|B|`` are
+    interpolated in ``s``.
+    """
+    from scipy.interpolate import CubicSpline
+
+    s_old = np.asarray(booz["s_b"], dtype=float)
+    x_old, x_new = np.sqrt(s_old), np.sqrt(s_new)
+    scale_old = x_old[:, None] ** np.asarray(booz["xm_b"])
+    scale_new = x_new[:, None] ** np.asarray(booz["xm_b"])
+
+    def spline(values, x, x_to, scale=None):
+        flat = np.asarray(values, dtype=float)
+        flat = flat / scale if scale is not None else flat
+        out = CubicSpline(x, flat, axis=0)(x_to)
+        return out * scale_new if scale is not None else out
+
+    resampled = {key: spline(booz[key], x_old, x_new, scale_old if key[:4] == "bmnc" or key[:4] == "bmns" else None)
+                 for key in ("bmnc_b", "iota_b", "G_b", "I_b", "b_min", "b_max") if key in booz}
+    resampled["bmns_b"] = None if booz["bmns_b"] is None else spline(
+        booz["bmns_b"], x_old, x_new, scale_old)
+    return {**booz, **resampled, "s_b": np.asarray(s_new, dtype=float)}
+
+
+def _well_periods(booz: dict[str, Any]) -> int:
+    """Field periods a line must run to hold two periods of the main ripple.
+
+    The leading harmonic of ``|B|`` (``m``, ``n``) oscillates along a field
+    line as ``cos((m iota - n) zeta)``; a quasi-axisymmetric field with small
+    ``iota`` needs many field periods per well, a quasi-isodynamic one few.
+    """
+    amplitude = np.hypot(np.asarray(booz["bmnc_b"]), 0.0 if booz["bmns_b"] is None else booz["bmns_b"])
+    amplitude = np.median(amplitude, axis=0)
+    amplitude[(np.asarray(booz["xm_b"]) == 0) & (np.asarray(booz["xn_b"]) == 0)] = 0.0
+    lead = int(np.argmax(amplitude))
+    iota = np.asarray(booz["iota_b"], dtype=float)
+    rate = np.min(np.abs(booz["xm_b"][lead] * iota - booz["xn_b"][lead]))
+    well = 2.0 * np.pi / max(float(rate), 0.05)
+    iota_typical = max(float(np.median(np.abs(iota))), 0.2)
+    transit = 2.0 * np.pi * (1.0 + 1.0 / iota_typical) * 1.2
+    return int(min(60, max(2, np.ceil(int(booz["nfp"]) * max(2.5 * well, transit) / (2.0 * np.pi)))))
+
+
+def _branch_outliers(values: np.ndarray, *, tolerance: float = 6.0, jump: float = 5.0) -> np.ndarray:
+    """Flag samples of a ``(surface, alpha)`` map on a branch jump.
+
+    Wells appear and disappear as the pitch crosses a local maximum, so ``J``
+    of the selected well jumps between branches. A sample is flagged when it
+    differs from the median of its 3 x 3 neighbourhood (periodic in ``alpha``)
+    by more than ``tolerance`` robust standard deviations of that residual,
+    or when a step to a neighbour exceeds ``jump`` times the 90th percentile
+    of the steps in that direction (in ``alpha`` or in ``s``). Both limits are floored at 3 % of the robust range, so a
+    smooth map is never masked.
+    """
+    padded = np.pad(values, ((1, 1), (0, 0)), constant_values=np.nan)
+    stack = np.stack([np.roll(padded, shift, axis=1)[row:row + values.shape[0]]
+                      for row in range(3) for shift in (-1, 0, 1)])
+    with np.errstate(all="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        residual = values - np.nanmedian(stack, axis=0)
+        residual[[0, -1]] = 0.0  # one-sided neighbourhoods see the gradient as an offset
+        low, high = np.nanpercentile(values, [2.0, 98.0])
+        floor = 0.03 * (high - low)
+        flagged = np.abs(residual) > max(tolerance * 1.4826 * np.nanmedian(np.abs(residual)), floor)
+        around = np.abs(values - np.roll(values, -1, axis=1))
+        radial = np.abs(np.diff(values, axis=0))
+        # Each direction against its own steps: a map that is flat in alpha
+        # still has steep radial gradients that are not branch jumps.
+        around = around > max(jump * np.nanpercentile(around, 90.0), floor)
+        radial = radial > max(jump * np.nanpercentile(radial, 90.0), floor)
+        flagged |= around | np.roll(around, 1, axis=1)
+        flagged[:-1] |= radial
+        flagged[1:] |= radial
+    return flagged
+
+
 def _j_invariant_map(
     booz: dict[str, Any],
     *,
     pitch: float | None = None,
     pitch_fraction: float = 0.25,
-    nalpha: int = 96,
-    points_per_period: int = 64,
+    nalpha: int = 72,
+    nsurf: int = 33,
+    points_per_period: int = 96,
     quadrature_order: int = 32,
 ) -> dict[str, Any]:
     """Second adiabatic invariant ``J(alpha, s)`` at one physical pitch.
@@ -1176,26 +1258,26 @@ def _j_invariant_map(
     ``J`` decrease radially. ``J`` is normalized to ``J/(v R0)`` and the
     bounce integrals reuse the differentiable sine-mapped Gauss-Legendre
     kernel of :func:`vmex.core.bounce.bounce_action`, also used by DESC.
-    """
-    import jax
-    from .bounce import bounce_action_from_boozer
 
-    bounce_action_from_boozer = jax.jit(
-        bounce_action_from_boozer,
-        static_argnames=("nfp", "points_per_period", "num_periods",
-                         "max_wells", "quadrature_order"))
+    The Boozer spectra of the transformed surfaces are resampled onto
+    ``nsurf`` surfaces (``None`` keeps the transformed ones) and every field
+    line runs long enough to hold two periods of the leading harmonic. On a
+    line, ``J`` is that of the first well whose action is at least a fifth of the
+    line's largest, which drops shallow ripple wells; samples that jump away
+    from their neighbours (a well born or lost between neighbouring lines) are
+    set to NaN, so the map is masked where its value is ambiguous.
+    """
+    from . import bounce
 
     bmnc_b = booz["bmnc_b"]
-    nsurf = int(bmnc_b.shape[0])
     nfp = int(booz["nfp"])
-    iota_b = booz["iota_b"]
 
     # A surface-local normalized pitch changes the physical particle while
     # moving radially and cannot diagnose maximum-J. Select one physical pitch
     # from the overlap of every surface's trapping interval instead.
     theta = np.linspace(0.0, 2.0 * np.pi, 61)
     zeta = np.linspace(0.0, 2.0 * np.pi / nfp, 61)
-    b_all = np.stack([_boozer_surface_modB(booz, k, theta, zeta) for k in range(nsurf)])
+    b_all = np.stack([_boozer_surface_modB(booz, k, theta, zeta) for k in range(bmnc_b.shape[0])])
     b_min = b_all.min(axis=(1, 2)); b_max = b_all.max(axis=(1, 2))
     if (not np.all(np.isfinite(b_min)) or not np.all(np.isfinite(b_max))
             or np.any(b_min <= 0.0) or np.any(b_max <= b_min)):
@@ -1206,55 +1288,52 @@ def _j_invariant_map(
     if pitch is None:
         b_star = common_min + float(pitch_fraction) * (common_max - common_min)
         pitch_array = np.array([1.0 / b_star])
-        trapped_surface = np.ones(nsurf, dtype=bool)
     else:
         pitch_array = np.array([float(pitch)])
         if not np.isfinite(pitch_array[0]) or pitch_array[0] <= 0.0:
             raise ValueError("pitch must be finite and positive")
         b_star = 1.0 / pitch_array[0]
-        trapped_surface = (b_min < b_star) & (b_star < b_max)
-        if not np.any(trapped_surface):
+        if not np.any((b_min < b_star) & (b_star < b_max)):
             raise ValueError("pitch is not trapped on any plotted Boozer surface")
 
-    # Trace enough field periods to close at least one poloidal transit even
-    # for small-iota / axisymmetric-boundary decks (well length ~ 2*pi/iota).
-    iota_typical = float(np.median(np.abs(iota_b)))
-    num_periods = int(min(40, max(2, np.ceil(1.2 * nfp * (1.0 + 1.0 / max(iota_typical, 0.2))))))
+    s_old = np.asarray(booz["s_b"], dtype=float)
+    if nsurf is not None and s_old.size > 3:
+        s_new = np.linspace(s_old[0], 1.0, int(nsurf))
+        booz = _booz_on_grid({**booz, "b_min": b_min, "b_max": b_max}, s_new)
+        b_min, b_max = booz["b_min"], booz["b_max"]
+    trapped_surface = (b_min < b_star) & (b_star < b_max)
+
+    num_periods = _well_periods(booz)
     # The interval can contain roughly one well per field period.  An
     # undersized static buffer marks otherwise valid wells as overflow and
     # would make the complete polar map appear empty.
     max_wells = max(8, 2 * num_periods)
-
     alpha = np.linspace(0.0, 2.0 * np.pi, int(nalpha), endpoint=False)
-    j_map = np.full((nsurf, alpha.size), np.nan)
-    tau_map = np.full((nsurf, alpha.size), np.nan)
-    for k in range(nsurf):  # per-surface loop keeps the phase tables small
-        if not trapped_surface[k]:
-            continue
-        out = bounce_action_from_boozer(
-            bmnc_b=bmnc_b[k : k + 1],
-            xm_b=booz["xm_b"], xn_b=booz["xn_b"],
-            iota_b=iota_b[k : k + 1],
-            G_b=booz["G_b"][k : k + 1], I_b=booz["I_b"][k : k + 1],
-            nfp=nfp, alpha=alpha, pitch=pitch_array,
-            points_per_period=int(points_per_period),
-            num_periods=num_periods,
-            max_wells=max_wells,
-            bmns_b=None if booz["bmns_b"] is None else booz["bmns_b"][k : k + 1],
-            quadrature_order=int(quadrature_order),
-            drift_integrands={},
-        )
-        action = np.asarray(out["action"])[0, :, 0, :]       # (nalpha, nwells)
-        usable = np.asarray(out["usable_mask"])[0, :, 0, :]
-        # Later wells on the line belong to other labels: keep the deepest
-        # usable well starting within one field period of the first.
-        left = np.where(usable, np.asarray(out["well_left"])[0, :, 0, :], np.inf)
-        usable = usable & (left < left.min(axis=-1, keepdims=True) + 2.0 * np.pi / nfp)
-        first = np.argmax(np.where(usable, action, -np.inf), axis=-1)[:, None]
-        found = usable.any(axis=-1)
-        j_map[k] = np.where(found, np.take_along_axis(action, first, -1)[:, 0], np.nan)
-        tau = np.asarray(out["bounce_time"])[0, :, 0, :]
-        tau_map[k] = np.where(found, np.take_along_axis(tau, first, -1)[:, 0], np.nan)
+    trace = _jitted(bounce.bounce_action_from_boozer, "nfp", "points_per_period",
+                    "num_periods", "max_wells", "quadrature_order")
+    out = trace(
+        bmnc_b=np.asarray(booz["bmnc_b"]), xm_b=booz["xm_b"], xn_b=booz["xn_b"],
+        iota_b=np.asarray(booz["iota_b"]), G_b=np.asarray(booz["G_b"]), I_b=np.asarray(booz["I_b"]),
+        nfp=nfp, alpha=alpha, pitch=pitch_array,
+        points_per_period=int(points_per_period), num_periods=num_periods,
+        max_wells=max_wells,
+        bmns_b=None if booz["bmns_b"] is None else np.asarray(booz["bmns_b"]),
+        quadrature_order=int(quadrature_order), drift_integrands={})
+    action = np.asarray(out["action"])[:, :, 0, :]            # (nsurf, nalpha, nwells)
+    tau = np.asarray(out["bounce_time"])[:, :, 0, :]
+    usable = np.asarray(out["usable_mask"])[:, :, 0, :]
+    left = np.where(usable, np.asarray(out["well_left"])[:, :, 0, :], np.inf)
+    # Shallow ripple wells carry a few percent of the main well's action, the
+    # other wells of a pwO or QI line at least a third: the first well above
+    # a fifth of the line's best is the one the line starts in.
+    major = usable & (action >= 0.2 * np.max(np.where(usable, action, -np.inf), axis=-1, keepdims=True))
+    first = np.argmin(np.where(major, left, np.inf), axis=-1)[..., None]
+    found = major.any(axis=-1) & trapped_surface[:, None]
+    j_map = np.where(found, np.take_along_axis(action, first, -1)[..., 0], np.nan)
+    tau_map = np.where(found, np.take_along_axis(tau, first, -1)[..., 0], np.nan)
+    outlier = _branch_outliers(j_map)
+    j_map[outlier] = np.nan
+    tau_map[outlier] = np.nan
     # Drift surfaces: bounce-centre orbits of the same particles (eq. of
     # motion in vmex.core.maxj.drift_orbits), launched on the trapped surfaces.
     rows = np.flatnonzero(np.all(np.isfinite(j_map) & np.isfinite(tau_map), axis=1))
@@ -1266,7 +1345,8 @@ def _j_invariant_map(
         launch = np.asarray(booz["s_b"])[rows]
         launch = launch[(launch >= 0.2) & (launch <= 0.85)]
         launch = launch[:: max(1, launch.size // 5)]
-        orbits = {key: np.asarray(value) for key, value in drift_orbits(
+        orbits = {key: np.asarray(value) for key, value in _jitted(
+            drift_orbits, "length", "nsteps", "degree")(
             j_map, tau_map, booz["s_b"], alpha, launch, length=8.0, nsteps=512).items()}
     return {
         "alpha": alpha,
@@ -1280,7 +1360,21 @@ def _j_invariant_map(
         "trapped_surface": trapped_surface,
         "b_min": b_min,
         "b_max": b_max,
+        "num_periods": num_periods,
+        "masked_fraction": float(outlier.sum() / max(1, found.sum())),
     }
+
+
+_JITTED: dict[Any, Any] = {}
+
+
+def _jitted(function, *static):
+    """One cached ``jax.jit`` per function, so repeated panels never recompile."""
+    import jax
+
+    if function not in _JITTED:
+        _JITTED[function] = jax.jit(function, static_argnames=static)
+    return _JITTED[function]
 
 
 # ==========================================================================
@@ -1363,11 +1457,13 @@ def _stability_panel(ax, wout, d_r_info: dict[str, Any], *, s_plot_ignore: float
 def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     """Polar map of ``J/(v R0)`` in ``x=s cos(alpha), y=s sin(alpha)``.
 
-    The colored curves are ``J`` contours. The dark curves drawn over them
-    are drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
+    Filled contours show ``J`` with color limits at the 2nd and 98th
+    percentiles (end colors extend beyond them) and white lines at every
+    second level. Gray marks where no single well is resolved: untrapped
+    surfaces and branch jumps (:func:`_branch_outliers`). The dark curves are
+    drift surfaces integrated by :func:`vmex.core.maxj.drift_orbits` over
     about one precession turn, solid if they close inside the LCFS and dashed
-    red if they reach it; dots mark the launch points. Where an orbit follows
-    a contour, the colored curve shows along its edges. The title gives the
+    red if they reach it; dots mark the launch points. The title gives the
     pitch as ``v_par/v`` where ``|B|`` is smallest.
     """
     length_scale = abs(float(r_major))
@@ -1388,23 +1484,28 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
     periodic = np.ma.concatenate([masked, masked[:, :1]], axis=1)
     alpha2d, s2d = np.meshgrid(alpha, j_info["s_b"])
     x, y = s2d * np.cos(alpha2d), s2d * np.sin(alpha2d)
-    levels = np.linspace(float(periodic.min()), float(periodic.max()), 12)
-    from matplotlib.cm import ScalarMappable
-    from matplotlib.colors import Normalize
-    ax.contour(x, y, periodic, levels=levels, cmap=_CMAP_J, linewidths=3.2)
-    # A continuous bar reads better than twelve stripes; the contours sample it.
-    mappable = ScalarMappable(Normalize(levels[0], levels[-1]), cmap=_CMAP_J)
-    fig.colorbar(mappable, ax=ax, pad=0.02,
+    # Color limits from robust percentiles: a few extreme wells never wash out
+    # the map. Values outside the limits keep the end colors (extend arrows).
+    low, high = np.percentile(masked.compressed(), [2.0, 98.0])
+    if not high > low:
+        low, high = float(masked.min()), float(masked.max())
+    levels = np.linspace(low, high, 15)
+    filled = ax.contourf(x, y, periodic, levels=levels, cmap=_CMAP_J, extend="both")
+    ax.contour(x, y, periodic, levels=levels[::2], colors="white", linewidths=0.8, alpha=0.7)
+    fig.colorbar(filled, ax=ax, pad=0.02, ticks=levels[::2],
                  label=r"second adiabatic invariant $J\,/\,(v R_0)$")
-    from matplotlib import colormaps
+    from matplotlib import patheffects
     from matplotlib.lines import Line2D
-    from matplotlib.patches import Circle
+    from matplotlib.patches import Circle, Patch
+    halo = [patheffects.withStroke(linewidth=3.4, foreground="white")]
     circle = ax.add_patch(Circle((0.0, 0.0), 1.0, fill=False, color="0.15", linewidth=2.8))
     # Drift surfaces: black if the orbit closes inside the LCFS, red if lost.
     orbits = j_info.get("orbits")
-    handles = [Line2D([], [], color=colormaps[_CMAP_J](0.6), linewidth=3.2,
-                      label=r"contours of $J$ (second adiabatic invariant)"),
-               Line2D([], [], color="0.15", linewidth=2.8, label="last closed flux surface")]
+    handles = [Line2D([], [], color="0.15", linewidth=2.8, label="last closed flux surface")]
+    # Gray under the filled map shows through the axis hole and wherever J is masked.
+    ax.add_patch(Circle((0.0, 0.0), 1.0, facecolor="0.88", edgecolor="none", zorder=0))
+    if np.ma.getmaskarray(masked).any():
+        handles.append(Patch(facecolor="0.88", edgecolor="0.5", label="no single well resolved"))
     for s_orbit, a_orbit in zip(*(orbits["s"], orbits["alpha"])) if orbits else ():
         outside = np.abs(s_orbit) >= 1.0
         lost = bool(outside.any())
@@ -1414,8 +1515,8 @@ def _j_map_panel(ax, fig, j_info: dict[str, Any], r_major: float) -> None:
             int(np.argmax(turned)) + 2 if turned.any() else s_orbit.size)
         color = "#c0392b" if lost else "black"
         ax.plot(s_orbit[:end] * np.cos(a_orbit[:end]), s_orbit[:end] * np.sin(a_orbit[:end]),
-                color=color, linewidth=1.6, linestyle="--" if lost else "-",
-                clip_path=circle)
+                color=color, linewidth=1.8, linestyle="--" if lost else "-",
+                clip_path=circle, path_effects=halo)
         ax.plot(s_orbit[0] * np.cos(a_orbit[0]), s_orbit[0] * np.sin(a_orbit[0]),
                 "o", color=color, markersize=7, markeredgecolor="white")
     if orbits:

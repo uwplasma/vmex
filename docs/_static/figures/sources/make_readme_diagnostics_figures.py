@@ -63,6 +63,7 @@ CASES: dict[str, dict[str, object]] = {
 # small.  Pillow's encoder is deterministic for fixed pixels and settings.
 WEBP_WIDTH = 1760
 WEBP_QUALITY = 75
+WEBP_MAX_BYTES = 150_000  # repository figure cap; quality steps down until it fits
 
 
 def _package_version(name: str) -> str | None:
@@ -92,7 +93,10 @@ def _write_webp(png: Path, out: Path) -> tuple[int, int]:
         image = source.convert("RGB")
     height = round(image.height * WEBP_WIDTH / image.width)
     image = image.resize((WEBP_WIDTH, height), Image.Resampling.LANCZOS)
-    image.save(out, "WEBP", quality=WEBP_QUALITY, method=6)
+    for quality in range(WEBP_QUALITY, 30, -5):
+        image.save(out, "WEBP", quality=quality, method=6)
+        if out.stat().st_size <= WEBP_MAX_BYTES:
+            break
     return WEBP_WIDTH, height
 
 
