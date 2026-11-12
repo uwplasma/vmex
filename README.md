@@ -63,7 +63,7 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.13` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.15` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
@@ -73,10 +73,10 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.35.1 | `pip install vmex` | `pip install "solvax>=0.35.1"` |
+| `solvax` | 0.36.1 | `pip install vmex` | `pip install "solvax>=0.36.1"` |
 | `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.13 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.13"` |
+| `virtual-casing-jax` | 0.0.15 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.15"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
 | `dkx` | 2.14.0 | `vmex[neoclassical]` | `pip install "dkx>=2.14.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
@@ -387,6 +387,10 @@ surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX fr
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 
+![Exterior-field accuracy against distance, the plasma field around a QA boundary, its shape derivative against re-solved equilibria, and the plasma field outside a mirror](docs/_static/figures/readme_exterior_field.webp)
+
+`near_surface="auto"` (the default) switches to a target-graded rule within a few node spacings of the boundary, for `B` and its derivatives. (a) Error against an exact axis-filament field on the QA boundary at 32, 64 and 96 source samples per period (the estimate flags the first); the direct rule alone fails within 10% of a minor radius. (b) The plasma field at phi = 0. (c) `B_vjp` against central differences of re-solved equilibria. (d) A mirror (`examples/mirror/mirror_exterior_field.py`). Script: `docs/_static/figures/sources/make_exterior_field_figure.py`; parameters: [reference](https://vmex.readthedocs.io/en/latest/reference/exterior-field.html), [tutorial](https://vmex.readthedocs.io/en/latest/tutorials/exterior-field.html).
+
 ### Opt-in solver options
 
 Off by default, so VMEC2000 iteration parity is kept:
@@ -675,7 +679,7 @@ python examples/take_fixed_boundary_gradients.py
 | Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
-| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
+| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py`, `mirror/mirror_exterior_field.py` | core; the beta scan needs `vmex[coils]`; the exterior field needs a `virtual-casing-jax` with `virtual_casing_jax.mirror` |
 | Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
 
 The optimization scripts expose resolutions, objective weights and iteration budgets near the top.

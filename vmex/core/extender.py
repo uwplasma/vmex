@@ -1441,7 +1441,8 @@ class VmecExtender(MagneticField):
         direct path.  The attribute may also be set after construction.
     graded_nodes:
         ``(poloidal, toroidal)`` node counts of the graded rule over the full
-        torus; ``None`` takes the finest schedule level.
+        torus; ``None`` takes twice the finest schedule level, and at least
+        ``(256, 512)``.
     """
 
     def __init__(
@@ -1737,8 +1738,6 @@ class VmecExtender(MagneticField):
         schedule = levels or ((full, ntheta), (2 * full, 2 * ntheta))
         config = vc.ExteriorFieldConfig(
             digits=digits,
-            src_nphi=nphi,
-            src_ntheta=ntheta,
             levels=schedule,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
@@ -1947,17 +1946,21 @@ class VmecExtender(MagneticField):
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
         project_current: bool = False,
+        runtime: Any = None,
     ) -> "VmecExtender":
         """Construct the differentiable finite-beta path from a live VMEX state.
 
         ``nphi``, ``ntheta`` and ``project_current`` behave exactly as in
         :meth:`from_wout`; pass the grid explicitly to override its default.
+        Pass the ``runtime`` that matches ``state`` when the profile parameters
+        are differentiated: without it the profiles are read from ``inp`` and
+        their direct dependence leaves the graph.
         """
         from . import virtual_casing as vc
 
         chosen = _source_nphi_for_digits(inp, digits)
         surface = vc.surface_field_data_from_state(
-            inp, state,
+            inp, state, runtime=runtime,
             nphi=chosen if nphi is None else nphi,
             ntheta=chosen if ntheta is None else ntheta,
             project_current=project_current,
