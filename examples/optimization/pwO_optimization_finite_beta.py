@@ -79,7 +79,7 @@ ARIES_DENSITY, ARIES_TEMPERATURE = 2.38e20, 9.45e3  # ne (1 - s^5) in m^-3, Te =
 # GammaC on GAMMA_C_SURFACES, which ranks alpha losses best (0 = off):
 GAMMA_C_FINAL_STAGES = 0
 GAMMA_C_SURFACES = tuple(SURFACES[1:])
-GAMMA_C_WEIGHT = 1.0e4
+GAMMA_C_WEIGHT = 100.0
 
 # Stage ladder: highest boundary mode number varied in each stage, its beta as a
 # fraction of TARGET_BETA, and the residual evaluations it may spend:
@@ -209,9 +209,9 @@ def stage_terms(beta, with_dkx, with_gamma_c):
         if MERCIER_MARGIN is not None:
             terms.append((mercier, 0.0, MERCIER_WEIGHT))
     if with_gamma_c:
-        terms.append((opt.GammaCSmooth(GAMMA_C_SURFACES), 0.0, GAMMA_C_WEIGHT))
+        terms.append((opt.GammaCSmooth(GAMMA_C_SURFACES), 0.0, scale * GAMMA_C_WEIGHT))
     if with_dkx:
-        terms.append((dkx_j_dot_B, 0.0, DKX_WEIGHT))
+        terms.append((dkx_j_dot_B, 0.0, scale * DKX_WEIGHT))
     return terms
 
 
