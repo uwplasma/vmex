@@ -822,7 +822,8 @@ def graded_plasma_field(surface_data, points, *, order: int = 0, nodes=None):
     ``VirtualCasingExteriorField.B_and_derivatives_accurate_xyz``) at every
     point, on either side of the surface and on it, where the outside limit is
     returned.  ``nodes`` are ``(poloidal, toroidal)`` counts over the full
-    torus, default the finest schedule level.  Traceable and differentiable in
+    torus, default twice the finest schedule level and at least
+    ``(256, 512)``.  Traceable and differentiable in
     the points and the surface data.
     """
     _require_vcj()
