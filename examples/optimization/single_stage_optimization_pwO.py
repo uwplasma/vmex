@@ -62,7 +62,7 @@ PLASMA_MAX_NFEV, PLASMA_STEP, PLASMA_MAX_CHANGE = 15, 0.05, 5.0
 IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.54 if NFP == 2 else 0.41, 6.1, 0.01
 COIL_SURFACE_DISTANCE_A, COIL_DISTANCE_A, CURVATURE_A = .5, .5, .7
 DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.02
-IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.56 if NFP == 2 else 0.43, 6.0, 0.003
+IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.56 if NFP == 2 else 0.43, 6.0, 0.004
 CURVATURE_OBJECTIVE_A = .65
 COIL_DISTANCE_OBJECTIVE_A, COIL_SURFACE_DISTANCE_OBJECTIVE_A = .75, .6
 
@@ -72,7 +72,7 @@ COIL_RADIUS_A, LENGTH_OVER_2PI_A = 2.7, 7.0
 LENGTH_WEIGHT, CURVATURE_WEIGHT = 10., 1000.
 COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 1000., 1000.
 COIL_FIT_PARAMETER_BOUND = 4.0
-CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e3, 10.0, 3.0
+CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e2, 10.0, 3.0
 MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 10, 20, 600
 OPTIMIZER_FTOL = 1e-8
 NPHI, NTHETA, VC_DIGITS = 17, 24, 4  # Odd toroidal count avoids aliasing the two-coil field.
@@ -310,8 +310,8 @@ print(f"[solve] {result.nit} L-BFGS-B iterations, {joint.counts['trials']} trial
 prefix = "single_stage_pwO"
 equilibrium, surface, metrics, free = verify_design(
     joint, u, prefix=prefix, ns=31 if ci_smoke else 101,
-    ftol=1e-10 if ci_smoke else 1e-12, free_ns=[16] if ci_smoke else [16, 51],
-    free_ftol=1e-10 if ci_smoke else 1e-12, verbose=not ci_smoke)
+    ftol=1e-10 if ci_smoke else 1e-13, free_ns=[16] if ci_smoke else [16, 71],
+    free_ftol=1e-10 if ci_smoke else 1e-13, verbose=not ci_smoke)  # final stages: ns >= 71, ftol 1e-13
 final_values = report("final", equilibrium)
 print(f"Objective: {initial_value:.6e} -> {result.fun:.6e}")
 print(f"Coil lengths = {np.asarray(joint.objects_from_x(joint.x0 + joint.scales * u)[1].length[:N_COILS])}")
@@ -329,7 +329,7 @@ verdict = design_target_report(
 half_mesh = (np.arange(100) + 0.5) / 100
 neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
 seed_fine = opt.solve_equilibrium(
-    replace(start_inp, ns_array=np.array([101]), ftol_array=np.array([1e-12]),
+    replace(start_inp, ns_array=np.array([101]), ftol_array=np.array([1e-13]),
             niter_array=np.array([20000])),
     initial_state=start.solution, verbose=False, raise_on_max_iterations=True)
 if not ci_smoke:
