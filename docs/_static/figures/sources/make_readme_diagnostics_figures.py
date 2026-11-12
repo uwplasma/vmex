@@ -63,7 +63,7 @@ CASES: dict[str, dict[str, object]] = {
 # small.  Pillow's encoder is deterministic for fixed pixels and settings.
 WEBP_WIDTH = 1760
 WEBP_QUALITY = 75
-WEBP_MAX_BYTES = 150_000  # repository figure cap; quality steps down until it fits
+WEBP_MAX_BYTES = 135_000  # keeps docs/_static media under its total cap; quality steps down until it fits
 
 
 def _package_version(name: str) -> str | None:
