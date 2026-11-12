@@ -289,15 +289,45 @@ def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     np.testing.assert_allclose(float(jvp), float(fd), rtol=2e-5, atol=1e-10)
 
 
-def test_hinge_is_zero_inside_its_band_and_the_distance_outside(solovev_eq):
+def test_band_is_zero_inside_and_the_distance_outside(solovev_eq):
     eq = solovev_eq
     ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
     assert ratio.shape == (3,) and np.all((ratio > 0) & (ratio <= 1))
-    inside = opt.Hinge(opt.edge_jacobian_ratio, floor=0.0, ceiling=1.0)
-    assert np.all(np.asarray(inside(eq.state, eq.runtime)) == 0.0)
-    above = opt.Hinge(opt.edge_jacobian_ratio, floor=1.5)
-    np.testing.assert_allclose(above(eq.state, eq.runtime), 1.5 - ratio, rtol=1e-12)
+    weight = 4.0
+    rows = lambda target: np.asarray(opt.residuals_from_tuples(  # noqa: E731
+        eq.state, eq.runtime, [(opt.edge_jacobian_ratio, target, weight)]))
+    assert np.all(rows(opt.between(0.0, 1.0)) == 0.0)
+    assert np.all(rows(opt.at_most(1.5)) == 0.0)
+    below = jnp.maximum(1.5 - ratio, 0.0)
+    np.testing.assert_array_equal(rows(opt.at_least(1.5)), 2.0 * np.asarray(below))
+    np.testing.assert_allclose(rows(opt.at_least(1.5)), 2.0 * (1.5 - ratio), rtol=1e-12)
+    np.testing.assert_array_equal(rows(opt.at_most(0.5)),
+                                  2.0 * np.maximum(ratio - 0.5, 0.0))
+    np.testing.assert_array_equal(rows(opt.between(0.4, 0.6)),
+                                  2.0 * (np.maximum(0.4 - ratio, 0.0) + np.maximum(ratio - 0.6, 0.0)))
     assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("jac", [None, "implicit"])
+def test_band_target_matches_a_hand_written_one_sided_term(jac):
+    """A band target takes the same optimizer steps as the equivalent excess function.
+
+    Aspect starts near 3.12; the limit 3.0 binds, so the band row is active.
+    A second limit that already holds must leave the result unchanged (the jit
+    cache keys on the bounds, so a different limit must not reuse the first).
+    """
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+
+    def excess(state, runtime):
+        return jnp.maximum(opt.aspect_ratio(state, runtime) - 3.0, 0.0)
+
+    kw = dict(max_mode=1, jac=jac, max_nfev=2)
+    ref = opt.least_squares([(excess, 0.0, 100.0)], inp, **kw)
+    got = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, **kw)
+    np.testing.assert_array_equal(got.x, ref.x)
+    assert float(got.cost) == float(ref.cost)
+    loose = opt.least_squares([(opt.aspect_ratio, opt.at_most(9.0), 100.0)], inp, **kw)
+    assert float(loose.cost) == 0.0
 
 
 def test_scalar_targets_vs_golden(solovev_eq):

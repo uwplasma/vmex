@@ -290,7 +290,7 @@ The consistency error is taken on four kinetic surfaces, between which the profi
 
 ### Piecewise omnigenity
 
-[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared one-sided limits on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
 
 ![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 

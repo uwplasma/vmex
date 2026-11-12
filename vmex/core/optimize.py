@@ -153,7 +153,10 @@ __all__ = [
     "min_abs_iota",
     "edge_jacobian_ratio",
     "axis_excursion",
-    "Hinge",
+    "Band",
+    "at_least",
+    "at_most",
+    "between",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
@@ -793,23 +796,54 @@ class QuasisymmetryRatioResidual:
 # ``edge_iota`` (implicit.py exposes the mirror alias).
 
 
-class Hinge:
-    """An inequality as a residual: zero inside ``[floor, ceiling]``, the distance outside.
+@dataclass(frozen=True)
+class Band:
+    """The interval a term may occupy: its residual is the distance outside it.
 
-    ``fun`` is any ``(state, runtime)`` metric, scalar or per surface, so
-    ``(Hinge(min_abs_iota, floor=0.42), 0.0, 100.0)`` is an objective tuple.
+    Use it as the ``target`` of an objective tuple through :func:`at_least`,
+    :func:`at_most` or :func:`between`.  Inside the interval the residual row is
+    exactly zero, so a limit is inert while it holds and does not compete with
+    the main objective; once violated it acts as ``sqrt(weight) * distance``.
+    ``lower`` and ``upper`` may be scalars or arrays that broadcast against a
+    per-surface metric; ``None`` leaves that side open.
     """
 
-    def __init__(self, fun: Callable, *, floor: Any = None, ceiling: Any = None):
-        self.fun, self.floor, self.ceiling = fun, floor, ceiling
-        self.name = getattr(fun, "__name__", type(fun).__name__)
+    lower: Any = None
+    upper: Any = None
 
-    def __call__(self, state: SpectralState, rt: SolverRuntime) -> Array:
-        """Return the distance of ``fun`` outside the band, zero inside."""
-        value = self.fun(state, rt)
-        below = 0.0 if self.floor is None else jnp.maximum(self.floor - value, 0.0)
-        above = 0.0 if self.ceiling is None else jnp.maximum(value - self.ceiling, 0.0)
+    def __call__(self, value: Any) -> Any:
+        """Return the distance of ``value`` outside the interval, zero inside."""
+        below = 0.0 if self.lower is None else jnp.maximum(self.lower - value, 0.0)
+        above = 0.0 if self.upper is None else jnp.maximum(value - self.upper, 0.0)
         return below + above
+
+
+def at_least(lower: Any) -> Band:
+    """Target ``value >= lower``: ``(opt.min_abs_iota, opt.at_least(0.42), 100.0)``."""
+    return Band(lower=lower)
+
+
+def at_most(upper: Any) -> Band:
+    """Target ``value <= upper``: ``(opt.mirror_ratio, opt.at_most(0.2), 100.0)``."""
+    return Band(upper=upper)
+
+
+def between(lower: Any, upper: Any) -> Band:
+    """Target ``lower <= value <= upper``."""
+    return Band(lower, upper)
+
+
+def _gap(value: Any, target: Any) -> Any:
+    """Residual of one term: ``value - target``, or the distance outside a :class:`Band`."""
+    return target(value) if isinstance(target, Band) else value - target
+
+
+def _band_key(target: Any) -> Any:
+    """Hashable content of a :class:`Band` target for the problem cache key."""
+    if not isinstance(target, Band):
+        return None
+    return tuple(None if b is None else np.asarray(b, dtype=float).tobytes()
+                 for b in (target.lower, target.upper))
 
 
 def report_targets(
@@ -1803,12 +1837,12 @@ def _make_finite_difference_problem(
     weights = []
     for function, target, weight in objective_terms:
         scale = _least_squares_weight(weight, weight_semantics)
-        weights.append((function, float(target), scale))
+        weights.append((function, target if isinstance(target, Band) else float(target), scale))
 
     def raw_residual(x: np.ndarray) -> np.ndarray:
         eq = equilibrium(x)
         return np.concatenate([
-            scale * (_call_term(function, eq) - target)
+            scale * _gap(_call_term(function, eq), target)
             for function, target, scale in weights
         ])
 
@@ -1822,7 +1856,7 @@ def _make_finite_difference_problem(
     # The seed is strict and establishes output shape.  Subsequent failed
     # probes receive a deterministic finite penalty so parallel FD completes.
     initial_parts = None if loss is not None else [
-        scale * (_call_term(function, equilibrium(x0)) - target)
+        scale * _gap(_call_term(function, equilibrium(x0)), target)
         for function, target, scale in weights
     ]
     initial_rows = None if initial_parts is None else np.concatenate(initial_parts)
@@ -2418,7 +2452,7 @@ def least_squares(
         try:
             seed = state_holder["hot"] if (hot_restart and single_stage) else None
             eq = solve_equilibrium(trial, initial_state=seed, **solve_kwargs)
-            parts = [w * (_call_term(f, eq) - t) for (f, t, w) in objective_terms]
+            parts = [w * _gap(_call_term(f, eq), t) for (f, t, w) in objective_terms]
             residual = np.concatenate(parts)
         except Exception:  # zero-crash policy: penalize, don't die
             if state_holder["nres"] is None:
@@ -2592,7 +2626,7 @@ def residuals_from_tuples(
         scale = _least_squares_weight(weight, weight_semantics)
         traceable = _traceable_term(function)
         rows.append(jnp.atleast_1d(
-            jnp.asarray(scale) * (jnp.asarray(traceable(state, runtime)) - target)
+            jnp.asarray(scale) * _gap(jnp.asarray(traceable(state, runtime)), target)
         ).ravel())
     if not rows:
         raise ValueError("provide at least one objective tuple")
@@ -2770,7 +2804,8 @@ def _least_squares_implicit(
     terms = []
     for f, t, w in objective_terms:
         weight = _least_squares_weight(w, weight_semantics)
-        terms.append((_traceable_term(f), float(t), jnp.asarray(weight)))
+        terms.append((_traceable_term(f), 0.0 if isinstance(t, Band) else float(t), jnp.asarray(weight)))
+    bands = tuple(t if isinstance(t, Band) else None for _, t, _ in objective_terms)
     traceable_scalar = (
         None if scalar_objective is None
         else _traceable_scalar_loss(scalar_objective)
@@ -2845,8 +2880,8 @@ def _least_squares_implicit(
     # new targets and weights reuses every executable instead of recompiling.
     problem_jit_key = (
         cfg,
-        tuple((_problem_callable_token(f_orig), np.shape(w_res))
-              for (f_orig, _t, _w), (_f, _t_res, w_res)
+        tuple((_problem_callable_token(f_orig), np.shape(w_res), _band_key(t_orig))
+              for (f_orig, t_orig, _w), (_f, _t_res, w_res)
               in zip(objective_terms, terms)),
         (None if scalar_objective is None
          else _problem_callable_token(scalar_objective)),
@@ -2897,9 +2932,9 @@ def _least_squares_implicit(
         if traceable_scalar is not None:
             return jnp.atleast_1d(jnp.asarray(traceable_scalar(state, rt))).ravel()
         return jnp.concatenate([
-            jnp.atleast_1d(w * (jnp.asarray(term_value(j, f, state, rt, data)) - t)).ravel()
-            for j, ((f, _, _), t, w)
-            in enumerate(zip(terms, data["targets"], data["weights"]))])
+            jnp.atleast_1d(w * _gap(jnp.asarray(term_value(j, f, state, rt, data)), band or t)).ravel()
+            for j, ((f, _, _), t, w, band)
+            in enumerate(zip(terms, data["targets"], data["weights"], bands))])
 
     problem_data = {
         "params0": params0, "x0": _place(x0),
@@ -2945,8 +2980,8 @@ def _least_squares_implicit(
         rt = imp.runtime_from_params(params_of(x, problem_data), cfg)
         if traceable_scalar is not None:
             return [term_rows(state, rt, problem_data)]
-        return [jnp.atleast_1d(w * (jnp.asarray(f(state, rt)) - t)).ravel()
-                for f, t, w in terms]
+        return [jnp.atleast_1d(w * _gap(jnp.asarray(f(state, rt)), band or t)).ravel()
+                for (f, t, w), band in zip(terms, bands)]
 
     # Row counts from shapes alone: evaluating the terms eagerly here cost
     # ~200 one-off op compiles; the values come from the jitted rows below.

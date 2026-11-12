@@ -672,7 +672,7 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
+(6), limits on ``|iota|`` (at least 0.42), the mirror ratio (at most 0.16), the axis
 excursion, the edge-Jacobian ratio and the elongation. The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
