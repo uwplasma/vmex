@@ -10,7 +10,7 @@ import jax
 import jax.numpy as jnp
 
 from .bounce import bounce_action_from_boozer
-from .omnigenity import boozer_spectrum_state
+from .omnigenity import _ResidualTerm, boozer_spectrum_state
 from .statephysics import _as_1d
 
 Array = Any
@@ -511,26 +511,7 @@ def j_invariant_qi_residual_from_boozer(
     return out
 
 
-class _QIResidualTerm:
-    """Shared least-squares objective interface."""
-
-    def residuals_state(self, state, rt):
-        return self.compute_state(state, rt)["residuals1d"]
-
-    def total_state(self, state, rt):
-        return self.compute_state(state, rt)["total"]
-
-    def J(self, eq):
-        return self.residuals_state(eq.state, eq.runtime)
-
-    __call__ = J
-    residuals = J
-
-    def total(self, eq):
-        return self.total_state(eq.state, eq.runtime)
-
-
-class ConstructedQIResidual(_QIResidualTerm):
+class ConstructedQIResidual(_ResidualTerm):
     """Goodman squash-and-shuffle residual with a traceable Boozer transform."""
 
     name = "constructed_qi"
@@ -561,7 +542,7 @@ class ConstructedQIResidual(_QIResidualTerm):
         return out
 
 
-class JInvariantQIResidual(_QIResidualTerm):
+class JInvariantQIResidual(_ResidualTerm):
     """Pooled complete-well action dispersion at supplied physical pitch.
 
     See :func:`j_invariant_qi_residual_from_boozer` for its interpretation.
