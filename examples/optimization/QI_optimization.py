@@ -2,10 +2,13 @@
 """Optimize a boundary for quasi-isodynamic confinement with shape limits.
 
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
-vacuum equilibrium in stages of increasing mode number. The residual vector
-holds the constructed-QI residual, the aspect ratio, and one-sided hinges on
-the rotational transform, the mirror ratio and the elongation; VMEX supplies
-its exact Jacobian.
+vacuum equilibrium in stages of increasing mode number, starting from a
+near-circular torus with a rotating ellipse (no QI-shaped warm start). The
+residual vector holds the constructed-QI residual, the aspect ratio, and
+one-sided hinges on the rotational transform, the mirror ratio and the
+elongation; VMEX supplies its exact Jacobian. The first stage multiplies the
+shape terms so the optimizer reaches the aspect, transform and mirror limits
+before the QI residual shapes the boundary.
 
 The QI residual is evaluated on a Boozer grid whose resolution is a knob of
 its own. The run optimizes on QI_OPTIONS and re-scores the finished boundary
@@ -17,7 +20,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -25,10 +27,13 @@ import vmex as vj
 from vmex import optimize as opt
 from vmex.core.qi import ConstructedQIResidual
 
-# The seed deck. This nfp = 2 boundary already scores constructed QI 5e-3,
-# where a perturbed circular seed scores 1.3
-# (benchmarks/qi_optimization_profile_cpu.json):
-INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / "input.QI_nfp2_initial"
+# Seed: the circular torus of this field-period count with a rotating ellipse of
+# this amplitude added. The exactly circular torus has no first-order iota
+# response; 0.05 to 0.06 converges, while 0.04 settles at zero transform and
+# the opposite sign settles at aspect 12 with a mirror ratio of 0.26:
+NFP = 2
+SEED_PERTURBATION = 0.05
+INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Radial grid every optimizer trial is solved on:
 STAGE_NS = 31
@@ -38,16 +43,21 @@ STAGE_NITER = 5500
 # Flux surfaces the QI residual is evaluated on:
 SURFACES = np.linspace(0.1, 1.0, 6)
 
-# Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend. A max_mode = 3 stage lowered the
-# cost by 1 % for 45 % of the run, so it is not shipped:
-MAX_MODES = [1, 3]
-MAX_NFEV = [10, 15]
+# Stages: highest boundary mode number varied, residual evaluations spent, and the
+# factor on the shape rows. The QI residual is rough, so a stage with a large
+# factor first moves the boundary to the aspect, transform and mirror limits;
+# without it some seeds never reach them. Three 30-evaluation stages reach QI
+# 1e-3 to 2e-3; 15-evaluation stages stop near 5e-3:
+STAGES = [(1, 15, 30.0), (1, 30, 1.0), (2, 30, 1.0), (3, 30, 1.0)]
 
 # Boozer resolution the QI residual is optimized on, and the finer one the
 # finished boundary is re-scored with:
 QI_OPTIONS = dict(mboz=12, nboz=12, nphi=61, nalpha=18, n_bounce=21)
 VALIDATION_OPTIONS = dict(mboz=14, nboz=14, nphi=101, nalpha=29, n_bounce=31)
+
+# Weights on the QI residual and the shape terms (the objective is the sum of
+# weight * residual^2):
+QI_WEIGHT, ASPECT_WEIGHT, IOTA_WEIGHT, MIRROR_WEIGHT, ELONGATION_WEIGHT = 300.0, 0.3, 10.0, 1000.0, 10.0
 
 # Targets and limits:
 ASPECT_TARGET = 8.0
@@ -81,7 +91,7 @@ ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     QI_OPTIONS = dict(mboz=8, nboz=8, nphi=31, nalpha=7, n_bounce=7)
     VALIDATION_OPTIONS = QI_OPTIONS
-    MAX_MODES, MAX_NFEV = [2], [5]
+    STAGES = [(2, 5, 1.0)]
     FINAL_NS, FINAL_FTOL = 31, 1.0e-10
 
 ###############################################################################
@@ -90,43 +100,23 @@ if ci_smoke:
 
 ### Set up the equilibrium ####################################################
 
-inp = replace(vj.VmecInput.from_file(INPUT_FILE),
-              ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
-              niter_array=np.array([STAGE_NITER]))
+inp = vj.VmecInput.from_file(INPUT_FILE)
+rbc, zbs = inp.rbc.copy(), inp.zbs.copy()
+rbc[inp.ntor - 1, 1], zbs[inp.ntor - 1, 1] = -SEED_PERTURBATION, SEED_PERTURBATION
+inp = replace(inp, rbc=rbc, zbs=zbs, ns_array=np.array([STAGE_NS]),
+              ftol_array=np.array([STAGE_FTOL]), niter_array=np.array([STAGE_NITER]))
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio, pulling from MIRROR_HINGE_FRACTION of the limit."""
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context)
-        - MIRROR_HINGE_FRACTION * MIRROR_LIMIT, 0.0)
-
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
-
-
-# Each term is (function, target, weight).
+# Each term is (function, target, weight); the shape terms are the last rows.
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
-    (opt.aspect_ratio, ASPECT_TARGET, 0.01),
-    (iota_floor, 0.0, 10.0),
-    (mirror_excess, 0.0, 1000.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
+    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
+    (opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_HINGE_FRACTION * MIRROR_LIMIT), 0.0, MIRROR_WEIGHT),
+    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, ELONGATION_WEIGHT),
 ]
-qi_terms = [(qi, 0.0, 10.0), *objective_function_terms]
+qi_terms = [(qi, 0.0, QI_WEIGHT), *objective_function_terms]
 
 report = opt.EquilibriumReporter(
     ("constructed QI", qi.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
@@ -143,23 +133,27 @@ monitor = opt.OptimizationMonitor()
 # stage still restarts SciPy's trust-region model. A RuntimeWarning about
 # uncertified Jacobian columns is expected once the optimizer leaves the seed
 # and needs no action; see examples/README.md.
-mpol = max(max(MAX_MODES) + 2, MINIMUM_MPOL)
+top_mode = max(mode for mode, *_ in STAGES)
+mpol = max(top_mode + 2, MINIMUM_MPOL)
 inp = replace(inp, delt=0.5).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 problem = opt.VmecProblem.from_tuples(
-    inp, qi_terms, max_mode=max(MAX_MODES), use_ess=True,
+    inp, qi_terms, max_mode=top_mode, use_ess=True,
     progress=not ci_smoke, evaluation_progress=not ci_smoke,
     ess_alpha=ESS_ALPHA, vary_major_radius=VARY_MAJOR_RADIUS)
 monitor.problem = problem
 if not ci_smoke:
     problem.compile_residual_and_jacobian()
 x = problem.x0
-for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
-    print(f"\n===== QI stage, max_mode = {max_mode} =====")
+for max_mode, max_nfev, shape_factor in STAGES:
+    print(f"\n===== QI stage, max_mode = {max_mode}, shape rows x {shape_factor:g} =====")
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
+    row_scale = np.ones(stage.residual(stage.x0).size)
+    row_scale[-len(objective_function_terms):] = np.sqrt(shape_factor)
     result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
+        lambda u: row_scale * stage.residual(u), stage.x0,
+        jac=lambda u: row_scale[:, None] * stage.residual_jac(u),
         x_scale=stage.scales, max_nfev=max_nfev,
         ftol=1.0e-6, xtol=1.0e-10, verbose=2, callback=monitor)
     x = stage.embed(result.x)

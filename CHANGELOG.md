@@ -4,6 +4,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
+- **QI example from a cold seed.** `QI_optimization.py` starts from a circular torus with a rotating ellipse instead of the near-QI deck and reaches constructed QI 1.4e-3 at aspect 8.1 with the shape limits met, through a shape-weighted first stage and three 30-evaluation stages; it needs about 100 residual evaluations, more than the five-minute example budget.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09
@@ -21,13 +22,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## 0.12.0 - 2026-10-21
 
-- **Faster optimization.** Implicit executables are keyed on problem structure
-  and share one block factorization: QA stage compile 32-40 s to 24-27 s, a
-  second stage of the same shape 24-38 s to 13-15 s, peak memory about 30 %
-  lower (#599, #618). Adjoint tolerances are traced, so changing one no longer
-  recompiles (#623). Rejected trials stop early (#608), the Jacobian reuses the
-  refinement's block bands (#622), and multi-stage examples share one problem
-  (#621). Geometry synthesis is separable, 10-15 % faster warm solves (#597).
+- **Faster optimization.** Implicit executables are keyed on problem structure and share one block factorization: QA stage compile 32-40 s to 24-27 s, a second stage of the same shape 24-38 s to 13-15 s, peak memory about 30 % lower (#599, #618). Adjoint tolerances are traced, so changing one no longer recompiles (#623). Rejected trials stop early (#608), the Jacobian reuses the refinement's block bands (#622), and multi-stage examples share one problem (#621). Geometry synthesis is separable, 10-15 % faster warm solves (#597).
 - **Ballooning stability** is resolved along the field line (Richardson step,
   fourth-order radial reads) and matches COBRAVMEC within 1.7 %; the hard
   maximum is the default and the Jacobian is 6x cheaper (#589).
