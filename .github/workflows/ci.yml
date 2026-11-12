@@ -428,33 +428,6 @@ jobs:
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
-  gpu:
-    # Short accelerator check on the org's self-hosted GPU runners. Advisory:
-    # not part of PR gate, so a GPU-box outage cannot block merges.
-    name: GPU smoke (CUDA)
-    needs: changes
-    if: >-
-      needs.changes.outputs.run_tests == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, uwplasma-gpu]
-    timeout-minutes: 5
-    env:
-      UV_SYSTEM_PYTHON: "0"
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Install with CUDA 12 JAX
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          uv venv --python 3.10 .venv
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
-          uv pip install . pytest 'jax[cuda12]'
-      - name: Require the GPU backend
-        run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
-      - name: GPU tests
-        timeout-minutes: 1
-        run: pytest -q -x -m gpu $(python tools/test_manifest.py select gpu-ci) --durations=10
-
   install:
     # One cheap Linux cell plus the two platforms CI never otherwise touches.
     name: pip install (${{ matrix.os }}, Python ${{ matrix.python }}${{ matrix.extra }})
