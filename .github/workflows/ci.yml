@@ -456,7 +456,7 @@ jobs:
         run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
       - name: GPU tests
         timeout-minutes: 1
-        run: pytest -q -x -m gpu $(python tools/test_manifest.py select gpu-ci) --durations=10
+        run: pytest -q -x -m gpu $(python tools/test_manifest.py select pr-gpu-ci) --durations=10
       - name: Remove the virtual environment
         if: always()
         run: rm -rf .venv

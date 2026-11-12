@@ -128,7 +128,7 @@ potential and surface-field tables. Omitting ``--run-vmec2000`` skips it.
 GPU checks
 ----------
 
-CI runs a short subset (``gpu-ci`` in ``tests/manifest.json``) on the
+CI runs a short subset (``pr-gpu-ci`` in ``tests/manifest.json``) on the
 organization's self-hosted GPU runners for pull requests from this repository;
 fork pull requests never reach them. The check is advisory and is not part of
 ``PR gate``. The full GPU tests are the local-only

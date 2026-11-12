@@ -133,12 +133,12 @@
   },
   "local_only": {
     "gpu-smoke": {
-      "reason": "the full GPU suite needs an NVIDIA GPU and minutes of compilation; CI runs only the short gpu-ci subset on the self-hosted GPU runners",
+      "reason": "the full GPU suite needs an NVIDIA GPU and minutes of compilation; CI runs only the short pr-gpu-ci subset on the self-hosted GPU runners",
       "command": "pytest -q $(python tools/test_manifest.py select gpu-smoke)"
     }
   },
   "selectors": {
-    "gpu-ci": [
+    "pr-gpu-ci": [
       "tests/test_gpu_ci.py::test_gpu_is_default_without_platform_environment_pins",
       "tests/test_gpu_ci.py::test_bounce_action_cpu_gpu_parity",
       "tests/test_gpu_ci.py::test_j_invariant_qi_cpu_gpu_parity",
