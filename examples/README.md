@@ -37,6 +37,10 @@ that research budget as one commented set of constants next to the default.
     lives in optional setup cells. Advanced sections run sequential acquisition,
     compare optimizers, and optimize QA with a Fourier-mode continuation from
     a rotating ellipse, including independent radial/angular refinement.
+    Initial/final 3D views and independently sampled objective paths show the
+    shape changes and local landscape. A more expensive finite-beta QI study
+    examines restarts, discretization sensitivity and gradient reliability,
+    with fixed pressure/flux and zero prescribed net toroidal current.
     The compactness-only objective can severely worsen QA; both diagnostics
     are reported so a lower loss is not confused with better confinement. Script outputs go to `results/machine_learning/`;
     the notebook writes to `results/ml_notebook/`.
