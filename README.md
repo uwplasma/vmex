@@ -541,21 +541,17 @@ takes about a minute.
   metrics with it.
 
 **Stellarator** (finite-beta QA, prescribed toroidal current, no certificate yet).
-`python examples/prescribed_current_polishing.py` uses 300 L-BFGS iterations at `ns = 51`,
-`mpol = 5`, `ntor = 4`. One Apple M3 Max CPU run (JAX 0.12.0.1, populated compilation cache) took
-1.8 s for the discrete solve and 4.8 s for polishing; export and readback are additional work.
+`python examples/prescribed_current_polishing.py` runs 300 L-BFGS iterations at `ns = 51`,
+`mpol = 5`, `ntor = 4`, then exports and reads back experimental WOUT files.
 
 <img src="docs/_static/figures/readme_polish_stellarator.webp" alt="Force over pressure gradient of the finite-beta QA stellarator before and after polishing">
 
 - The RMS force relative to the pressure gradient falls 18× near the axis, 14× in the bulk and
-  30× at the edge on a held-out grid. The final ratios are 0.52, 0.24 and 0.82; these remain
-  substantial force errors, not a high-accuracy equilibrium.
+  30× at the edge on a held-out grid, to 0.52, 0.24 and 0.82: substantial force errors remain.
 - L-BFGS stops at |grad| = 1.9e-4 after 300 iterations: a forward result, not a converged one.
-- Experimental WOUT snapshots at `ns = 129, 257` recompute the current on the export mesh.
-  Their serialized profiles preserve at least a 10× reduction after readback, within 2% of
-  the native regional ratios. The files retain `ier_flag = 2` (not converged), include the
-  actual discrete residuals, and come with input decks. They have no stationarity, continuum
-  or implicit-gradient certificate; consumers requiring converged WOUTs should reject them.
+- Experimental WOUT files at `ns = 129, 257` carry `ier_flag = 2`, their actual residuals and input
+  decks. Read back, they keep a 10x force reduction within 2% of the native ratios. They have no
+  stationarity, continuum or implicit-gradient certificate; reject them where convergence is required.
 
 `vmex.core.strong_force.traced_lift` is the differentiable form of the lift, for force-balance
 certificates inside gradient-based objectives.

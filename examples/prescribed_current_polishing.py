@@ -6,14 +6,14 @@ script lifts the converged state to a high-order radial representation and
 lowers the continuous force with ``polish_prescribed_current``: L-BFGS on the
 weighted force, with the enclosed current ``I(s)`` of the deck imposed through
 an angular-mean Ampere closure for ``chi'(rho)``.  The deck is the finite-beta
-QA of Landreman, Buller and Drevlak (its file keeps a legacy name).
+QA of Landreman, Buller and Drevlak.
 
 It reports the force over pressure-gradient RMS on a finer held-out grid, by
 region, before and after, and saves a bar chart.  This is a forward
 experiment: there is no stationarity certificate (unlike the axisymmetric
-polish). Experimental WOUT snapshots recompute the current closure on their
-export mesh and retain ``ier_flag = 2`` (not converged). Their serialized
-profiles are checked after reading the files back; this is not certification.
+polish). The experimental WOUT files recompute the current closure on their
+export mesh and keep ``ier_flag = 2`` (not converged). Their profiles are
+checked after reading the files back; this is not a certificate.
 """
 import os
 from dataclasses import replace
