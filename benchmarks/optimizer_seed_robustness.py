@@ -1,16 +1,17 @@
 #!/usr/bin/env python
-"""Seed robustness of the boundary-optimization ladders (QA, pwO, QI).
+"""Start-boundary robustness of the boundary-optimization ladders (QA, pwO, QI).
 
-Each seed perturbs the example's start boundary at random, runs the example's mode ladder with
-the chosen stage driver, re-solves the optimized boundary on a finer radial grid and writes one
-JSON record per (family, seed, driver): final metrics on that grid, residual evaluations,
-rejected trials and wall time. Seed 0 is the unperturbed example; seeds above 9 are the stress
-set (random-sign rotating ellipse down to nearly circular, more noise). A perturbed boundary
-whose cold start has no converged equilibrium is redrawn, as a user would re-seed.
+The start is the example's, with one or two boundary modes perturbed by a fixed amplitude
+(RBC(m, n) += -a, ZBS(m, n) += a), so a grid over which modes and which amplitude is
+deterministic. The script runs the example's mode ladder, re-solves the optimized boundary on
+the example's final radial grid and writes one JSON record: final metrics, residual
+evaluations, rejected trials and wall time. DRIVER=old is the SciPy call the QA example used
+before it got the larger ceilings and the stall stop; DRIVER=new is the shipped call. pwO and QI
+ship unchanged, so for them only DRIVER=old exists.
 
-Run it from outside the repository root, one process per (family, seed, driver)::
+Run it from outside the repository root, one process per (family, modes, amplitude, driver)::
 
-    FAMILY=QA SEED=3 DRIVER=run_stage python benchmarks/optimizer_seed_robustness.py
+    FAMILY=QA MODES=1:-1,2:-1 AMP=0.03 DRIVER=new python benchmarks/optimizer_seed_robustness.py
 """
 
 import json
@@ -27,50 +28,39 @@ import vmex as vj
 from vmex import optimize as opt
 
 FAMILY = os.environ.get("FAMILY", "QA")        # QA, pwO or QI
-SEED = int(os.environ.get("SEED", "1"))
-DRIVER = os.environ.get("DRIVER", "run_stage")  # run_stage, or scipy (the call the examples used to make)
+MODES = [tuple(int(v) for v in mode.split(":")) for mode in os.environ.get("MODES", "1:-1").split(",")]  # (m, n)
+AMP = float(os.environ.get("AMP", "0.05"))
+DRIVER = os.environ.get("DRIVER", "new")        # old or new, see the docstring
 OUTPUT = Path(os.environ.get("OUTPUT", "."))
 
 DATA = Path(vj.__file__).resolve().parents[1] / "examples" / "data"
-rng = np.random.default_rng(1000 + SEED)
-
-
-def perturb(base, sigma, modes=2, ellipse=0.0):
-    """Gaussian noise on RBC/ZBS for 1 <= m <= modes and |n| <= modes, plus a rotating ellipse."""
-    rbc, zbs, ntor = base.rbc.copy(), base.zbs.copy(), base.ntor
-    for m in range(1, modes + 1):
-        for n in range(-modes, modes + 1):
-            rbc[ntor + n, m] += sigma * rng.standard_normal()
-            zbs[ntor + n, m] += sigma * rng.standard_normal()
-    rbc[ntor - 1, 1] -= ellipse
-    zbs[ntor - 1, 1] += ellipse
-    return replace(base, rbc=rbc, zbs=zbs)
 
 
 def seeded(base):
-    """Seed 0: the example start; 1-9: moderate noise; 10 and up: the stress set."""
-    if SEED == 0:
-        return replace(base, rbc=base.rbc.copy(), zbs=base.zbs.copy())
-    if SEED < 10:
-        return perturb(base, 0.01, ellipse=0.05 * rng.uniform(0.4, 1.6))
-    return perturb(base, 0.007, ellipse=rng.choice([-1, 1]) * rng.uniform(0.005, 0.12))
+    """The start boundary with each (m, n) in MODES moved by AMP (RBC down, ZBS up)."""
+    rbc, zbs = base.rbc.copy(), base.zbs.copy()
+    for m, n in MODES:
+        rbc[base.ntor + n, m] -= AMP
+        zbs[base.ntor + n, m] += AMP
+    return replace(base, rbc=rbc, zbs=zbs)
 
 
 if FAMILY in ("QA", "pwO"):
     nfp = 2 if FAMILY == "QA" else 3
     base = vj.VmecInput.from_file(DATA / f"input.minimal_seed_nfp{nfp}")
     ladder, budgets, parameter_step, prep = (
-        ([1, 2], [10, 15], 0.02, dict(delt=0.5)) if FAMILY == "QA" else
+        ([1, 2], [20, 30] if DRIVER == "new" else [10, 15], 0.02, dict(delt=0.5)) if FAMILY == "QA" else
         ([1, 2, 3], [15] * 3, 0.05, dict(delt=0.5, ns_array=np.array([35]), niter_array=np.array([5000]),
                                           ftol_array=np.array([1e-12]))))
-    final_grid = dict(ns_array=np.array([71 if FAMILY == "QA" else 55]),
-                      ftol_array=np.array([1e-14 if FAMILY == "QA" else 1e-10]),
-                      niter_array=np.array([8000 if FAMILY == "QA" else 30000]))
+    final_grids = ([dict(ns_array=np.array([71]), ftol_array=np.array([1e-14]), niter_array=np.array([8000]))]
+                   if FAMILY == "QA" else
+                   [dict(ns_array=np.array([ns]), ftol_array=np.array([1e-13]), niter_array=np.array([30000]))
+                    for ns in (37, 45, 55, 71)])
 else:
     base = vj.VmecInput.from_file(DATA / "input.QI_nfp2_initial")
     base = replace(base, ns_array=np.array([31]), ftol_array=np.array([1e-12]), niter_array=np.array([5500]))
     ladder, budgets, parameter_step, prep = [1, 3], [10, 15], None, dict(delt=0.5)
-    final_grid = dict(ns_array=np.array([71]), ftol_array=np.array([1e-14]), niter_array=np.array([8000]))
+    final_grids = [dict(ns_array=np.array([71]), ftol_array=np.array([1e-14]), niter_array=np.array([8000]))]
 
 ### Objectives (as in the shipped examples) ###################################
 
@@ -120,26 +110,12 @@ def resolved(inp):
         mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 
 
-def converged(equilibrium):
-    result = equilibrium.result
-    fsq = float(result.fsqr) + float(result.fsqz) + float(result.fsql)
-    return bool(result.converged) or fsq <= 100 * float(equilibrium.inp.ftol_array[-1])
-
-
-record = dict(family=FAMILY, seed=SEED, driver=DRIVER, ok=False, stages=[])
+record = dict(family=FAMILY, modes=MODES, amplitude=AMP, driver=DRIVER, ok=False, stages=[])
 start = time.time()
 try:
-    for redraw in range(30):
-        inp = resolved(seeded(base))
-        try:
-            equilibrium = opt.solve_equilibrium(inp)
-        except Exception as error:  # noqa: BLE001 - a start boundary without an initial Jacobian
-            if "JACOBIAN" not in str(error).upper() or SEED == 0:
-                raise
-            continue
-        if converged(equilibrium) or SEED == 0:
-            break
-    record.update(redraws=redraw, seed_metrics=report("", equilibrium))
+    inp = resolved(seeded(base))
+    equilibrium = opt.solve_equilibrium(inp, raise_on_max_iterations=True)  # the start must converge
+    record["seed_metrics"] = report("", equilibrium)
     problem = opt.VmecProblem.from_tuples(
         inp, terms, max_mode=max(ladder), use_ess=True, ess_alpha=1.2,
         **(dict(restart_from=equilibrium) if FAMILY != "QI" else {}))
@@ -163,14 +139,17 @@ try:
             rejected += int(np.max(np.abs(value)) >= 1e5)  # the failed-trial penalty rows
             return value
 
-        if DRIVER == "run_stage":
-            target.residual = residual
-            result = opt.run_stage(target, max_nfev=2 * max_nfev, step=step, change=limit)
-        else:
-            bounds = (-np.inf, np.inf) if limit is None else (
-                target.x0 - limit * step, target.x0 + limit * step)
-            result = least_squares(residual, target.x0, jac=target.residual_jac, x_scale=step,
-                                   max_nfev=max_nfev, bounds=bounds, ftol=1e-6, xtol=1e-10)
+        costs = []
+
+        def stop_when_stalled(intermediate_result, max_nfev=max_nfev):
+            costs.append(intermediate_result.cost)
+            if DRIVER == "new" and len(costs) >= max(4, max_nfev // 4) and costs[-4] - costs[-1] < 0.02 * costs[-4]:
+                raise StopIteration
+
+        bounds = (-np.inf, np.inf) if limit is None else (target.x0 - limit * step, target.x0 + limit * step)
+        result = least_squares(residual, target.x0, jac=target.residual_jac, x_scale=step,
+                               max_nfev=max_nfev, bounds=bounds, ftol=1e-6, xtol=1e-10,
+                               callback=stop_when_stalled)
         if FAMILY == "pwO":
             map_values = target.values(result.x)
             pwo.options.update(map_values)
@@ -179,13 +158,16 @@ try:
         record["stages"].append(dict(
             max_mode=max_mode, nfev=int(result.nfev), cost=float(result.cost), rejected=rejected,
             wall=time.time() - began, metrics=report("", equilibrium)))
-    final = opt.solve_equilibrium(
-        replace(inp, **final_grid), initial_state=equilibrium.solution, raise_on_max_iterations=True)
+    final = equilibrium
+    for grid in final_grids:
+        final = opt.solve_equilibrium(
+            replace(inp, **grid), initial_state=final.solution, raise_on_max_iterations=True)
     record.update(ok=True, final=report("", final))
 except Exception as error:  # noqa: BLE001 - the table counts failures
     record["error"] = f"{type(error).__name__}: {str(error)[:300]}"
 record["wall"] = time.time() - start
 record["cpu"] = time.process_time()
-path = OUTPUT / f"{FAMILY}_{SEED}_{DRIVER}.json"
+tag = "+".join(f"m{m}n{n}" for m, n in MODES)
+path = OUTPUT / f"{FAMILY}_{tag}_a{AMP}_{DRIVER}.json"
 path.write_text(json.dumps(record, indent=1, default=float))
 print(path, json.dumps({k: record.get(k) for k in ("ok", "final", "wall", "error")}, default=float))

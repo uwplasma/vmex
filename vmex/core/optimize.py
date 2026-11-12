@@ -191,7 +191,6 @@ __all__ = [
     "resample_current_profile",
     "least_squares",
     "minimize",
-    "run_stage",  # noqa: F822 - provided lazily by __getattr__ below
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
     "BootstrapFiniteNuResidual",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
@@ -211,9 +210,6 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
         return getattr(bootstrap, name)
     # gammac.py sits on the stability/turbulence field-line lane; the lazy
     # re-export keeps the fast-ion proxy import-light like the f_boot term.
-    if name == "run_stage":
-        from .stages import run_stage
-        return run_stage
     if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
         from . import gammac
         return getattr(gammac, name)

@@ -75,7 +75,6 @@
     ["tests/test_omnigenity.py", "diagnostics", "ad", "slow", "cpu-gpu", "golden", "fd", ["pr-parity-c4", "full-core-n-s"]],
     ["tests/test_optimization_convergence.py", "optimization", "campaign", "campaign", "cpu-gpu", "golden", "external", ["pr-parity-c2"]],
     ["tests/test_optimize.py", "optimization", "integration", "slow", "cpu-gpu", "none", "fd", ["pr-parity-d", "full-core-n-s"]],
-    ["tests/test_stages.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "full-core-n-s"]],
     ["tests/test_problem.py", "optimization", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-d", "pr-fast", "full-core-n-s"]],
     ["tests/test_optimize_penalty.py", "optimization", "integration", "slow", "cpu-gpu", "none", "fd", ["pr-parity-c2", "full-core-n-s"]],
     ["tests/test_optimize_traceable_qs.py", "optimization", "integration", "slow", "cpu-gpu", "golden", "fd", ["pr-parity-a2", "full-core-n-s"]],
