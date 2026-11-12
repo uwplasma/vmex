@@ -233,7 +233,7 @@ def fit_vacuum_coils(inp, equilibrium, coils, coil_penalty, *, nphi, ntheta, nor
     factor, normal, jump = field_factor(fitted)
     if not np.isfinite(float(factor)) or float(factor) == 0:
         raise ValueError("The boundary field must admit a finite nonzero coil current")
-    print(f"[coil fit] {fit.nit} L-BFGS-B iterations, no equilibrium solves: B.n/B RMS = "
+    print(f"[coil fit] {fit.nit} L-BFGS-B iterations ({fit.message}), no equilibrium solves: B.n/B RMS = "
           f"{100 * float(normal):.3f}%, |B|^2 jump RMS = {100 * float(jump):.3f}%, "
           f"common current factor {float(factor):.6g}", flush=True)
     return fitted.with_dofs(jnp.concatenate((fitted.dofs_curves.ravel(), fitted.dofs_currents * factor)))
