@@ -42,9 +42,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "optimization" / "single_stage_optimization.py",
     EXAMPLES / "optimization" / "single_stage_optimization_augmented_lagrangian.py",
     EXAMPLES / "optimization" / "single_stage_optimization_least_squares.py",
-    EXAMPLES / "optimization" / "single_stage_optimization_QA.py",
-    EXAMPLES / "optimization" / "single_stage_optimization_QH.py",
-    EXAMPLES / "optimization" / "single_stage_optimization_QI.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py",
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
@@ -204,9 +202,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_augmented_lagrangian.py",
     "examples/optimization/single_stage_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization_least_squares.py",
-    "examples/optimization/single_stage_optimization_QA.py",
-    "examples/optimization/single_stage_optimization_QH.py",
-    "examples/optimization/single_stage_optimization_QI.py",
+    "examples/optimization/single_stage_optimization_QA_QH_QI.py",
     "examples/optimization/stellarator_asymmetry/QA_optimization.py",
     "examples/optimization/stellarator_asymmetry/QH_optimization.py",
     "examples/optimization/stellarator_asymmetry/QI_optimization.py",
@@ -762,8 +758,10 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
 @pytest.mark.parametrize("case", ["QA", "QH", "QI"])
 def test_single_stage_symmetry_examples(case, tmp_path):
     pytest.importorskip("essos")
-    out = _run_example(
-        EXAMPLES / "optimization" / f"single_stage_optimization_{case}.py", tmp_path, timeout=1800)
+    script = EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py"
+    source = script.read_text().replace('FAMILY = "QA"', f'FAMILY = "{case}"').replace("__file__", repr(str(script)))
+    (tmp_path / "family.py").write_text(source)
+    out = _run_example(tmp_path / "family.py", tmp_path, timeout=1800)
     assert "[coil fit]" in out and "[augmented Lagrangian 1]" in out
     final = re.search(rf"\[final\] {case} total = ([0-9.eE+-]+)", out)
     assert final is not None and np.isfinite(float(final.group(1)))
