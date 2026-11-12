@@ -256,7 +256,7 @@ class _BoozerBoundary(Mapping):
 def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float = MODE_TOLERANCE,
                  angle_grid: int | None = 6):
     """Run ``booz_xform_jax`` on every surface of ``wout`` and return
-    ``(essos.boozer.BoozerField, Booz_xform)``; ``bx`` holds the |B| spectra, G and I, not the R, Z and nu
+    ``(essos.boozer.BoozerField, Booz_xform)``; ``bx`` holds the ``|B|`` spectra, G and I, not the R, Z and nu
     spectra (see :func:`boundary_geometry`)."""
     from inspect import signature
 
