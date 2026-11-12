@@ -696,7 +696,9 @@ pressure itself deepens the well; ``MAGNETIC_WELL_FLOOR = None`` or
 ``MERCIER_MARGIN = None`` removes one. ``BOOTSTRAP_TERM = "band"`` and
 ``DKX_FINAL_STAGES`` control the bootstrap current as in the vacuum example, and
 ``GAMMA_C_FINAL_STAGES`` adds the GammaC proxy to the last stages. The elongation
-ceiling is 6. Holding the plasma volume (``HOLD_VOLUME = True``) stalls the NFP 4
+ceiling is 6. The pwO rows weigh 1e3 in vacuum and ``BETA_PWO_WEIGHT`` = 1e5 at finite
+beta, where a weight of 1e3 lets the hinges degrade the transport (NFP 4, 3 %: alpha
+loss 36 % against 13 %). Holding the plasma volume (``HOLD_VOLUME = True``) stalls the NFP 4
 ladder. Each stage writes ``input.<name>_stage<k>``; set ``INPUT_FILE`` to one,
 ``SEED_MODES = None``, ``MAP_PARAMETERS`` to its printed map and trim the ladder
 lists to resume after an interruption. The seed baseline of the NEO comparison is the

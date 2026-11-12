@@ -97,6 +97,7 @@ AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magneti
 ELONGATION_LIMIT = 6.0
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
+BETA_PWO_WEIGHT = 1.0e5           # at finite beta the hinges otherwise win and the transport degrades
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
@@ -254,7 +255,8 @@ for i, (max_mode, max_nfev) in enumerate(zip(MAX_MODES, MAX_NFEV)):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP, weight=PWO_WEIGHT,
+    joint = FreeMapProblem(stage, pwo, equilibrium, MAP_PARAMETERS, FREE_MAP,
+                           weight=PWO_WEIGHT if beta == 0 else BETA_PWO_WEIGHT,
                            band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
