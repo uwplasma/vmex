@@ -138,6 +138,7 @@ profile_scale = TARGET_BETA / float(seed.wout.betatotal)
 n0 *= profile_scale ** (1 / 3)
 T0 *= profile_scale ** (2 / 3)
 inp = replace(inp, pres_scale=inp.pres_scale * profile_scale)
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)  # hold the seed plasma volume
 
 # These polynomials provide ne(s), Te(s) and Ti(s) to the Redl model. The
 # Picard loop leaves the prescribed pressure and boundary shape unchanged and

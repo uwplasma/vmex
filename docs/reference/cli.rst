@@ -155,9 +155,10 @@ Options
        ``RESTART_WOUT`` deck entry. See
        :doc:`/howto/restart-from-previous-run`.
    * - ``--prefetch-compile`` / ``--no-prefetch-compile``
-     - Opt in to or out of overlapping the next multigrid rung's compilation.
-       Sequential compilation is the default and uses less peak memory;
-       numerical results are identical.
+     - Overlap the next multigrid rung's compilation with the current rung's
+       iteration (default: on). ``--no-prefetch-compile`` compiles
+       sequentially and uses less peak memory (about 25% less on
+       ``cth_like_free_bdy``); results are bit-identical.
    * - ``--jacobian-retries N``
      - Retry a stage from its best finite checkpoint after the VMEC2000
        75-Jacobian-reset condition, using a reduced ``DELT`` (default 2).
@@ -181,8 +182,8 @@ Free boundary and restart
 
 An ``LFREEB = T`` deck with a readable ``MGRID_FILE`` (or
 ``MGRID_FILE = 'DIRECT_COILS'`` with ``--coils``) runs the free-boundary
-ladder; a missing mgrid file falls back to a fixed-boundary solve with a
-warning, as in VMEC2000.  See :doc:`/howto/free-boundary`.  ``--restart`` or
+ladder; a missing mgrid file is an input error (exit code 5), as in STELLOPT's
+VMEC.  See :doc:`/howto/free-boundary`.  ``--restart`` or
 the deck key ``RESTART_WOUT`` seeds a fixed- or free-boundary solve from a
 wout file (:doc:`/howto/restart-from-previous-run`).
 

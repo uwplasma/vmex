@@ -113,6 +113,7 @@ calibration = opt.solve_equilibrium(
     inp, initial_state=restart_state(vj.read_wout(WOUT_FILE), inp),
     raise_on_max_iterations=True)
 inp = replace(inp, pres_scale=TARGET_BETA / float(calibration.wout.betatotal))
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)  # hold the seed plasma volume
 
 ### Set up the objective ######################################################
 

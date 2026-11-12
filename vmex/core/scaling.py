@@ -523,7 +523,7 @@ def _estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     """Estimate ``|B|`` on the axis at toroidal angle ``phi`` from the input alone [T].
 
     No equilibrium is solved.  ``PHIEDGE`` is the toroidal flux through the
-    boundary, and in a thin tube the flux is the axis field times the tube
+    boundary (``PHIEDGE * BLOAT``), and in a thin tube the flux is the axis field times the tube
     cross-section, so ``|B| ~ |PHIEDGE| / A_perp``.  ``A_perp`` is the area
     where the boundary surface meets the plane through the cross-section
     centroid that is normal to the curve of centroids of the ``phi = const``
@@ -590,7 +590,8 @@ def _estimate_axis_field(inp: Any, phi: float = 0.0, ntheta: int = 128) -> Any:
     k = jnp.fft.fftfreq(ntheta, 1.0 / ntheta)
     ddt = lambda f: jnp.fft.ifft(1j * k * jnp.fft.fft(f)).real  # noqa: E731
     area_perp = jnp.abs(jnp.pi * jnp.mean(u * ddt(v) - v * ddt(u)))
-    return jnp.abs(jnp.asarray(inp.phiedge, dtype=float)) / area_perp
+    bloat = float(getattr(inp, "bloat", 1.0)) or 1.0  # readin.f: PHIEDGE is multiplied by BLOAT
+    return jnp.abs(jnp.asarray(inp.phiedge, dtype=float)) * bloat / area_perp
 
 
 def _probe_axis_field(inp: VmecInput, phi: float = 0.0, ns: tuple[int, int] = (7, 13)) -> float:

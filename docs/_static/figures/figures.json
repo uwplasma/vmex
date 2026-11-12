@@ -218,6 +218,27 @@
       "note": "Drawn from benchmarks/extender_islands_sections.npz, which the same script writes with --record using only VMEX, ESSOS and inputs in examples/data: the Landreman-Paul QA deck solved as a free boundary at fixed ESSOS coil currents (p = PRES_SCALE (1 - s), PRES_SCALE = 1/1.45e-3 Pa, without net current and with CURTOR = 4 kA, j proportional to 1 - s, which puts iota = 1/2 just outside the LCFS), the exterior field formed as the coil field plus the VmecExtender virtual-casing field tabulated on a 1 cm tricubic grid, and field lines launched 4 mm to 4.5 cm outside the LCFS at phi = 0 traced for 1500 m; the right panel unrolls the 4 kA section against poloidal position on and distance from the LCFS. The vacuum, 1% and 2% cases of the record were computed on a Linux x86_64 CPU, the 4 kA case on an Apple M3 Max CPU; rerunning the command without --record reproduces these bytes (checked twice with cmp)."
     },
     {
+      "path": "docs/_static/figures/readme_exterior_field.webp",
+      "sha256": "58550b475821eb0a8d81bcaa7abe2611da3126d1c3c15191eb50e63686d9df14",
+      "bytes": 37342,
+      "generator": "docs/_static/figures/sources/make_exterior_field_figure.py",
+      "command": "python docs/_static/figures/sources/make_exterior_field_figure.py",
+      "inputs": [
+        "benchmarks/exterior_field_figure.npz",
+        "examples/data/input.nfp2_QA_finite_beta"
+      ],
+      "record": "benchmarks/exterior_field_figure.npz",
+      "generated": "2026-11-11",
+      "hardware": "Linux x86_64 Intel Xeon W-2295 CPU (record); Apple M3 Max, CPU (drawing)",
+      "reproducible": "command",
+      "bytes_verified": true,
+      "used_in": [
+        "README.md",
+        "docs/tutorials/exterior-field.md"
+      ],
+      "note": "Drawn from benchmarks/exterior_field_figure.npz, which the script writes with --record (parts accuracy, map, gradient, mirror) from the NFP=2 finite-beta QA deck in examples/data. (a) Error of VmecExtender against an axis-filament field on the solved QA boundary, 32/64/96 source samples per period, 17 distances from 1e-4 to 1 minor radius, worst of three points. (b) Plasma field outside the LCFS at phi = 0. (c) B_vjp against central differences of re-solved equilibria, steps 1e-3 and 1e-4. (d) Plasma field outside the fixed-boundary mirror of examples/mirror/mirror_exterior_field.py (ns=11, elements=10), with RK4 field lines. Record from a Linux x86_64 CPU with virtual-casing-jax a2590b1, reproducible to round-off; the command without --record reproduces these bytes (checked twice with cmp)."
+    },
+    {
       "path": "docs/_static/figures/extender_vacuum_islands.webp",
       "sha256": "4d634852afdc38ca3ff5a41a8c3f59bf0dd55faf44a1c3707bce41fb46f83009",
       "bytes": 13768,

@@ -25,8 +25,8 @@ Free-boundary routing (``LFREEB = T``):
   console output (``In VACUUM`` block, ``VACUUM PRESSURE TURNED ON`` banner)
   and free-boundary wout metadata (``nextcur``/``extcur``/``curlabel``/
   ``mgrid_mode``);
-- a missing mgrid file falls back to a fixed-boundary solve with a warning
-  (retained VMEC2000 behavior);
+- a missing mgrid file is an input error (exit code 5), as in STELLOPT's VMEC:
+  a free-boundary deck never silently runs as a fixed-boundary one;
 - ``MGRID_FILE = 'DIRECT_COILS'`` (or the ``--coils`` flag) builds the external
   field from an ESSOS coils file (``essos.coils.Coils``): the Biot-Savart field
   is tabulated directly into an in-memory
@@ -435,10 +435,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--prefetch-compile",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=True,
         help=(
-            "Overlap compilation of the next multigrid rung (default: off "
-            "to bound peak memory)."
+            "Overlap compilation of the next multigrid rung (default: on; "
+            "--no-prefetch-compile lowers peak memory)."
         ),
     )
     p.add_argument(
@@ -712,12 +712,12 @@ def _coils_mgrid_field(path: Path, *, nr: int = 96, nphi: int = 32,
 
 
 def _free_boundary_plan(args, inp, input_path: Path, *, emit):
-    """Free-boundary routing policy (``None`` -> fixed-boundary solve).
+    """Free-boundary routing policy (``None`` -> fixed-boundary solve, for LFREEB = F).
 
     - readable mgrid -> :class:`_FreeBoundaryPlan` with ``mgrid_path`` and
       the wout coil metadata (``nextcur``/``extcur``/``curlabel``/
       ``mgrid_mode``) read from the file;
-    - missing mgrid -> warning + fixed-boundary fallback (VMEC2000 policy);
+    - missing mgrid -> :class:`VmecInputError`;
     - ``--coils`` / ``MGRID_FILE = 'DIRECT_COILS'`` -> plan with
       ``external_field`` from :func:`_coils_mgrid_field` (``nextcur = 0``: the
       coil currents live in the coils file, not in EXTCUR).
@@ -757,11 +757,10 @@ def _free_boundary_plan(args, inp, input_path: Path, *, emit):
     if not mgrid.is_absolute():
         mgrid = (input_path.parent / mgrid).resolve()
     if not mgrid.exists():
-        emit(
-            f" WARNING: mgrid file not found: {mgrid}\n"
-            "          proceeding with a FIXED-BOUNDARY solve (VMEC2000 fallback)."
+        raise VmecInputError(
+            WERROR_MESSAGES[INPUT_ERROR_FLAG],
+            hint=f"mgrid file not found: {mgrid}",
         )
-        return None
 
     from .mgrid import deck_extcur, read_mgrid
 
@@ -931,7 +930,7 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
             raise_on_max_iterations=False,
             device=None if args.device == "none" else args.device,
             release_stage_cache=True,
-            # Opt-in cold-run overlap; the library default is also False.
+            # Cold-run overlap; the library default stays False.
             prefetch_compile=bool(args.prefetch_compile),
             jacobian_retries=int(args.jacobian_retries),
             **freeb_plan.solver_kwargs,
