@@ -1440,7 +1440,8 @@ class VmecExtender(MagneticField):
         direct path.  The attribute may also be set after construction.
     graded_nodes:
         ``(poloidal, toroidal)`` node counts of the graded rule over the full
-        torus; ``None`` takes the finest schedule level.
+        torus; ``None`` takes twice the finest schedule level, and at least
+        ``(256, 512)``.
     """
 
     def __init__(
@@ -1742,8 +1743,6 @@ class VmecExtender(MagneticField):
         schedule = levels or ((full, ntheta), (2 * full, 2 * ntheta))
         config = vc.ExteriorFieldConfig(
             digits=digits,
-            src_nphi=nphi,
-            src_ntheta=ntheta,
             levels=schedule,
             chunk_size=chunk_size,
             target_chunk_size=target_chunk_size,
