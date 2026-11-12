@@ -35,9 +35,8 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# most residual evaluations each stage may spend. A stage still lowering its
-# cost keeps going, so a start far from the optimum finishes its stage, and a
-# stage that stalls (three accepted iterations improve the cost by < 2 %) stops:
+# most residual evaluations each stage may spend. opt.StallStop ends a stage
+# whose cost falls by less than 2 % over three accepted iterations:
 MAX_MODES = [1, 2]
 MAX_NFEV = [20, 30]
 
@@ -153,20 +152,12 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
     step = PARAMETER_STEP * stage.scales
-    costs = []
-
-    def stop_when_stalled(intermediate_result):
-        monitor(intermediate_result)
-        costs.append(intermediate_result.cost)
-        if len(costs) >= max(4, max_nfev // 4) and costs[-4] - costs[-1] < 0.02 * costs[-4]:
-            raise StopIteration
-
     result = least_squares(
         stage.residual, stage.x0, jac=stage.residual_jac,
         x_scale=step, max_nfev=max_nfev,
         bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
                 stage.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=stop_when_stalled)
+        ftol=1e-6, xtol=1e-10, verbose=2, callback=opt.StallStop(monitor, min_iterations=max_nfev // 4))
     x = stage.embed(result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)

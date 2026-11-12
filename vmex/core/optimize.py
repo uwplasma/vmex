@@ -134,7 +134,7 @@ from .statephysics import (
 )
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
-from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
+from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop
 
 __all__ = [
     "report_targets",
@@ -144,6 +144,7 @@ __all__ = [
     "EquilibriumReporter",
     "OptimizationMonitor",
     "OptimizationRecord",
+    "StallStop",
     "make_problem",
     "Equilibrium",
     "solve_equilibrium",
