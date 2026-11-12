@@ -157,6 +157,7 @@ __all__ = [
     "at_least",
     "at_most",
     "between",
+    "stability_terms",
     "soft_min_abs_iota",
     "edge_iota",
     "iota_edge",
@@ -831,6 +832,39 @@ def at_most(upper: Any) -> Band:
 def between(lower: Any, upper: Any) -> Band:
     """Target ``lower <= value <= upper``."""
     return Band(lower, upper)
+
+
+def stability_terms(
+    inp: VmecInput,
+    *,
+    margin: float = 0.0,
+    weight: float = 1.0,
+    from_s: float = 0.0,
+    edge_factor: float = 1.0,
+) -> list[tuple[Callable, Band, np.ndarray]]:
+    """Mercier and resistive-interchange stability limits as two objective tuples.
+
+    VMEC's ``DMerc`` and ``D_R`` scale as ``PHIEDGE**-2``, so the rows act on
+    the dimensionless ``PHIEDGE**2 * DMerc >= margin`` and
+    ``PHIEDGE**2 * D_R <= -margin`` on the interior surfaces of the last grid of
+    ``inp`` (the axis, the first surface and the edge are excluded).  Surfaces
+    inward of ``from_s`` carry no weight, where the criteria follow the radial
+    grid more than the configuration; the weight rises as
+    ``1 + (edge_factor - 1) * s**4`` toward the edge.  Multiply the weights by a
+    stage factor to bring the rows in gradually.  Call it once per run and reuse
+    the list, so that every stage shares one compiled objective.
+    """
+    phi2 = float(inp.phiedge) ** 2
+    s = np.linspace(0.0, 1.0, int(np.asarray(inp.ns_array)[-1]))[2:-1]
+    weights = np.where(s >= from_s, weight * (1.0 + (edge_factor - 1.0) * s**4), 0.0)
+
+    def mercier(state: SpectralState, rt: SolverRuntime) -> Array:
+        return phi2 * d_merc_state(state, rt)[2:-1]
+
+    def resistive(state: SpectralState, rt: SolverRuntime) -> Array:
+        return phi2 * glasser_d_r_state(state, rt, shear_epsilon=1.0e-8)[2:-1]
+
+    return [(mercier, at_least(margin), weights), (resistive, at_most(-margin), weights)]
 
 
 def _gap(value: Any, target: Any) -> Any:

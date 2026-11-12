@@ -96,6 +96,15 @@ Choose a weight large enough that a violation costs more than the gain in the
 main objective, and set the bound slightly inside the real requirement so
 the optimum does not rest exactly on it.
 
+Stability limits are the same construction applied to the Mercier and
+resistive-interchange profiles.  :func:`~vmex.core.optimize.stability_terms`
+returns both tuples, acting on ``PHIEDGE**2 * DMerc >= margin`` and
+``PHIEDGE**2 * D_R <= -margin`` (the criteria scale as ``PHIEDGE**-2``) with a
+radial weight that is zero inward of ``from_s`` and rises toward the edge::
+
+    stability = opt.stability_terms(inp, margin=1e-3, weight=1e4, from_s=0.5, edge_factor=4.0)
+    terms = qs_terms + [(f, band, stage_scale * w) for f, band, w in stability]
+
 Quasisymmetry
 -------------
 

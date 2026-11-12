@@ -308,6 +308,26 @@ def test_band_is_zero_inside_and_the_distance_outside(solovev_eq):
     assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
 
 
+def test_stability_terms_match_the_stability_residuals(solovev_eq):
+    """The two tuples reproduce the PHIEDGE-scaled hinge rows of the stability residuals."""
+    eq = solovev_eq
+    state, rt = eq.state, eq.runtime
+    dmerc = np.asarray(opt.d_merc_state(state, rt))[2:-1]
+    inp = SimpleNamespace(phiedge=1.7, ns_array=[dmerc.size + 3])
+    margin = 2.0 * float(np.abs(1.7**2 * dmerc).max())
+    terms = opt.stability_terms(inp, margin=margin, weight=9.0, from_s=0.3, edge_factor=3.0)
+    s = np.linspace(0.0, 1.0, dmerc.size + 3)[2:-1]
+    weights = np.where(s >= 0.3, 9.0 * (1.0 + 2.0 * s**4), 0.0)
+    reference = [
+        1.7**2 * opt.mercier_stability_residual(state, rt, margin=margin / 1.7**2, smoothing=1e-12),
+        1.7**2 * opt.glasser_stability_residual(state, rt, margin=margin / 1.7**2, smoothing=1e-12)]
+    for (fun, band, weight), expected in zip(terms, reference):
+        np.testing.assert_array_equal(weight, weights)
+        rows = np.sqrt(weight) * np.asarray(band(fun(state, rt)))
+        np.testing.assert_allclose(rows, np.sqrt(weights) * np.asarray(expected), atol=1e-10)
+        assert np.any(rows > 0.0)
+
+
 @pytest.mark.parametrize("jac", [None, "implicit"])
 def test_band_target_matches_a_hand_written_one_sided_term(jac):
     """A band target takes the same optimizer steps as the equivalent excess function.
