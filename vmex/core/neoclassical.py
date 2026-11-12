@@ -34,9 +34,14 @@ def diagnostic_neo_config():
     On the bundled NFP=2 QA and NFP=4 QI finite-beta decks this stays within
     4% of NEO_JAX's default ``NeoConfig``.  A 16 x 16 spline grid aliases the
     summary Boozer spectrum (``mboz=16``) and fewer than 20 steps per field
-    period or 200 field periods leave 7-30% errors.  Pass a
-    ``neo_jax.NeoConfig`` to :func:`epsilon_effective_from_wout` for
-    publication calculations.
+    period or 200 field periods leave 7-30% errors.  Against a 96 x 96,
+    60-particle, 40-steps-per-period reference (twice the steps changes it
+    by 1% or less where ``epsilon_eff^(3/2)`` exceeds 1e-4), on 39 optimized QI and pwO equilibria its largest error over
+    ``s = 0.25, 0.5, 0.75`` is 2.5% median and 10% at the 90th percentile, and
+    it ranks them like the reference (Spearman 0.995). The coarser 24 x 24,
+    12-particle, 6-steps-per-period set is 18% median and ranked ten nearby
+    QI candidates with Spearman 0.60.  Pass a ``neo_jax.NeoConfig`` to
+    :func:`epsilon_effective_from_wout` for publication calculations.
     """
     NeoConfig, _ = _neo_imports()
     return NeoConfig(

@@ -78,8 +78,8 @@ ACTION_MBOZ = 10
 #                 max_wells=24, quadrature_order=32)
 
 # NEO_JAX controls for the hard effective-ripple validation:
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+NEO_CONFIG_ARGS = dict(theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+                       nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
                        max_rational_field_periods=100000)
 
 # Step control:

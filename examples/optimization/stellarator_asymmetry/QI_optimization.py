@@ -82,8 +82,8 @@ FINAL_NITER = 20000
 # Flux surfaces and NEO controls of the closing epsilon_eff diagnostic, the
 # compact set of examples/epsilon_effective.py:
 EPS_EFF_SURFACES = np.array([0.25, 0.5, 0.75])
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+NEO_CONFIG_ARGS = dict(theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+                       nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
                        max_rational_field_periods=100000)
 
 # Every output file name contains this; each stage also writes its own
