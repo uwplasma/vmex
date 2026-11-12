@@ -218,7 +218,9 @@ that research budget as one commented set of constants next to the default.
 - `mirror/mirror_fixed_boundary_nonaxisymmetric.py` compares axisymmetric and
   rotating-ellipse fixed-boundary mirrors; `mirror/mirror_free_boundary_beta_scan.py`
   continues a solved ESSOS-coil free boundary through 80% central beta and
-  compares its on-axis field with `sqrt(1-beta)`.
+  compares its on-axis field with `sqrt(1-beta)`; `mirror/mirror_exterior_field.py`
+  evaluates the plasma field outside a fixed-boundary mirror from its boundary
+  and end-plane field (needs `virtual_casing_jax.mirror`) and traces field lines.
 - `data/`: bundled input decks and small checked-in fixtures.
 - `data/single_grid/`: fixed-boundary single-grid benchmark inputs and optional
   fetched reference assets.
