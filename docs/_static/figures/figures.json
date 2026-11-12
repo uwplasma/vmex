@@ -119,42 +119,42 @@
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_qa.webp",
-      "sha256": "9ada42344111615999772c48508a8fc7fa5cfd1cfce5c96c66b96705038920a9",
-      "bytes": 133764,
+      "sha256": "3a4cbe21eaf97d3bb432982b7c7f9b55fbb33da3033bf9b01eac874ce7f932f5",
+      "bytes": 134868,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
         "examples/data/input.nfp2_QA_finite_beta"
       ],
       "record": "docs/_static/figures/readme_diagnostics.json",
-      "generated": "2026-09-23",
-      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "generated": "2026-11-12",
+      "hardware": "Intel Xeon W-2295 (x86_64), Linux, CPU",
       "reproducible": "command",
-      "bytes_verified": true,
+      "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "The `vmex examples/data/input.nfp2_QA_finite_beta --plot` summary panel, rendered with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple) and the DESC-normalized force panel (bootstrap <J.B> on its right axis), and downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
+      "note": "The `vmex examples/data/input.nfp2_QA_finite_beta --plot` summary panel, rendered with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple) and the DESC-normalized force panel (bootstrap <J.B> on its right axis), and downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-11-12 with the filled-contour second-adiabatic-invariant panel; the generator steps the webp quality down from 75 until the file is at most 135000 bytes. Not yet reproduced by a second run."
     },
     {
       "path": "docs/_static/figures/readme_diagnostics_summary.webp",
-      "sha256": "387923eac854ec067f9f419ab9602ad55404d112fa9e0ef848ada163f14de2f3",
-      "bytes": 172406,
+      "sha256": "5a48141ec9a8a2de5868ad59bed9b4e4c6b152f96a30cc99b9a926d1763fe0bf",
+      "bytes": 133234,
       "generator": "docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "command": "python docs/_static/figures/sources/make_readme_diagnostics_figures.py",
       "inputs": [
         "examples/data/input.nfp4_QI_finite_beta"
       ],
       "record": "docs/_static/figures/readme_diagnostics.json",
-      "generated": "2026-09-23",
-      "hardware": "Apple M3 Max (arm64), macOS 23.4, CPU",
+      "generated": "2026-11-12",
+      "hardware": "Intel Xeon W-2295 (x86_64), Linux, CPU",
       "reproducible": "command",
-      "bytes_verified": true,
+      "bytes_verified": false,
       "used_in": [
         "README.md",
         "docs/explanation/validation.md"
       ],
-      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. Re-rendered on 2026-09-14 as the `vmex examples/data/input.nfp4_QI_finite_beta --plot` summary panel with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple), the DESC-normalized force panel (bootstrap <J.B> on its right axis) and D_R reconstructed on the solver grid, downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars the validation page quotes, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-09-23 after <J.B> moved from the iota panel to the force panel; a second run reproduced the bytes."
+      "note": "Regenerated from a bundled deck in 2026-09; the figure it replaced had no generator and no recorded input. Re-rendered on 2026-09-14 as the `vmex examples/data/input.nfp4_QI_finite_beta --plot` summary panel with the vmex[neoclassical] extra (NEO_JAX, so the pressure panel carries effective ripple), the DESC-normalized force panel (bootstrap <J.B> on its right axis) and D_R reconstructed on the solver grid, downsampled to 1760 px webp. The record file carries the deck hash, the solved scalars the validation page quotes, the equivalent CLI command, and the run's commit and versions. Re-rendered on 2026-11-12 with the filled-contour second-adiabatic-invariant panel; the generator steps the webp quality down from 75 until the file is at most 135000 bytes. Not yet reproduced by a second run."
     },
     {
       "path": "docs/_static/figures/readme_equilibrium_showcase.webp",
