@@ -1412,6 +1412,11 @@ def _dof_modes(inp: VmecInput, max_mode: int) -> list[tuple[int, int]]:
     return out
 
 
+#: Boundary Fourier families in packing order; the first two for a
+#: stellarator-symmetric boundary, all four when ``inp.lasym``.
+_BOUNDARY_FAMILIES = ("rbc", "zbs", "rbs", "zbc")
+
+
 def _n_boundary_families(inp: VmecInput) -> int:
     """Packed boundary Fourier families: 2 (``rbc``/``zbs``) for a
     stellarator-symmetric boundary, 4 (``rbc``/``zbs``/``rbs``/``zbc``) when
@@ -1430,11 +1435,9 @@ def boundary_dof_names(
     families are appended (same ``(m, n)`` order as the symmetric block).
     """
     modes = _dof_modes(inp, max_mode)
-    names = ([f"RBC({n},{m})" for (m, n) in modes]
-             + [f"ZBS({n},{m})" for (m, n) in modes])
-    if bool(inp.lasym):
-        names += ([f"RBS({n},{m})" for (m, n) in modes]
-                  + [f"ZBC({n},{m})" for (m, n) in modes])
+    names = [f"{family.upper()}({n},{m})"
+             for family in _BOUNDARY_FAMILIES[:_n_boundary_families(inp)]
+             for (m, n) in modes]
     if vary_major_radius:
         names.append("RBC(0,0)")
     return names
@@ -1456,17 +1459,11 @@ def pack_boundary(
     """
     modes = _dof_modes(inp, max_mode)
     ntor = int(inp.ntor)
-    rbc = np.asarray(inp.rbc, dtype=float)
-    zbs = np.asarray(inp.zbs, dtype=float)
-    vals = ([rbc[n + ntor, m] for (m, n) in modes]
-            + [zbs[n + ntor, m] for (m, n) in modes])
-    if bool(inp.lasym):
-        rbs = np.asarray(inp.rbs, dtype=float)
-        zbc = np.asarray(inp.zbc, dtype=float)
-        vals += ([rbs[n + ntor, m] for (m, n) in modes]
-                 + [zbc[n + ntor, m] for (m, n) in modes])
+    vals = [np.asarray(getattr(inp, family), dtype=float)[n + ntor, m]
+            for family in _BOUNDARY_FAMILIES[:_n_boundary_families(inp)]
+            for (m, n) in modes]
     if vary_major_radius:
-        vals.append(rbc[ntor, 0])
+        vals.append(np.asarray(inp.rbc, dtype=float)[ntor, 0])
     return np.asarray(vals, dtype=float)
 
 
@@ -1489,15 +1486,11 @@ def boundary_arrays_from_x(
         raise ValueError(f"expected {expected} boundary dofs, got {x.shape[0]}")
     rows = jnp.asarray([n + ntor for m, n in modes])
     columns = jnp.asarray([m for m, n in modes])
-    rbc = jnp.asarray(inp.rbc).at[rows, columns].set(x[:nm])
-    zbs = jnp.asarray(inp.zbs).at[rows, columns].set(x[nm:2 * nm])
+    arrays = [jnp.asarray(getattr(inp, family)).at[rows, columns].set(x[i * nm:(i + 1) * nm])
+              for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam])]
     if vary_major_radius:
-        rbc = rbc.at[ntor, 0].set(x[nfam * nm])
-    if not bool(inp.lasym):
-        return rbc, zbs
-    rbs = jnp.asarray(inp.rbs).at[rows, columns].set(x[2 * nm:3 * nm])
-    zbc = jnp.asarray(inp.zbc).at[rows, columns].set(x[3 * nm:4 * nm])
-    return rbc, zbs, rbs, zbc
+        arrays[0] = arrays[0].at[ntor, 0].set(x[nfam * nm])
+    return tuple(arrays)
 
 
 def unpack_boundary(
@@ -1516,21 +1509,14 @@ def unpack_boundary(
     if x.size != expected:
         raise ValueError(f"expected {expected} dofs, got {x.size}")
     ntor = int(inp.ntor)
-    rbc = np.array(inp.rbc, dtype=float, copy=True)
-    zbs = np.array(inp.zbs, dtype=float, copy=True)
-    for k, (m, n) in enumerate(modes):
-        rbc[n + ntor, m] = x[k]
-        zbs[n + ntor, m] = x[nm + k]
+    arrays = {}
+    for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam]):
+        arrays[family] = np.array(getattr(inp, family), dtype=float, copy=True)
+        for k, (m, n) in enumerate(modes):
+            arrays[family][n + ntor, m] = x[i * nm + k]
     if vary_major_radius:
-        rbc[ntor, 0] = x[nfam * nm]
-    if not bool(inp.lasym):
-        return dataclasses.replace(inp, rbc=rbc, zbs=zbs)
-    rbs = np.array(inp.rbs, dtype=float, copy=True)
-    zbc = np.array(inp.zbc, dtype=float, copy=True)
-    for k, (m, n) in enumerate(modes):
-        rbs[n + ntor, m] = x[2 * nm + k]
-        zbc[n + ntor, m] = x[3 * nm + k]
-    return dataclasses.replace(inp, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc)
+        arrays["rbc"][ntor, 0] = x[nfam * nm]
+    return dataclasses.replace(inp, **arrays)
 
 
 #: curtor dof storage scale (dof = CURTOR/1e6, i.e. MA) — keeps the trust
@@ -1714,6 +1700,63 @@ def _ess_scale(
     return np.exp(-alpha * levels) / np.exp(-alpha)
 
 
+class _Dofs:
+    """Decision-vector layout of one optimization stage.
+
+    The boundary Fourier block (:func:`pack_boundary`), the optional
+    ``RBC(0,0)`` entry, and the optional trailing ``AC``/``CURTOR`` block
+    (:func:`_current_dof_setup`); every driver packs, unpacks, names and
+    scales its vector through this one object.
+    """
+
+    def __init__(self, inp: VmecInput, max_mode: int, vary_major_radius: bool,
+                 current_dofs: int | None):
+        self.inp, self.max_mode = inp, int(max_mode)
+        self.vary_major_radius = bool(vary_major_radius)
+        self.k, self.ac_scale = _current_dof_setup(inp, current_dofs)
+        self.nboundary = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
+                          + int(vary_major_radius))
+        self.ndof = self.nboundary + (self.k + 1 if self.k else 0)
+
+    def pack(self, source: VmecInput | None = None) -> np.ndarray:
+        """Decision vector of ``source`` (default: the stage input)."""
+        source = self.inp if source is None else source
+        x = pack_boundary(source, self.max_mode, vary_major_radius=self.vary_major_radius)
+        if self.k:
+            x = np.concatenate([x, _pack_current(source, self.k, self.ac_scale)])
+        return x
+
+    def unpack(self, x) -> VmecInput:
+        """Stage input with the decision vector ``x`` applied."""
+        x = np.asarray(x)
+        result = unpack_boundary(self.inp, x[:self.nboundary], self.max_mode,
+                                 vary_major_radius=self.vary_major_radius)
+        if self.k:
+            result = _apply_current(result, x[self.nboundary:], self.k, self.ac_scale)
+        return result
+
+    def boundary_arrays(self, x) -> tuple[Array, ...]:
+        """Traceable boundary arrays of the leading boundary block of ``x``."""
+        return boundary_arrays_from_x(self.inp, x[:self.nboundary], self.max_mode,
+                                      vary_major_radius=self.vary_major_radius)
+
+    def names(self) -> list[str]:
+        """Labels in packing order."""
+        names = boundary_dof_names(self.inp, self.max_mode,
+                                   vary_major_radius=self.vary_major_radius)
+        if self.k:
+            label = "AC_AUX_F" if _current_uses_spline(self.inp) else "AC"
+            names += [f"{label}({j})/{self.ac_scale:.6g}" for j in range(self.k)]
+            names.append("CURTOR/1e6")
+        return names
+
+    def ess_scales(self, alpha: float) -> np.ndarray:
+        """ESS trust-region scales; current dofs are O(1) by construction."""
+        scales = _ess_scale(self.inp, self.max_mode, float(alpha),
+                            vary_major_radius=self.vary_major_radius)
+        return np.concatenate([scales, np.ones(self.k + 1)]) if self.k else scales
+
+
 _IMPLICIT_JACOBIAN_METHODS = {
     "auto": "auto",
     "block_tridiagonal": "block",
@@ -1755,31 +1798,10 @@ def _make_finite_difference_problem(
 
     if weight_semantics not in ("cost", "residual"):
         raise ValueError("weight_semantics must be 'cost' or 'residual'")
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-    nboundary = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
-                 + int(vary_major_radius))
-    if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    x0 = np.asarray(x0, dtype=float)
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    x0 = np.asarray(dofs.pack() if x0 is None else x0, dtype=float)
     solve_kwargs.setdefault("device", device)
-
-    def input_from_x(x: np.ndarray) -> VmecInput:
-        result = unpack_boundary(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            result = _apply_current(
-                result, np.asarray(x)[nboundary:], k_cur, ac_scale
-            )
-        return result
-
-    def x_from_input(source: VmecInput) -> np.ndarray:
-        x = pack_boundary(source, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x = np.concatenate([x, _pack_current(source, k_cur, ac_scale)])
-        return x
+    input_from_x, x_from_input = dofs.unpack, dofs.pack
 
     holder: dict[str, Any] = {
         "cache": None,
@@ -1864,32 +1886,20 @@ def _make_finite_difference_problem(
         "rel_step": fd_rel_step,
         "workers": workers,
     }
-    names = list(boundary_dof_names(
-        inp, max_mode, vary_major_radius=vary_major_radius))
-    if k_cur:
-        label = "AC_AUX_F" if _current_uses_spline(inp) else "AC"
-        names.extend([f"{label}({j})/{ac_scale:.6g}" for j in range(k_cur)])
-        names.append("CURTOR/1e6")
-    scales = _ess_scale(
-        inp, max_mode, float(ess_alpha),
-        vary_major_radius=vary_major_radius) if use_ess else None
-    if scales is not None and k_cur:
-        scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    scales = dofs.ess_scales(ess_alpha) if use_ess else None
     starts = np.cumsum([0] + ([] if initial_parts is None else [p.size for p in initial_parts]))
     term_slices = tuple(
         (_term_name(function), int(starts[j]), int(starts[j + 1]))
         for j, (function, _target, _weight) in enumerate(objective_terms)
     )
     common = dict(
-        names=names,
+        names=dofs.names(),
         bounds=bounds,
         scales=scales,
         input_from_x=input_from_x,
         x_from_input=x_from_input,
         equilibrium_from_x=equilibrium,
-        boundary_from_x=lambda x: boundary_arrays_from_x(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius),
+        boundary_from_x=lambda x: dofs.boundary_arrays(np.asarray(x)),
         metadata={
             "derivative_method": "finite_difference",
             "derivative_description": (
@@ -2133,12 +2143,8 @@ def make_problem(
             f"got {implicit_jacobian_method!r}"
         ) from exc
     max_mode = int(max_mode)
-    scales = _ess_scale(
-        inp, max_mode, float(ess_alpha),
-        vary_major_radius=vary_major_radius) if use_ess else None
-    k_cur, _ = _current_dof_setup(inp, current_dofs)
-    if scales is not None and k_cur:
-        scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    scales = dofs.ess_scales(ess_alpha) if use_ess else None
     problem = _run_with_progress(
         lambda: _least_squares_implicit(
             list(objective_terms or ()),
@@ -2189,6 +2195,27 @@ def make_problem(
     problem.metadata["max_fsq_ratio"] = float(max_fsq_ratio)
     problem.metadata["refine_tol"] = float(refine_tol)
     return problem
+
+
+def _max_mode_schedule(max_mode: int | Sequence[int]) -> list[int]:
+    """``max_mode`` as a list of stage values."""
+    return [int(max_mode)] if np.isscalar(max_mode) else [int(m) for m in max_mode]
+
+
+def _run_stages(solve: Callable, inp: VmecInput, modes: list[int], x0) -> Any:
+    """Chain ``solve(stage_input, mode)`` along an increasing ``max_mode`` schedule.
+
+    Each stage starts from the previous stage's optimized input; the last
+    result gains ``stage_results``.
+    """
+    if x0 is not None:
+        raise ValueError("x0 cannot be combined with a max_mode schedule")
+    results, current = [], inp
+    for mode in modes:
+        results.append(solve(current, mode))
+        current = results[-1].input
+    results[-1].stage_results = results
+    return results[-1]
 
 
 def least_squares(
@@ -2334,44 +2361,25 @@ def least_squares(
 
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
 
-    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
-                      else [int(m) for m in max_mode])
-    if len(modes_schedule) > 1:
-        if x0 is not None:
-            raise ValueError("x0 cannot be combined with a max_mode schedule")
-        stage_results = []
-        current = inp
-        result = None
-        for mm in modes_schedule:
-            result = least_squares(
-                objective_terms, current, max_mode=mm,
-                vary_major_radius=vary_major_radius,
-                current_dofs=current_dofs, jac=jac,
-                jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
-                adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
-                hot_restart=hot_restart,
-                warm_start=warm_start, use_ess=use_ess,
-                ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
-                verbose=verbose, **scipy_kwargs)
-            stage_results.append(result)
-            current = result.input
-        result.stage_results = stage_results
-        return result
-    max_mode = modes_schedule[0]
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-
-    def _ess_scale_full() -> np.ndarray:
-        scale = _ess_scale(
-            inp, max_mode, float(ess_alpha),
-            vary_major_radius=vary_major_radius)
-        if k_cur:  # current dofs are already O(1) by construction
-            scale = np.concatenate([scale, np.ones(k_cur + 1)])
-        return scale
+    modes = _max_mode_schedule(max_mode)
+    if len(modes) > 1:
+        return _run_stages(lambda current, mode: least_squares(
+            objective_terms, current, max_mode=mode,
+            vary_major_radius=vary_major_radius,
+            current_dofs=current_dofs, jac=jac,
+            jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
+            adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            hot_restart=hot_restart,
+            warm_start=warm_start, use_ess=use_ess,
+            ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
+            verbose=verbose, **scipy_kwargs), inp, modes, x0)
+    max_mode = modes[0]
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
 
     if jac == "implicit":
         if use_ess:
-            scipy_kwargs.setdefault("x_scale", _ess_scale_full())
+            scipy_kwargs.setdefault("x_scale", dofs.ess_scales(ess_alpha))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
             vary_major_radius=vary_major_radius,
@@ -2388,22 +2396,9 @@ def least_squares(
     solve_kwargs = dict(solve_kwargs or {})
     solve_kwargs.setdefault("device", device)
     if use_ess:
-        scipy_kwargs.setdefault("x_scale", _ess_scale_full())
+        scipy_kwargs.setdefault("x_scale", dofs.ess_scales(ess_alpha))
     if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    nb = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
-          + int(vary_major_radius))
-
-    def unpack_full(x: np.ndarray) -> VmecInput:
-        trial = unpack_boundary(
-            inp, np.asarray(x, dtype=float)[:nb], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            trial = _apply_current(trial, np.asarray(x, dtype=float)[nb:],
-                                   k_cur, ac_scale)
-        return trial
+        x0 = dofs.pack()
 
     state_holder: dict[str, Any] = {
         "hot": None,
@@ -2414,7 +2409,7 @@ def least_squares(
     single_stage = int(np.asarray(inp.ns_array).size) == 1
 
     def fun(x: np.ndarray) -> np.ndarray:
-        trial = unpack_full(x)
+        trial = dofs.unpack(np.asarray(x, dtype=float))
         try:
             seed = state_holder["hot"] if (hot_restart and single_stage) else None
             eq = solve_equilibrium(trial, initial_state=seed, **solve_kwargs)
@@ -2436,7 +2431,7 @@ def least_squares(
                                           jac="2-point",
                                           verbose=(2 if verbose else 0),
                                           **scipy_kwargs)
-    result.input = unpack_full(result.x)
+    result.input = dofs.unpack(result.x)
     result.equilibrium = state_holder["eq"]
     result.failed_trials = state_holder["failed_trials"]
     return result
@@ -2487,29 +2482,18 @@ def minimize(
     objective lanes; an unconverged adjoint is never returned as a gradient.
     """
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
-    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
-                      else [int(m) for m in max_mode])
-    if len(modes_schedule) > 1:
-        if x0 is not None:
-            raise ValueError("x0 cannot be combined with a max_mode schedule")
-        stage_results = []
-        current = inp
-        for mm in modes_schedule:
-            result = minimize(
-                objective_terms, current, max_mode=mm,
-                vary_major_radius=vary_major_radius,
-                current_dofs=current_dofs, hot_restart=hot_restart,
-                device=device, solve_kwargs=solve_kwargs, verbose=verbose,
-                method=method, adjoint_tol=adjoint_tol,
-                adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
-                refine_tol=refine_tol,
-                **scipy_kwargs)
-            stage_results.append(result)
-            current = result.input
-        result.stage_results = stage_results
-        return result
+    modes = _max_mode_schedule(max_mode)
+    if len(modes) > 1:
+        return _run_stages(lambda current, mode: minimize(
+            objective_terms, current, max_mode=mode,
+            vary_major_radius=vary_major_radius,
+            current_dofs=current_dofs, hot_restart=hot_restart,
+            device=device, solve_kwargs=solve_kwargs, verbose=verbose,
+            method=method, adjoint_tol=adjoint_tol,
+            adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
+            refine_tol=refine_tol, **scipy_kwargs), inp, modes, x0)
     return _least_squares_implicit(
-        objective_terms, inp, max_mode=modes_schedule[0], x0=x0,
+        objective_terms, inp, max_mode=modes[0], x0=x0,
         vary_major_radius=vary_major_radius,
         current_dofs=current_dofs, jac_solver="reverse",
         warm_start=("state" if hot_restart else None),
@@ -2784,9 +2768,8 @@ def _least_squares_implicit(
     # Optional AC/CURTOR dof block (spec 6.4): k + 1 trailing dofs, one-hot
     # tangents through ImplicitParams.ac / .curtor (runtime_from_params
     # already traces both).
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-    nboundary = nfam * nm + int(vary_major_radius)
-    ndof = nboundary + (k_cur + 1 if k_cur else 0)
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    k_cur, ac_scale, nboundary, ndof = dofs.k, dofs.ac_scale, dofs.nboundary, dofs.ndof
     # multigrid=True routes the host solve through solve_multigrid so
     # NITER-exhausted trials are penalized instead of raising (same trial
     # policy as the finite-difference path). Public problem/minimize defaults
@@ -2830,11 +2813,7 @@ def _least_squares_implicit(
     params0 = imp.params_from_input(inp, device=jac_device)
     imp._template_runtime(cfg)  # host-built template: warm the per-cfg cache
     # eagerly so runtime_from_params stays traceable under jit below
-    if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    x0 = np.asarray(x0, dtype=float)
+    x0 = np.asarray(dofs.pack() if x0 is None else x0, dtype=float)
 
     # Structural key of the jitted closures below: the canonical config
     # (structure only, see implicit._canonical_config), the term/loss
@@ -2860,11 +2839,8 @@ def _least_squares_implicit(
 
     def params_of(x: jnp.ndarray, data):
         params0 = data["params0"]
-        repl = dict(rbc=params0.rbc.at[row_idx, col_idx].set(x[:nm]),
-                    zbs=params0.zbs.at[row_idx, col_idx].set(x[nm:2 * nm]))
-        if lasym:  # non-symmetric families [rbs..., zbc...] (see pack_boundary)
-            repl["rbs"] = params0.rbs.at[row_idx, col_idx].set(x[2 * nm:3 * nm])
-            repl["zbc"] = params0.zbc.at[row_idx, col_idx].set(x[3 * nm:4 * nm])
+        repl = {family: getattr(params0, family).at[row_idx, col_idx].set(x[i * nm:(i + 1) * nm])
+                for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam])}
         if vary_major_radius:
             repl["rbc"] = repl["rbc"].at[ntor, 0].set(x[nfam * nm])
         params = dataclasses.replace(params0, **repl)
@@ -3707,22 +3683,7 @@ def _least_squares_implicit(
             return failure_value_and_gradient(xh)[0]
         return value
 
-    def input_from_x(x: np.ndarray) -> VmecInput:
-        result_input = unpack_boundary(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            result_input = _apply_current(
-                result_input, np.asarray(x)[nboundary:], k_cur, ac_scale
-            )
-        return result_input
-
-    def x_from_input(source: VmecInput) -> np.ndarray:
-        x = pack_boundary(
-            source, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x = np.concatenate([x, _pack_current(source, k_cur, ac_scale)])
-        return x
+    input_from_x, x_from_input = dofs.unpack, dofs.pack
 
     def equilibrium_from_x(
         x: np.ndarray, *, newton_iterations: int = 10
@@ -3931,12 +3892,7 @@ def _least_squares_implicit(
 
     if return_problem:
         jax_jac_public = jax_residual_jacobian
-        names = list(boundary_dof_names(
-            inp, max_mode, vary_major_radius=vary_major_radius))
-        if k_cur:
-            label = "AC_AUX_F" if _current_uses_spline(inp) else "AC"
-            names.extend([f"{label}({j})/{ac_scale:.6g}" for j in range(k_cur)])
-            names.append("CURTOR/1e6")
+        names = dofs.names()
         scales = (
             np.ones_like(np.asarray(x0, dtype=float))
             if problem_scales is None else np.asarray(problem_scales, dtype=float)
@@ -3967,9 +3923,7 @@ def _least_squares_implicit(
             input_from_x=input_from_x,
             x_from_input=x_from_input,
             equilibrium_from_x=equilibrium_from_x,
-            boundary_from_x=lambda x: boundary_arrays_from_x(
-                inp, x[:nboundary], max_mode,
-                vary_major_radius=vary_major_radius),
+            boundary_from_x=dofs.boundary_arrays,
             metadata={
                 "derivative_method": "implicit",
                 "derivative_description": (
@@ -4022,12 +3976,7 @@ def _least_squares_implicit(
         result.cost = float(result.fun)
         result.optimality = float(np.linalg.norm(result.jac, ord=np.inf))
         result.monitor = monitor
-    result.input = unpack_boundary(
-        inp, result.x[:nboundary], max_mode,
-        vary_major_radius=vary_major_radius)
-    if k_cur:
-        result.input = _apply_current(result.input, result.x[nboundary:],
-                                      k_cur, ac_scale)
+    result.input = dofs.unpack(result.x)
     stats = imp._SOLVE_STATS.get(cfg)
     result.solve_stats = None if stats is None else dict(stats)
     result.failed_trials = holder["failed_trials"]
