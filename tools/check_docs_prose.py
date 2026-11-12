@@ -63,7 +63,7 @@ BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 797 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures, plus the two QI bootstrap figures (#629, 79 KB)
+BUDGET_TOTAL = 816 * 1024  # 569 KB (550 KB + the exterior-field figure script and its manifest row, 19 KB) + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures, plus the two QI bootstrap figures (#629, 79 KB)
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
@@ -84,6 +84,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_diagnostics_summary.webp",
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
+    "figures/readme_exterior_field.webp",
     "figures/readme_interior_field.webp",
     # Reproducible README comparison.
     "figures/readme_low_transport.webp",

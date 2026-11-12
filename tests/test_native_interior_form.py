@@ -440,6 +440,29 @@ def test_native_current_mode_ignores_the_unused_iota_profile():
     assert np.max(np.abs(np.asarray(first["chipf"]))) > 0
 
 
+def test_exterior_from_state_differentiates_the_net_current_through_runtime():
+    """The live-state exterior carries the profile parameters only via ``runtime``."""
+    import dataclasses
+
+    from vmex.core import implicit as im
+
+    inp, state, _ = _profile_export_case(ncurr=1)
+    config = im.make_config(inp, ns=7)
+    base = im.params_from_input(inp)
+    points = jnp.array([[4.2, 0.0, 0.1], [3.9, 0.2, -0.1]])
+
+    def exterior(curtor):
+        runtime = im.runtime_from_params(dataclasses.replace(base, curtor=curtor), config)
+        return ext.VmecExtender.from_state(
+            inp, state, runtime=runtime, nphi=8, ntheta=8, accuracy_check="off").B(points)
+
+    derivative = jax.jacfwd(exterior)(base.curtor)
+    step = 1.0
+    difference = (exterior(base.curtor + step) - exterior(base.curtor - step)) / (2 * step)
+    assert np.max(np.abs(np.asarray(derivative))) > 0
+    np.testing.assert_allclose(derivative, difference, rtol=1e-6, atol=1e-14)
+
+
 @pytest.mark.parametrize("flipped", [False, True])
 def test_prescribed_iota_export_retains_implicit_parameter_derivative(flipped):
     from dataclasses import replace

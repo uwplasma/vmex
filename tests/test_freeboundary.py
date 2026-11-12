@@ -827,22 +827,21 @@ def test_first_vacuum_update_warns_when_the_mgrid_circulation_disagrees_with_cto
     assert len(doubled) == 1 and "I_TOR MISMATCH" in doubled[0] and "TOROIDAL CURRENT" in doubled[0]
 
 
-def test_cli_missing_mgrid_fallback_warns(tmp_path):
-    """CLI policy: missing mgrid -> fixed-boundary fallback warning (VMEC2000)."""
+def test_cli_missing_mgrid_raises(tmp_path):
+    """CLI policy: missing mgrid is an input error, never a silent fixed-boundary run."""
     import types
 
+    import pytest
+
     from vmex.core.cli import _free_boundary_plan
+    from vmex.core.errors import VmecInputError
 
     deck = tmp_path / "input.cth_like_free_bdy_lasym_small"
     deck.write_text(DECK.read_text())  # mgrid deliberately NOT copied
     inp = VmecInput.from_file(deck)
-    messages: list[str] = []
-    args = types.SimpleNamespace(coils=None)
-    plan = _free_boundary_plan(args, inp, deck,
-                               emit=lambda s, **k: messages.append(str(s)))
-    assert plan is None  # fixed-boundary fallback
-    assert any("FIXED-BOUNDARY" in msg for msg in messages)
-    assert any("mgrid file not found" in msg for msg in messages)
+    with pytest.raises(VmecInputError) as caught:
+        _free_boundary_plan(types.SimpleNamespace(coils=None), inp, deck, emit=print)
+    assert "mgrid file not found" in caught.value.hint
 
 
 def test_boundary_outside_the_mgrid_box_warns_as_becoil_does():

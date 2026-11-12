@@ -2458,8 +2458,10 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             try:
                 with placement_neutral((carry, rt)):
                     executable = lane.executable(carry, rt)
-            except Exception:
-                pass
+            except Exception as error:
+                if "RESOURCE_EXHAUSTED" in str(error):
+                    raise  # out of memory: the on-demand lane would only fail the same way
+                # Any other lowering failure: the on-demand jitted lane below recompiles.
     # Committed arguments already fix placement, so keep the caller's
     # default-device context out of the lane's jit key: a construction solve
     # and trial solves run inside a device context then share one executable.
