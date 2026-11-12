@@ -1947,17 +1947,21 @@ class VmecExtender(MagneticField):
         target_chunk_size: int | str = "auto",
         accuracy_check: AccuracyCheck = "warn",
         project_current: bool = False,
+        runtime: Any = None,
     ) -> "VmecExtender":
         """Construct the differentiable finite-beta path from a live VMEX state.
 
         ``nphi``, ``ntheta`` and ``project_current`` behave exactly as in
         :meth:`from_wout`; pass the grid explicitly to override its default.
+        Pass the ``runtime`` that matches ``state`` when the profile parameters
+        are differentiated: without it the profiles are read from ``inp`` and
+        their direct dependence leaves the graph.
         """
         from . import virtual_casing as vc
 
         chosen = _source_nphi_for_digits(inp, digits)
         surface = vc.surface_field_data_from_state(
-            inp, state,
+            inp, state, runtime=runtime,
             nphi=chosen if nphi is None else nphi,
             ntheta=chosen if ntheta is None else ntheta,
             project_current=project_current,
