@@ -127,8 +127,13 @@ that research budget as one commented set of constants next to the default.
   target aspect ratio, brings beta to within 0.05 % (relative) of the target.
   The beta and aspect-ratio targets then agree, which a pressure calibrated at
   the seed's own aspect ratio does not. They include radially weighted Mercier
-  and resistive-interchange terms, and `QA_optimization_finite_beta.py` is the
-  least-squares counterpart of the QA one. Each of the eight scalar scripts is
+  and resistive-interchange terms. `QA_`, `QH_` and
+  `QP_optimization_finite_beta.py` are the least-squares counterparts:
+  `USE_WELL` and `USE_MERCIER` switch a magnetic-well floor and Mercier and
+  resistive-interchange hinges on the dimensionless PHIEDGE^2 DMerc and
+  PHIEDGE^2 D_R, and `STABILITY_SCALE` brings the stability rows in after the
+  quasisymmetric basin exists (from the first stage they overwhelm the
+  quasisymmetry rows). Each of the eight scalar scripts is
   self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.

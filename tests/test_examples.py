@@ -123,10 +123,12 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
+    "examples/optimization/QH_optimization_finite_beta.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
+    "examples/optimization/QP_optimization_finite_beta.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
@@ -670,6 +672,18 @@ def test_qa_finite_beta_least_squares_example_sets_beta_through_phiedge():
     assert "opt.glasser_stability_residual" in text
     assert "VmecProblem.from_tuples" in text
     assert "least_squares(" in text
+
+
+@pytest.mark.parametrize("case", ["QA", "QH", "QP"])
+def test_finite_beta_least_squares_examples_expose_the_row_toggles(case):
+    """The well and stability rows are switches, and stability enters after the basin."""
+    text = (EXAMPLES / "optimization" / f"{case}_optimization_finite_beta.py").read_text()
+    _assert_beta_from_toroidal_flux(text)
+    assert "USE_WELL = " in text and "USE_MERCIER = " in text
+    assert "opt.Hinge(opt.magnetic_well" in text and "opt.Hinge(opt.min_abs_iota" in text
+    assert "opt.mercier_stability_residual" in text and "opt.glasser_stability_residual" in text
+    scales = [float(v) for v in re.search(r"STABILITY_SCALE = \[([^\]]*)\]", text).group(1).split(",")]
+    assert scales[0] == 0.0 and scales[-1] == 1.0
 
 
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
