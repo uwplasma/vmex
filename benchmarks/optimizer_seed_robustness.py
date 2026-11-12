@@ -141,7 +141,7 @@ try:
 
         costs = []
 
-        def stop_when_stalled(intermediate_result, max_nfev=max_nfev):
+        def stop_when_stalled(intermediate_result):
             costs.append(intermediate_result.cost)
             if DRIVER == "new" and len(costs) >= max(4, max_nfev // 4) and costs[-4] - costs[-1] < 0.02 * costs[-4]:
                 raise StopIteration
