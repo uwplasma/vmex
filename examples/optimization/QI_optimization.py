@@ -29,10 +29,11 @@ from vmex.core.qi import ConstructedQIResidual
 
 # Seed: the circular torus of this field-period count, with these boundary
 # coefficients added, keyed (family, n, m). A rotating ellipse gives the torus
-# the first-order iota response it lacks. Amplitudes 0.03 to 0.07 all reach QI
-# 1.4e-3 to 1.6e-3, as does 0.05 with a 0.2 helical axis excursion
-# ("zbs", 1, 0); the opposite ellipse sign settles at aspect 12 with a mirror
-# ratio of 0.27, and a 0.1 axis excursion ends near 6e-3:
+# the first-order iota response it lacks. Amplitudes 0.03, 0.04, 0.05, 0.06 and
+# 0.07 reach QI 1.4e-3 to 1.6e-3, as does 0.05 with a 0.2 helical axis
+# excursion ("zbs", 1, 0). Amplitude 0.045 and a 0.1 axis excursion stop at
+# 5e-3 to 6e-3, and the opposite ellipse sign settles at aspect 12 with a
+# mirror ratio of 0.27:
 NFP = 2
 SEED_MODES = {("rbc", -1, 1): -0.05, ("zbs", -1, 1): 0.05}
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
