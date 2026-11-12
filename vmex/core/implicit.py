@@ -198,6 +198,8 @@ __all__ = [
     "make_config", "solve_implicit", "solve_implicit_status",
     "solve_implicit_with_aux",
     "implicit_state_tangent_multi_rhs", "implicit_state_pullback_multi_rhs", "run",
+    "implicit_state_tangent_raw_block",
+    "implicit_state_pullback_multi_rhs_raw_block_transpose",
     "measured_chunk_size",
     "mhd_energy", "plasma_volume", "aspect_ratio", "iota_profile",
     "iota_axis", "iota_edge", "edge_iota", "residual_fn",
@@ -3642,6 +3644,45 @@ def implicit_state_pullback_multi_rhs(
             solver=solver, active_fields=active_fields,
             probe_chunk_size=probe_chunk_size,
             response_chunk_size=response_chunk_size))
+
+
+def implicit_state_tangent_raw_block(
+    params: ImplicitParams,
+    cfg: ImplicitConfig,
+    x_star: SpectralState,
+    dof_mask: SpectralState,
+    param_tangent: ImplicitParams,
+    *,
+    probe_chunk_size: int = 1,
+) -> SpectralState:
+    """Single-direction view of the certified, batched raw-block response.
+
+    Retains the NEOPAX calling convention without a second implementation
+    of the factorization, residual or boundary-assembly derivative.
+    """
+    tangent_batch = jax.tree.map(lambda value: value[None], param_tangent)
+    states, report = implicit_state_tangent_multi_rhs(
+        params, cfg, x_star, dof_mask, tangent_batch,
+        probe_chunk_size=probe_chunk_size, response_chunk_size=1,
+    )
+    _raise_unconverged_rows(cfg, report, "block")
+    return jax.tree.map(lambda value: value[0], states)
+
+
+def implicit_state_pullback_multi_rhs_raw_block_transpose(
+    params: ImplicitParams,
+    cfg: ImplicitConfig,
+    x_star: SpectralState,
+    dof_mask: SpectralState,
+    gbar_batch: SpectralState,
+    *,
+    probe_chunk_size: int = 1,
+) -> ImplicitParams:
+    """NEOPAX-compatible view of the certified batched block transpose."""
+    return implicit_state_pullback_multi_rhs(
+        params, cfg, x_star, dof_mask, gbar_batch,
+        solver="block", probe_chunk_size=probe_chunk_size, response_chunk_size=1,
+    )
 
 
 def _block_state_pullback(

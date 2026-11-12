@@ -85,6 +85,8 @@ links to the module that documents it.
 
 - ``vmex.optimize`` — objectives + least-squares driver (module)
 - ``vmex.implicit`` — implicit differentiation of the equilibrium (module)
+- :func:`~vmex.core.omnigenity.j_invariant_qi_maxj_residual_from_boozer`
+  — the opt-in constructed-well J surrogate retained for NEOPAX
 - ``vmex.parallel`` — concurrent ensembles of independent solves (module)
 - :class:`~vmex.core.problem.VmecProblem` /
   :class:`~vmex.core.problem.FunctionProblem` /
@@ -230,6 +232,8 @@ _os.environ.setdefault("GLOG_minloglevel", "2")
 # Lazy public exports: name -> (module, attribute).  ``attribute=None``
 # exports the module itself.
 _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
+    "j_invariant_qi_maxj_residual_from_boozer": (
+        ".core.omnigenity", "j_invariant_qi_maxj_residual_from_boozer"),
     # input
     "VmecInput": (".core.input", "VmecInput"),
     # solvers
