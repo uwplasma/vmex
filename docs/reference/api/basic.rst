@@ -74,6 +74,28 @@ Optional neoclassical diagnostics
 .. automodule:: vmex.core.neoclassical
    :members:
 
+Optional helium-ash objective
+------------------------------
+
+Requires the optional residence API in `ESSOS #167
+<https://github.com/uwplasma/ESSOS/pull/167>`_. Given a callback
+``transport_response(state, runtime)`` returning the evaluator's SI keyword
+arguments, compose its positive cost with existing least-squares terms:
+
+.. code-block:: python
+
+   from vmex import optimize as opt
+
+   ash = opt.HeliumAshObjective(transport_response, reference_occupation_s,
+                                "D/V only; geometry, source and Er fixed")
+   rows = opt.residuals_from_tuples(state, runtime, [(ash, 0.0, 1.0)])
+
+The reference is fixed and positive. Derivatives cover only traced callback
+dependencies; physical acceptance needs independent qualification.
+
+.. automodule:: vmex.core.ash
+   :members:
+
 Optional alpha-particle tracing
 -------------------------------
 
