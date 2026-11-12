@@ -9,8 +9,8 @@ near-surface quadrature (``VmecExtender.with_graded_quadrature``), which keeps
 the virtual-casing field accurate a few millimetres off the boundary. The
 default traces the exterior lines for 100 m, which shows the workflow but not
 the exterior islands; the research settings trace them for the full length.
-Measured at commit 2ec4069b on a 36-core Linux workstation under load: about 12
-minutes, of which 8.5 are the exterior traces. The exterior traces still end at
+The default run takes about 12 minutes on a loaded 36-core Linux workstation,
+8.5 of them in the exterior traces. The exterior traces still end at
 a stopping distance, and a finite trace does not by itself establish magnetic
 topology.
 
@@ -57,7 +57,6 @@ NPHI, NTHETA, VC_DIGITS = 24, 24, 4
 # minutes, still slowing). The README figure uses the research settings, days
 # on a laptop:
 #   OUTSIDE_TRACE_LENGTH = TRACE_LENGTH; OUTSIDE_TOLERANCE = TRACE_TOLERANCE
-USE_GRADED_QUADRATURE = True
 GRADED_NODES = (64, 256)
 OUTSIDE_TRACE_LENGTH, OUTSIDE_TOLERANCE = 100.0, 1.0e-5
 TRACE_PROGRESS = True
@@ -114,9 +113,8 @@ alignment = (jnp.sum(interface.weights * jnp.sum(B_surface * surface_data.B_tota
 print(f"True boundary B.n/B: mean = {100 * float(jnp.sum(interface.weights * Bn_over_B)):.3f}%, "
       f"max = {100 * float(jnp.max(Bn_over_B)):.3f}%")
 print(f"Boundary field alignment = {float(alignment):.6f}")
-if USE_GRADED_QUADRATURE:
-    print("Switching the exterior plasma field to the graded near-surface quadrature...")
-    exterior = exterior.with_graded_quadrature(nodes=GRADED_NODES)
+print("Switching the exterior plasma field to the graded near-surface quadrature...")
+exterior = exterior.with_graded_quadrature(nodes=GRADED_NODES)
 coil_B_outside = coil_field(outside_xyz); total_B_outside = exterior.B(outside_xyz)
 plasma_fraction = jnp.linalg.norm(total_B_outside - coil_B_outside, axis=1) / jnp.linalg.norm(total_B_outside, axis=1)
 direction_difference = jnp.rad2deg(jnp.arccos(jnp.clip(jnp.sum(
