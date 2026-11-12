@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import scipy
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = sorted((ROOT / "examples").rglob("*.py"))
@@ -55,8 +54,6 @@ def test_example_calls_match_vmex_signatures(path):
 
 def test_pwo_example_optimization_stage_runs_and_lowers_its_cost(tmp_path):
     """The shipped pwO script, up to its verification solve, at the CI budget."""
-    if tuple(map(int, scipy.__version__.split(".")[:2])) < (1, 16):
-        pytest.skip("the examples call least_squares(callback=...), new in SciPy 1.16 (Python >= 3.11)")
     script = ROOT / "examples" / "optimization" / "pwO_optimization.py"
     source = script.read_text().split("### Check the result")[0].replace("__file__", repr(str(script)))
     code = source + "\nprint('COST', result.cost, 0.5 * np.sum(joint.residual(joint.x0) ** 2))\n"

@@ -164,7 +164,9 @@ jobs:
               --cov=vmex --cov-report=term
             mv .coverage coverage.fast
           else
-            pytest -q -n 4 -m "not full and not weekly" $FILES --durations=20
+            # The examples need Python >= 3.11 (SciPy 1.16 least_squares callbacks).
+            pytest -q -n 4 -m "not full and not weekly" $FILES --durations=20 \
+              ${{ matrix.python-version == '3.10' && '--deselect tests/test_example_contracts.py::test_pwo_example_optimization_stage_runs_and_lowers_its_cost' || '' }}
           fi
       - &xla-collect
         id: xla-collect
@@ -356,13 +358,18 @@ jobs:
           enable-cache: false
       - name: Install tested numerical versions
         run: uv pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
+      - name: Bind and smoke the examples
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+        run: pytest -q -m "not full and not weekly" tests/test_example_contracts.py --durations=5
       - name: Record environment and exercise eager and compiled certificates
         env:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
         run: |
           python -m pip freeze
-          pytest -q -m "not full and not weekly" tests/test_polish.py tests/test_example_contracts.py --durations=10
+          pytest -q -m "not full and not weekly" tests/test_polish.py --durations=10
 
   changed-coverage:
     name: Changed executable lines (>= 95%)
