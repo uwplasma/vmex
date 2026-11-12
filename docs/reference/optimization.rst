@@ -682,6 +682,14 @@ with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
 boundary.
 
+The pwO ladder is sensitive to the start: a rotating ellipse of negative sign ends in a
+basin with a mirror ratio above its ceiling and an alpha loss of 22 to 25 %. The first-stage
+cost separates the basins by a factor of ten, so ``examples/optimization/pwO_multistart.py``
+runs the first stage from several deterministic one- and two-mode boundary perturbations
+(``STARTS``), keeps the ``KEEP[0]`` lowest-cost starts for the second stage and the best of
+those for the rest. The QA and QI first-stage costs do not rank their final designs, and
+their ladders end at similar objectives from every start, so those examples keep one start.
+
 Continue the saved vacuum shape to finite pressure with::
 
    python examples/optimization/pwO_optimization_finite_beta.py

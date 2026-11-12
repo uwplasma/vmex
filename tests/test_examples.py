@@ -185,6 +185,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QH_optimization_bootstrap.py",
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
+    "examples/optimization/pwO_multistart.py",
     "examples/optimization/pwO_optimization.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
@@ -1096,6 +1097,14 @@ def test_qi_optimization_example(tmp_path):
     assert totals is not None
     assert all(np.isfinite(float(value)) for value in totals.groups())
     assert (tmp_path / "wout_QI_optimized.nc").exists()
+
+
+@pytest.mark.full
+def test_pwo_multistart_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    _run_example(EXAMPLES / "optimization" / "pwO_multistart.py", tmp_path)
+    for name in ("input.pwO_multistart_nfp3", "wout_pwO_multistart_nfp3.nc"):
+        assert (tmp_path / name).exists()
 
 
 @pytest.mark.full

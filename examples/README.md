@@ -118,6 +118,8 @@ that research budget as one commented set of constants next to the default.
   `single_stage_optimization_pwO.py` to optimize coils and boundary together;
   both read the vacuum script's `input.` and `wout_` files.
   A lower proxy does not establish confinement; particle checks remain separate.
+  `pwO_multistart.py` runs the same ladder from seven deterministic boundary perturbations and keeps the
+  lowest first-stage costs, which separate the good pwO basins from the bad ones.
   See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
   The finite-beta examples prescribe p(s) = PRES_SCALE (1 - s) and set beta
