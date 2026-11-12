@@ -1105,12 +1105,12 @@ ARIES-CS scale (``dkx.bootstrap.KineticBootstrapCurrent``, a
 median, pure pitch-angle scattering on the same grid 74 % away and the coarse
 :math:`11 \times 11 \times 48 \times 4` pitch-angle grid 190 % away, with sign
 changes on the QI decks. The traced row with the momentum-restoring correction
-(``collision_model="pas+momentum_correction"``) is 1.5 times smaller in
-magnitude than pure scattering on the NFP 4 QH deck, and its Boozer
+(``collision_model="pas+momentum_correction"``) is 1.2 to 1.5 times smaller
+in magnitude than pure scattering on the NFP 4 QH deck, and its Boozer
 resolution is converged at ``mboz=6`` (``mboz`` 8 to 16 agree to 1e-9; 4 is
 13 % off). Spectral angles change the current by 8 to 19 % and the finer
-:math:`15 \times 21 \times 48 \times 5` grid by a further 15 to 36 %, at sixty
-times the cost (24 s to 1460 s for three surfaces). On an aspect-3.5 QI deck
+:math:`15 \times 21 \times 48 \times 5` spectral grid by a further 4 to 21 %,
+at sixty times the cost (24 s to 1460 s for three surfaces). On an aspect-3.5 QI deck
 with :math:`|\iota| \approx 1.1` the Fokker-Planck current at :math:`s = 0.55`
 takes values from -7 to +8 MA T/m\ :sup:`2` as the angular grid changes, so a
 DKX term is only as trustworthy as a refinement check of the optimum on the
