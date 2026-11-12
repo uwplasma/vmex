@@ -86,6 +86,7 @@ DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
 
 # Targets:
 IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
+IOTA_CEILING = None               # maximum |iota|; None leaves it free
 MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
@@ -152,6 +153,8 @@ objective_function_terms = [
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
     (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
 ]
+if IOTA_CEILING:
+    objective_function_terms.append((opt.Hinge(opt.max_abs_iota, ceiling=IOTA_CEILING), 0.0, 1000.0))
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))

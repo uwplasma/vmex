@@ -254,6 +254,8 @@ def test_min_abs_iota_floors_the_profile_not_its_average(solovev_eq):
         float(iotas.min()), rel=1e-10)
     assert (float(opt.soft_min_abs_iota(eq.state, eq.runtime))
             >= float(iotas.min()) - 1.0e-12)
+    assert float(opt.max_abs_iota(eq.state, eq.runtime)) == pytest.approx(
+        float(iotas.max()), rel=1e-10)
 
     # Reducer separation on a profile with a genuine interior minimum, and on
     # its negation: a magnitude floor must not see the transform sign.
