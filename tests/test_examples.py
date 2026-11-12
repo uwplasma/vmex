@@ -118,7 +118,6 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
     "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
-    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
     "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
@@ -156,6 +155,7 @@ EXECUTED_EXAMPLES = {
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
     "examples/optimization/QA_maxJ_continuation.py",
+    "examples/optimization/drift_surfaces_optimization.py",
     "examples/optimization/QA_optimization.py",
     "examples/optimization/QP_optimization_scipy.py",
     "examples/optimization/QP_optimization_finite_beta_scalar.py",
@@ -1010,6 +1010,7 @@ def test_qs_optimization_examples(case, tmp_path):
     "stellarator_asymmetry/QI_optimization_finite_beta",
     "stellarator_asymmetry/QP_optimization_finite_beta",
     "QA_maxJ_continuation",
+    "drift_surfaces_optimization",
 ])
 def test_sibling_optimization_examples_run(name, tmp_path):
     """The symmetry-class and optimizer siblings of a PR-tested example run at smoke budget.
