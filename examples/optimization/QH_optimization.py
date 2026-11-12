@@ -23,7 +23,7 @@ import vmex as vj
 from vmex import optimize as opt
 
 # Number of field periods, and the seed deck the boundary is shaped from:
-NFP = 4
+NFP = 3
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Rotating-ellipse amplitude added to the circular seed. A circular torus
@@ -41,7 +41,7 @@ MAX_NFEV = [10, 15, 20]
 # Targets. The iota floor keeps a stage from trading transform for quasisymmetry;
 # a hinge costs nothing once its floor is met:
 ASPECT_TARGET = 6.0
-IOTA_FLOOR = 1.0                  # minimum |iota| over the profile
+IOTA_FLOOR = 0.8                  # minimum |iota| over the profile
 IOTA_WEIGHT = 10.0
 MAGNETIC_WELL_TARGET = 0.0
 WELL_WEIGHT = 100.0
