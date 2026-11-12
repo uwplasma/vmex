@@ -159,6 +159,24 @@ def test_monitor_collects_saves_and_plots_objective_terms(tmp_path) -> None:
     assert plot.is_file() and plot.stat().st_size > 0
 
 
+def test_monitor_write_results_names_every_output_after_the_run(tmp_path, monkeypatch, capsys) -> None:
+    from vmex.core import plotting, wout
+
+    calls = {}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(wout, "write_wout", lambda path, data: Path(path))
+    monkeypatch.setattr(plotting, "plot_wout", lambda path, out: calls.update(plot=(path, out)) or {"summary": Path("run_summary.png")})
+    monitor = OptimizationMonitor(FunctionProblem([1.0], residual=lambda x: np.asarray([x[0]])), stream=None)
+    monitor.record(np.zeros(1), cost=1.0, iteration=0, terms={})
+    final_input = SimpleNamespace(to_indata=lambda path: Path(path))
+    paths = monitor.write_results("run", final_input, SimpleNamespace(wout=None))
+
+    assert [p.name for p in paths] == [
+        "input.run", "wout_run.nc", "run_objectives.csv", "run_objectives.png", "run_summary.png"]
+    assert calls["plot"] == (paths[1], ".")
+    assert capsys.readouterr().out.count("Wrote ") == 5
+
+
 def test_monitor_plot_uses_readable_objective_floor(tmp_path, monkeypatch) -> None:
     """Tiny or zero terms stay visible without inventing sub-1e-8 decades."""
     import matplotlib.axes

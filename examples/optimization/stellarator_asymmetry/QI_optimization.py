@@ -201,10 +201,4 @@ try:
 except ImportError as error:
     print(f"epsilon_eff skipped: {error}")
 
-input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
-wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)
-print(f"Wrote {input_path}\nWrote {wout_path}")
-print(f"Wrote {monitor.save(f'{OUTPUT_NAME}_objectives.csv')}")
-print(f"Wrote {monitor.plot(f'{OUTPUT_NAME}_objectives.png')}")
-for path in vj.plot_wout(wout_path, ".").values():
-    print(f"Wrote {path}")
+monitor.write_results(OUTPUT_NAME, final_input, final_equilibrium)

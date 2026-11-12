@@ -631,6 +631,25 @@ class OptimizationMonitor:
                    comments="")
         return path
 
+    def write_results(self, name: str, final_input: Any, equilibrium: Any) -> list[Path]:
+        """Write the standard result files of an optimization and print each path.
+
+        ``input.<name>``, ``wout_<name>.nc``, the objective history as
+        ``<name>_objectives.csv`` and ``.png``, and the figures of
+        :func:`vmex.plot_wout`, all in the working directory.
+        """
+        from .plotting import plot_wout
+        from .wout import write_wout
+
+        paths = [final_input.to_indata(f"input.{name}"),
+                 write_wout(f"wout_{name}.nc", equilibrium.wout),
+                 self.save(f"{name}_objectives.csv"),
+                 self.plot(f"{name}_objectives.png")]
+        paths += list(plot_wout(paths[1], ".").values())
+        for path in paths:
+            print(f"Wrote {path}")
+        return paths
+
     def plot(self, path: str | Path, *, title: str = "Optimization objective terms") -> Path:
         """Write a compact log-scale total and per-term cost history plot."""
         if not self.records:
