@@ -31,15 +31,13 @@ def coil_field_from_dofs(dofs):
     return lambda points: jax.vmap(field.B)(points)
 
 # The exterior total field is the actual ESSOS coil field plus the plasma-current
-# field from virtual casing, a periodic trapezoid rule over the LCFS whose error
-# decays as exp(-2 pi d / h) with h the finest source spacing. The source grid is
-# not a constant: it is sized from the boundary's aspect ratio and the requested
-# digits, so a high-aspect boundary is not extended on a grid four orders too
-# coarse. Leaving nphi and ntheta unset is what asks for that rule; this QA
-# boundary gets 64 x 64, h = 2 pi R / 128, about 0.07 m here, so the point is
-# placed 0.25 m (1.5 minor radii) outboard of the LCFS, still well inside the
-# coils. On a 12 x 12 grid at 0.03 m the plasma field came out near 15 T against
-# about 0.03 T; closer points are switched to the graded near-surface rule.
+# field from virtual casing. Away from the boundary the plasma part is a periodic
+# trapezoid rule whose error decays as exp(-2 pi d / h) with h the source spacing,
+# and the source grid is sized from the boundary's aspect ratio and the requested
+# digits. Within a few spacings of the boundary the default near_surface="auto"
+# switches each point to the target-graded rule, so points close to the LCFS
+# are accurate too; this point is placed 0.25 m (1.5 minor radii) outboard of
+# it, still well inside the coils, where the direct rule already meets DIGITS.
 DISTANCE = 0.25  # metres along the axis-to-edge ray at theta = phi = 0
 DIGITS = 4
 final_equilibrium.set_points_flux([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
