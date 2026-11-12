@@ -746,9 +746,6 @@ class FunctionProblem:
 
             return both
 
-        metadata = dict(self.metadata)
-        if "trial_valid" in metadata:
-            metadata["trial_valid"] = host(metadata["trial_valid"])
         return dict(
             fun=host(self._fun),
             grad=gradient(self._grad),
@@ -763,7 +760,7 @@ class FunctionProblem:
             names=[self.names[position] for position in free],
             bounds=_slice_bounds(self.bounds, free, self.x0.size),
             scales=self.scales[free],
-            metadata=metadata,
+            metadata=self.metadata,
             evaluation_progress=self.evaluation_progress,
             report_interval=self.report_interval,
         )
@@ -1026,7 +1023,7 @@ class VmecProblem(FunctionProblem):
             # cuts from the right ladder rung; everything else -- the config,
             # the shared solve-counter holder, the residual slices -- is the
             # parent's, because it is the same compiled problem.
-            kwargs["metadata"] = {**kwargs["metadata"], "max_mode": int(max_mode)}
+            kwargs["metadata"] = {**self.metadata, "max_mode": int(max_mode)}
         kwargs["input_from_x"] = lambda u: self._input_from_x(embed(u))
         kwargs["x_from_input"] = lambda deck: np.asarray(
             self._x_from_input(deck), dtype=float).reshape(-1)[free]

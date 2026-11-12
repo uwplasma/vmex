@@ -3987,7 +3987,6 @@ def _least_squares_implicit(
                 "term_slices": term_slices,
                 "config": cfg,
                 "holder": holder,
-                "trial_valid": certified_trial,
                 "input": inp,
                 "jax_state_runtime": jax_state_runtime,
                 "jax_state_runtime_status": jax_state_runtime_status,

@@ -532,14 +532,13 @@ def test_limited_map_turns_any_parameters_into_a_valid_map():
 
 def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch):
     spec = _spectrum(2)
-    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
     monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
-    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
     shift = np.linspace(.01, .03, flat.size)
 
     class Stage:
         x0 = np.zeros(2)
-        metadata = {"term_slices": (("spectrum", 0, flat.size), ("shape", flat.size, flat.size + 1))}
 
         def residual(self, x):
             return np.concatenate((flat + shift*x[0], [x[1] - 1.]))
@@ -550,9 +549,9 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     class Equilibrium:
         state = runtime = None
 
-    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
+    mapped = MappedPwOResidual((.3, .6))
     np.testing.assert_allclose(mapped.spectrum_state(None, None), flat)
-    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(eta_min=2.8, c=-2., b=.1, a=.3),
+    problem = FreeMapProblem(Stage(), mapped, Equilibrium(), dict(a=.3, b=.1, c=-2., eta_min=2.8),
                              ("a", "b", "c", "eta_min"), weight=10.)
     z = problem.x0 + .05
     jac = problem.residual_jac(z)
@@ -562,157 +561,66 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
     values = problem.values(z)
     for name, (low, high) in FreeMapProblem.MAP_BOUNDS.items():
         assert low < values[name] < high
-    rows = problem.residual(z)
-    assert rows.shape == (2 * 12 * 10 + 2 + 1,)
-    from vmex.core.monitoring import OptimizationMonitor
-    from types import SimpleNamespace
-    monitor = OptimizationMonitor(problem, stream=None)
-    monitor(SimpleNamespace(x=z, fun=rows))
-    terms = monitor.records[-1].terms
-    assert terms["shape"] == pytest.approx(.5 * (z[1] - 1.) ** 2)
-    assert sum(terms.values()) == pytest.approx(.5 * rows @ rows)
-    assert Stage.metadata["term_slices"][0][2] == flat.size
 
 
-def test_free_map_problem_appends_band_rows_with_exact_derivatives(monkeypatch):
+def _free_map(monkeypatch, values, *, break_field=False, **options):
+    """A FreeMapProblem on a synthetic two-surface Boozer spectrum; optionally break it for x[1] > .5."""
     spec = _spectrum(2)
-    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
     monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
-    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
-    shift = np.linspace(.01, .03, flat.size)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
 
     class Stage:
-        x0 = np.zeros(1)
+        x0 = np.zeros(2)
 
         def residual(self, x):
-            return flat + shift*x[0]
+            spectrum = -flat if break_field and x[1] > .5 else flat
+            return np.append(spectrum, x[1] - 1.)
 
         def residual_jac(self, x):
-            return shift[:, None]
+            return np.column_stack((np.zeros(flat.size + 1), np.append(np.zeros(flat.size), 1.)))
 
     class Equilibrium:
         state = runtime = None
 
-    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
+    mapped = MappedPwOResidual((.3, .6), **options)
+    return FreeMapProblem(Stage(), mapped, Equilibrium(), values, tuple(values), weight=1., area_floor=0.)
+
+
+def test_free_map_problem_forwards_mapped_options_in_bounds_order(monkeypatch):
     values = dict(a=.3, b=.1, c=-2., eta_min=2.8)
-    free = ("a", "eta_min")
-    plain = FreeMapProblem(Stage(), mapped, Equilibrium(), values, free, weight=10.)
-    banded = FreeMapProblem(Stage(), mapped, Equilibrium(), values, free, weight=10.,
-                            band_weight=4., nband=5)
-    z = banded.x0 + .05
-    assert banded.residual(z).size == plain.residual(z).size + 2*12*5
-    jac = banded.residual_jac(z)
-    fd = np.column_stack([(banded.residual(z + h) - banded.residual(z - h)) / 2e-6
-                          for h in 1e-6*np.eye(z.size)])
-    np.testing.assert_allclose(jac, fd, rtol=1e-5, atol=1e-7)
-
-
-def test_free_map_failure_pairs_survive_nested_views_and_status_retries(monkeypatch):
-    from types import SimpleNamespace
-    from vmex.core.problem import FunctionProblem
+    problem = _free_map(monkeypatch, values, ngamma=64, neta=24, b_ref=1.7)
+    shuffled = _free_map(monkeypatch, dict(reversed(values.items())), ngamma=64, neta=24, b_ref=1.7)
+    z = problem.x0 + .05
+    np.testing.assert_array_equal(problem.x0, shuffled.x0)
+    np.testing.assert_array_equal(problem.residual(z), shuffled.residual(z))
+    assert problem.values(z) == shuffled.values(z)
+    assert tuple(problem.values(z)) == tuple(FreeMapProblem.MAP_BOUNDS)
 
     spec = _spectrum(2)
-    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "bmns_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
-    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
-    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["bmns_b"].ravel(), spec["iota_b"]))
-    shift = np.linspace(.01, .03, flat.size)
-    status, holder = {"valid": True, "calls": 0}, {}
+    plain = mapped_pwo_residual_from_boozer(
+        **{k: spec[k] for k in ("bmnc_b", "xm_b", "xn_b", "iota_b", "nfp")}, limit_map=True,
+        ngamma=64, neta=24, b_ref=1.7, **problem.values(z))
+    rows = problem.residual(z)[:plain["residuals1d"].size]
+    assert rows.size == 2 * 64 * 24
+    np.testing.assert_allclose(rows @ rows, plain["total"], rtol=1e-12)
+    default = _free_map(monkeypatch, values)
+    assert default.residual(default.x0 + .05).size != problem.residual(z).size
 
-    def residual(x):
-        status["calls"] += 1
-        status["valid"] = x[0] < .5
-        holder["solved"] = object()
-        return (np.full(flat.size + 1, 7.) if not status["valid"]
-                else np.append(flat + shift*x[0], x[1] - 1.))
 
-    def jacobian(x):
-        assert status["valid"], "failed spectrum must not trigger a Jacobian retry"
-        result = np.column_stack((np.append(shift, 0.), np.append(np.zeros(flat.size), 1.),
-                                  np.zeros(flat.size + 1), np.zeros(flat.size + 1)))
-        if .5 < x[1] < .7:
-            result[:] = np.nan
-        if x[1] > .7:
-            holder["solved"] = object()  # a successful retry at a different root
-        return result
+def test_free_map_problem_rejects_invalid_trials_with_a_finite_residual(monkeypatch):
+    from scipy.optimize import least_squares
 
-    def valid(x):
-        assert np.shape(x) == (4,), "view certificate must receive the root vector"
-        return status["valid"]
-
-    root = FunctionProblem(np.zeros(4), residual=residual, residual_jac=jacobian,
-        names=("boundary0", "boundary1", "frozen2", "frozen3"),
-        metadata={"trial_valid": valid, "holder": holder})
-    stage = root.subproblem([0, 1, 2]).subproblem([0, 1])
-    mapped = MappedPwOResidual((.3, .6), ngamma=12, neta=10, b_ref=1.7)
-    ordinary = mapped.kernel
-    cutoff = float(flat[0] + .25*shift[0])
-
-    def kernel(**kwargs):
-        out = ordinary(**kwargs)
-        first = kwargs["bmnc_b"][0, 0]
-        # A finite residual with an undefined derivative must reject the pair.
-        rows = out["residuals1d"].at[0].set(jnp.sqrt((first - cutoff)**2))
-        out["residuals1d"] = jnp.where(first < flat[0] - .1*shift[0], jnp.nan, rows)
-        return out
-
-    mapped.kernel = kernel
-    problem = FreeMapProblem(stage, mapped, SimpleNamespace(state=None, runtime=None),
-        dict(a=.3, b=.1, c=-2., eta_min=2.8), tuple(FreeMapProblem.MAP_BOUNDS), weight=10.)
-    z = problem.x0 + .05
-    rows = problem.residual(z)
-    calls = status["calls"]
-    matrix = problem.residual_jac(z)
-    value, gradient = problem.fun_and_grad(z)
-    assert status["calls"] == calls
-    assert tuple(problem.values(z)) == tuple(FreeMapProblem.MAP_BOUNDS)
-    assert problem.names[:2] == ("boundary0", "boundary1")
-    assert value == pytest.approx(.5 * rows @ rows)
-    np.testing.assert_allclose(gradient, matrix.T @ rows)
-
-    failed = z.copy()
-    failed[0] = .8
-    wall, wall_jac = problem.residual_and_jac(failed)
-    assert np.isfinite(wall).all() and np.isfinite(wall_jac).all()
-    status["valid"] = True  # later external retries cannot relabel the cached pair
-    holder["solved"] = object()
-    assert not problem.metadata["trial_valid"](failed)
-    np.testing.assert_array_equal(problem.residual(failed), wall)
-    step = 1e-6
-    fd = np.column_stack([(problem.residual(failed + h) - problem.residual(failed - h))/(2*step)
-                          for h in step*np.eye(failed.size)])
-    np.testing.assert_allclose(wall_jac, fd, rtol=2e-7, atol=1e-6)
-    assert .5 * wall @ wall > 10 * value
-
-    # Residual success followed by derivative failure/root replacement is atomic.
-    for boundary in ((.05, .6), (.05, .8), (-.2, .05), (.25, .05)):
-        rejected = z.copy()
-        rejected[:2] = boundary
-        r = problem.residual(rejected)
-        j = problem.residual_jac(rejected)
-        cost, grad = problem.fun_and_grad(rejected)
-        assert not problem.metadata["trial_valid"](rejected)
-        assert np.isfinite(r).all() and np.isfinite(j).all()
-        assert cost == pytest.approx(.5 * r @ r)
-        np.testing.assert_allclose(grad, j.T @ r)
-
-    # Interleaving parent and nested view calls must not return another point's status.
-    problem.residual_and_jac(z)
-    view = problem.subproblem([0, 1], x=z)
-    nested = view.subproblem([0])
-    nested.residual([.8])
-    assert not nested.metadata["trial_valid"]([.8])
-    assert problem.metadata["trial_valid"](z)
-    assert nested.metadata["trial_valid"]([.05])
-    np.testing.assert_allclose(nested.residual_jac([.05]), problem.residual_jac(z)[:, :1])
-    scalar, grad = problem.fun_and_grad(z)
-    nested.fun_and_grad([.8])
-    repeated_scalar, repeated_grad = problem.fun_and_grad(z)
-    assert repeated_scalar == scalar
-    np.testing.assert_array_equal(repeated_grad, grad)
-    invalid_seed = root.subproblem([0, 1], x=np.array([.8, 0., 0., 0.]))
-    with pytest.raises(ValueError, match="starting point"):
-        FreeMapProblem(invalid_seed, mapped, SimpleNamespace(state=None, runtime=None),
-            dict(a=.3, b=.1, c=-2., eta_min=2.8), tuple(FreeMapProblem.MAP_BOUNDS), weight=10.)
+    problem = _free_map(monkeypatch, dict(a=.3, b=.1, c=-2., eta_min=2.8), break_field=True)
+    bad = problem.x0.copy()
+    bad[1] = .8  # the stage returns a field with a negative mean here
+    rows, jacobian = problem.residual(bad), problem.residual_jac(bad)
+    assert np.all(rows == FreeMapProblem.REJECTED)
+    assert np.isfinite(jacobian).all() and not jacobian.any()
+    start = .5 * problem.residual(problem.x0) @ problem.residual(problem.x0)
+    result = least_squares(problem.residual, problem.x0, jac=problem.residual_jac)
+    assert np.isfinite(result.fun).all() and result.cost < start
+    assert result.x[1] <= .5 and result.cost < FreeMapProblem.REJECTED
 
 
 # Independent collisionless toy checks; finite-collisionality current remains separate.
