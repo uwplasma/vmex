@@ -50,6 +50,8 @@ result = scipy.optimize.least_squares(
     x_scale=problem.scales, max_nfev=50, verbose=2)
 ```
 
+`opt.run_stage(problem, max_nfev=50, step=problem.scales)` makes the same call with two choices that matter when the start is not tuned. The variables are rewritten in step units, so the trust region starts at one step rather than at the whole boundary in step units. `max_nfev` is a ceiling: the stage stops once three accepted iterations lower the cost by less than 2 %. `change=5` also bounds the stage to five steps around its start.
+
 For BFGS or L-BFGS-B, use the scalar pair:
 
 ```python

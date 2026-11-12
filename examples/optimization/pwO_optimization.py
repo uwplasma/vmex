@@ -16,7 +16,6 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
@@ -50,7 +49,8 @@ BOOTSTRAP_TERM = None
 BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
+# residual evaluations each stage may spend at most. A stage stops early once
+# three iterations improve it by less than 2 % (opt.run_stage):
 MAX_MODES = [1, 2, 3]
 MAX_NFEV = [15]*len(MAX_MODES)
 ASPECT_TARGET = 6.0
@@ -220,11 +220,8 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
                            band_weight=BOOTSTRAP_WEIGHT if BOOTSTRAP_TERM == "band" else 0.)
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
-    change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
-    result = least_squares(
-        joint.residual, joint.x0, jac=joint.residual_jac,
-        x_scale=step, max_nfev=max_nfev, bounds=(joint.x0 - change, joint.x0 + change),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
+    change = np.concatenate((np.full(joint.nx, MAX_PARAMETER_CHANGE), np.full(len(FREE_MAP), np.inf)))
+    result = opt.run_stage(joint, max_nfev=max_nfev, step=step, change=change, verbose=2, callback=monitor)
     x = stage.embed(result.x[:joint.nx])
     MAP_PARAMETERS = joint.values(result.x)
     pwo.options.update(MAP_PARAMETERS)

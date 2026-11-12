@@ -18,7 +18,6 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
@@ -35,9 +34,10 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
+# residual evaluations each stage may spend at most. A stage stops early once
+# three iterations improve it by less than 2 % (opt.run_stage):
 MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_NFEV = [20, 30]
 
 # Targets:
 ASPECT_TARGET = 6.0
@@ -150,13 +150,9 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
             problem.compile_residual_and_jacobian()
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    step = PARAMETER_STEP * stage.scales
-    result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
-        x_scale=step, max_nfev=max_nfev,
-        bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
-                stage.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
+    result = opt.run_stage(
+        stage, max_nfev=max_nfev, step=PARAMETER_STEP * stage.scales,
+        change=MAX_PARAMETER_CHANGE, verbose=2, callback=monitor)
     x = stage.embed(result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)

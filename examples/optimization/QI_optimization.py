@@ -19,7 +19,6 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
@@ -39,7 +38,8 @@ STAGE_NITER = 5500
 SURFACES = np.linspace(0.1, 1.0, 6)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend. A max_mode = 3 stage lowered the
+# residual evaluations each stage may spend (a stage stops early once three iterations
+# improve it by less than 2 %: opt.run_stage). A max_mode = 3 stage lowered the
 # cost by 1 % for 45 % of the run, so it is not shipped:
 MAX_MODES = [1, 3]
 MAX_NFEV = [10, 15]
@@ -158,10 +158,7 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     print(f"\n===== QI stage, max_mode = {max_mode} =====")
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
-    result = least_squares(
-        stage.residual, stage.x0, jac=stage.residual_jac,
-        x_scale=stage.scales, max_nfev=max_nfev,
-        ftol=1.0e-6, xtol=1.0e-10, verbose=2, callback=monitor)
+    result = opt.run_stage(stage, max_nfev=max_nfev, step=stage.scales, verbose=2, callback=monitor)
     x = stage.embed(result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
