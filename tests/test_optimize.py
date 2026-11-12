@@ -27,6 +27,7 @@ from vmex.core.errors import AdjointSolveError  # noqa: E402
 from vmex.core.problem import Evaluation, FunctionProblem  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
+from vmex.core import qi  # noqa: E402
 
 from tests.conftest import resolve_golden_dir  # noqa: E402
 
@@ -421,7 +422,7 @@ def test_qi_regression_pin_and_jit():
     assert np.all(np.isfinite(res))
     # The residual's two argmins read normalized |B| (range 1) per field line
     # over the periodic and the endpoint-inclusive samples.
-    grid = opt._qi_grid(
+    grid = qi._qi_grid(
         booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
         weights=None, phimin=0.0,
         **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
