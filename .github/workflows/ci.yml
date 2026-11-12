@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # The manifest parity lanes and the combined coverage gate are too heavy to
+  # repeat on every pull-request push. They run on main, nightly and on demand.
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
 
 concurrency:
-  group: CI-${{ github.ref }}
+  group: CI-${{ github.ref }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 env:
@@ -30,6 +36,7 @@ permissions:
 jobs:
   changes:
     name: Select required CI scope
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
@@ -189,7 +196,9 @@ jobs:
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
+    # Not on pull requests: the lanes run on push to main, nightly and dispatch.
     if: >-
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_tests == 'true' &&
       needs.changes.outputs.parity != '[]'
     runs-on: ubuntu-latest
@@ -374,6 +383,7 @@ jobs:
       id-token: write
     if: >-
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_coverage == 'true' &&
       needs.fast.result == 'success' &&
       needs.parity.result == 'success' &&
@@ -445,7 +455,9 @@ jobs:
 
   pr-gate:
     name: PR gate
-    if: always()
+    # A draft pull request skips every job, the gate included. Skipped jobs
+    # (the parity lanes and changed-coverage on a pull request) count as passed.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 2
     needs: [changes, quality, fast, parity, desc, device, jax-compatibility, install, changed-coverage]
