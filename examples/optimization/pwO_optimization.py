@@ -104,7 +104,7 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
-FINAL_FTOL = 1.0e-13
+FINAL_FTOL = 1.0e-10
 FINAL_NITER = 30000
 
 # Every output file name contains this:
