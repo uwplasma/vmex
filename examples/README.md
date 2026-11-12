@@ -127,8 +127,8 @@ that research budget as one commented set of constants next to the default.
   target aspect ratio, brings beta to within 0.05 % (relative) of the target.
   The beta and aspect-ratio targets then agree, which a pressure calibrated at
   the seed's own aspect ratio does not. They include radially weighted Mercier
-  and resistive-interchange terms. `QA_`, `QH_` and
-  `QP_optimization_finite_beta.py` are the least-squares counterparts:
+  and resistive-interchange terms. `QA_optimization_finite_beta.py` is the least-squares counterpart
+  (its `FAMILY` selects QA, QH or QP; QP is a symmetry demonstration that does not confine alphas):
   `USE_WELL` and `USE_MERCIER` switch a magnetic-well floor and Mercier and
   resistive-interchange hinges on the dimensionless PHIEDGE^2 DMerc and
   PHIEDGE^2 D_R, and `STABILITY_SCALE` brings the stability rows in after the

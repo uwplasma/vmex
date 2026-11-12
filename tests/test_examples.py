@@ -123,12 +123,10 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
-    "examples/optimization/QH_optimization_finite_beta.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_finite_beta.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
     "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
@@ -674,11 +672,12 @@ def test_qa_finite_beta_least_squares_example_sets_beta_through_phiedge():
     assert "least_squares(" in text
 
 
-@pytest.mark.parametrize("case", ["QA", "QH", "QP"])
-def test_finite_beta_least_squares_examples_expose_the_row_toggles(case):
-    """The well and stability rows are switches, and stability enters after the basin."""
-    text = (EXAMPLES / "optimization" / f"{case}_optimization_finite_beta.py").read_text()
+def test_finite_beta_least_squares_example_exposes_the_row_toggles():
+    """One script serves QA, QH and QP; the well and stability rows are switches."""
+    text = (EXAMPLES / "optimization" / "QA_optimization_finite_beta.py").read_text()
     _assert_beta_from_toroidal_flux(text)
+    for family in ("QA", "QH", "QP"):
+        assert f'FAMILY == "{family}"' in text
     assert "USE_WELL = " in text and "USE_MERCIER = " in text
     assert "opt.Hinge(opt.magnetic_well" in text and "opt.Hinge(opt.min_abs_iota" in text
     assert "opt.mercier_stability_residual" in text and "opt.glasser_stability_residual" in text

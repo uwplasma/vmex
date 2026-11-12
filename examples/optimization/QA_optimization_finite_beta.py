@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Optimize a boundary for quasi-axisymmetry at finite beta.
+"""Optimize a boundary for quasi-axisymmetry, quasi-helical or quasi-poloidal symmetry at finite beta.
 
-This is the least-squares counterpart to
+Set ``FAMILY`` to ``"QA"``, ``"QH"`` or ``"QP"``. This is the least-squares counterpart to
 ``QA_optimization_finite_beta_scalar.py``: SciPy least squares receives the
 full residual vector and its exact Jacobian, while VMEX supplies the implicit
 equilibrium derivatives.
@@ -31,7 +31,11 @@ resistive-interchange stability on the dimensionless PHIEDGE**2 DMerc and
 PHIEDGE**2 D_R (VMEC's criteria scale as PHIEDGE**-2) over s >= STABILITY_MIN_S.
 The stability rows enter only after the quasisymmetric basin exists, at a tenth
 of their weight first (``STABILITY_SCALE``): applied from the first stage they
-swamp the quasisymmetry residual.
+swamp the quasisymmetry residual (QH ended at QS 1.5 instead of 0.09).
+
+QP is a symmetry demonstration: a quasi-poloidally symmetric field does not
+confine alphas, so judge it by the QS residual alone, with the mirror and
+elongation hinges keeping the shape in range.
 """
 
 import os
@@ -46,22 +50,39 @@ import vmex as vj
 from vmex import optimize as opt
 from vmex.core.scaling import input_minor_radius
 
-# Number of field periods, and the seed deck the boundary is shaped from:
-NFP = 2
+# Symmetry family. Per family: field periods, the rotating-ellipse amplitude added to the
+# circular seed (0.06 to 0.12 find the QH basin at finite beta; 0.16 does not, although the
+# vacuum script does), the pressure scale p(s) = PRES_SCALE (1 - s) in pascal, the transform
+# floor, the magnetic-well floor and whether the well row is used (USE_WELL):
+FAMILY = "QA"  # "QA", "QH" or "QP"
+if FAMILY == "QA":
+    NFP, SEED_PERTURBATION = 2, 0.05
+    PRES_SCALE = 1.0e3
+    IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 0.42, 0.01, True
+    HELICITY_M, HELICITY_N = 1, 0
+elif FAMILY == "QH":
+    NFP, SEED_PERTURBATION = 4, 0.12
+    PRES_SCALE = 8.0e3
+    IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 1.0, 0.0, True
+    HELICITY_M, HELICITY_N = 1, -1
+elif FAMILY == "QP":
+    NFP, SEED_PERTURBATION = 2, 0.05
+    PRES_SCALE = 1.0e3
+    IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 0.51, 0.0, False
+    HELICITY_M, HELICITY_N = 0, 1
+else:
+    raise ValueError(f"FAMILY must be QA, QH or QP, not {FAMILY!r}")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
-
-# Rotating-ellipse amplitude added to the circular seed:
-SEED_PERTURBATION = 0.05
+# QP only: the mirror ratio and elongation hinges (heavy limits stall the trust region):
+MIRROR_LIMIT, ELONGATION_LIMIT, SHAPE_WEIGHT = (0.35, 12.0, 1.0) if FAMILY == "QP" else (None, None, 0.0)
 
 # Volume-averaged beta that the toroidal flux is chosen to give at ASPECT_TARGET:
 TARGET_BETA = 0.01
 BETA_WEIGHT = 1.0 / TARGET_BETA**2        # relative: beta is a small number; 10x this costs 3 to 10x in QS
-# Pressure p(s) = PRES_SCALE (1 - s), in pascal.  With TARGET_BETA it sets the
-# field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA):
-PRES_SCALE = 1.0e3
+# With TARGET_BETA the pressure scale sets the field, B0 = sqrt(mu0 PRES_SCALE / TARGET_BETA).
 
 # Flux surfaces the quasisymmetry residual is evaluated on:
-SURFACES = np.linspace(0.1, 0.9, 8)
+SURFACES = np.array([0.3, 0.5, 0.7, 0.9]) if FAMILY == "QP" else np.linspace(0.1, 0.9, 8)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
@@ -72,9 +93,6 @@ STABILITY_SCALE = [0.0, 0.0, 0.1, 1.0]
 
 # Targets, and the optional rows. Each is a hinge, so it costs nothing once met:
 ASPECT_TARGET = 6.0
-IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
-USE_WELL = True                   # magnetic-well floor
-MAGNETIC_WELL_TARGET = 0.01
 WELL_WEIGHT = 10.0
 USE_MERCIER = True                # Mercier and resistive-interchange stability
 
@@ -102,7 +120,7 @@ FINAL_FTOL = 1e-14
 FINAL_NITER = 20000
 
 # Every output file name contains this:
-OUTPUT_NAME = "QA_finite_beta_optimized"
+OUTPUT_NAME = f"{FAMILY}_finite_beta_optimized"
 
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
@@ -167,13 +185,16 @@ def resistive_rows(state, runtime):
 
 
 # Each term is (function, target, weight).
-qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
+qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=HELICITY_M, helicity_n=HELICITY_N)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
 ]
+if FAMILY == "QP":
+    objective_function_terms += [(opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_LIMIT), 0.0, SHAPE_WEIGHT),
+                                 (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, SHAPE_WEIGHT)]
 if USE_WELL:
     objective_function_terms.append(
         (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_TARGET), 0.0, WELL_WEIGHT))
@@ -202,7 +223,7 @@ stages = list(zip(MAX_MODES, MAX_NFEV, STABILITY_SCALE))
 resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
 problem, key = None, None
 for index, (max_mode, max_nfev, weight_scale) in enumerate(stages):
-    print(f"\n===== finite-beta QA stage, max_mode = {max_mode}, stability weight x {weight_scale} =====")
+    print(f"\n===== finite-beta {FAMILY} stage, max_mode = {max_mode}, stability weight x {weight_scale} =====")
     if (resolution_of[max_mode], weight_scale) != key:
         key = (resolution_of[max_mode], weight_scale)
         group = max(m for m, _, _ in takewhile(
@@ -251,6 +272,7 @@ final_beta = float(opt.volume_average_beta(final_equilibrium.solution,
                                            final_equilibrium.solver_context))
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    well_floor=MAGNETIC_WELL_TARGET if USE_WELL else None,
+                   mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT,
                    extra=[("beta", final_beta, 0.9 * TARGET_BETA, "min"),
                           ("beta", final_beta, 1.1 * TARGET_BETA, "max")])
 print(f"\nQS total {final_total:.3e}")

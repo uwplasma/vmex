@@ -6,7 +6,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
-- **Switchable well and stability rows in the finite-beta quasisymmetry examples.** `QA_optimization_finite_beta.py` gains `USE_WELL` and `USE_MERCIER`, `QH_` and `QP_optimization_finite_beta.py` are new, and the stability rows are hinges on the dimensionless PHIEDGE^2 DMerc and PHIEDGE^2 D_R that enter after the quasisymmetric basin (`STABILITY_SCALE`). On four QA seeds the result is Mercier stable with QS 2.5e-3 to 7.9e-3 and eps_eff^(3/2) 6e-6 to 2e-4 (was unstable, QS 2.1e-2 to 5.1e-2, 2e-4 to 8e-3).
+- **Switchable well and stability rows in the finite-beta quasisymmetry examples.** `QA_optimization_finite_beta.py` gains `USE_WELL`, `USE_MERCIER` and a `FAMILY` switch for QA, QH and QP (QP is a symmetry demonstration that does not confine alphas), and the stability rows are hinges on the dimensionless PHIEDGE^2 DMerc and PHIEDGE^2 D_R that enter after the quasisymmetric basin (`STABILITY_SCALE`). On four QA seeds the result is Mercier stable with QS 2.5e-3 to 7.9e-3 and eps_eff^(3/2) 6e-6 to 2e-4 (was unstable, QS 2.1e-2 to 5.1e-2, 2e-4 to 8e-3).
 
 ## 0.14.0 - 2026-11-09
 
