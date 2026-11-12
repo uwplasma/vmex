@@ -4,7 +4,6 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
-- **Single-stage pwO coils.** `CoilPenalty(normalized=True)` aggregates the worst sampled curvature and gaps as a p = 8 power mean instead of a hard maximum or minimum, which stalled L-BFGS (NFP 4 coil fit 1.7 % to 0.6 % B.n/B at equal iterations). `single_stage_optimization_pwO.py` adds elongation and curvature-radius hinges, restores the target beta after the plasma stage, tightens the coil-fit tolerance in two steps, uses `12 // NFP` coils and reports the transport of the free-boundary equilibrium.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
 ## 0.14.0 - 2026-11-09
@@ -190,6 +189,12 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 - Fixes: GPU-host implicit solves rehome the forward state beside the
   parameters; long CPU runs release executables before `vm.max_map_count`.
 
-## 0.11.2 and earlier
+## 0.11.2 - 2026-09-24
+
+A compilation-cache directory set through `JAX_COMPILATION_CACHE_DIR` or
+`VMEX_COMPILATION_CACHE_DIR` is now split by machine, like the default one
+(#449): nodes with different CPU features no longer recompile on every run.
+
+## 0.11.1 and earlier
 
 See the [GitHub releases](https://github.com/uwplasma/vmex/releases).

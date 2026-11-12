@@ -2,11 +2,11 @@
 """Optimize a finite-beta pwO plasma and ESSOS coils together.
 
 Run ``pwO_optimization.py`` first. A finite-beta plasma stage frees the pwO
-map as in that example, under hinges on the boundary elongation and smallest
-radius of curvature that keep the shape coil-friendly, and the pressure is
+map as in that example, with hinges on the boundary elongation and smallest
+radius of curvature that keep the shape coil-friendly; the pressure is then
 rescaled to the target beta. The coils are fitted to that plasma with a normal
 field tolerance that tightens in two steps (a tight one from the start
-switches the coils off), and coil length, curvature and distances are smooth
+switches the coils off); coil length, curvature and distances are smooth
 worst-case measures. The joint plasma and coil stage holds the map fixed.
 COILS_INPUT accepts an ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes.
 A cold free-boundary solve and NEO check the design, including the transport of
@@ -61,7 +61,7 @@ PLASMA_MAX_NFEV, PLASMA_STEP, PLASMA_MAX_CHANGE = 15, 0.05, 5.0
 # boundary stalled with iota near 0.5. Run pwO_optimization.py with IOTA_FLOOR = 0.56 too.
 IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.54 if NFP == 2 else 0.41, 6.1, 0.01
 COIL_SURFACE_DISTANCE_A, COIL_DISTANCE_A, CURVATURE_A = .5, .5, .7
-DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.02
+DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.03  # DEL-BSQ; boundary shift in metres
 IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.56 if NFP == 2 else 0.43, 6.0, 0.004
 CURVATURE_OBJECTIVE_A = .65
 COIL_DISTANCE_OBJECTIVE_A, COIL_SURFACE_DISTANCE_OBJECTIVE_A = .75, .6

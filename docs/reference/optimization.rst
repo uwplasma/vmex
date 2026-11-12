@@ -702,8 +702,7 @@ beta. The coils (``12 // NFP`` shapes) are fitted to the fixed plasma with a
 normal-field tolerance that tightens in two steps, and the pwO residual, with the
 map held, joins the joint boundary/coil objective. Coil
 length, curvature and distances are normalized by the seed minor radius and
-enter as smooth worst-case (power-mean) measures, so L-BFGS keeps a gradient where
-a hard maximum or minimum would stall it; dense geometry sampling checks
+enter as smooth worst-case (power-mean) measures, so L-BFGS keeps a gradient; dense geometry sampling checks
 constraints between field quadrature nodes. The run ends with a cold
 free-boundary solve of the held design and a NEO screen of both the fixed- and
 the free-boundary equilibrium: the second is the transport the coils produce.
