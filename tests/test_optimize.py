@@ -1883,3 +1883,24 @@ def test_l_grad_b_excess_rows_and_weighted_well(solovev_eq):
     s = (np.arange(vp.size) + .5)/vp.size
     well = opt.weighted_magnetic_well(state, runtime, inner=lambda x: 1 - x, outer=lambda x: x)
     assert float(well) == pytest.approx(np.sum((1 - 2*s)*vp)/np.sum(vp), rel=1e-6)
+
+
+def test_min_boundary_curvature_radius_gradient_is_finite_at_an_inflection(monkeypatch):
+    """A boundary point with zero curvature has infinite radius and no NaN gradient."""
+    from vmex.core import statephysics
+
+    def sections(*_args):
+        one, zero = jax.numpy.ones(8), jax.numpy.zeros(8)
+        return None, None, None, one, zero, zero, zero  # straight everywhere: cross = 0
+
+    monkeypatch.setattr(statephysics, "_boundary_sections", sections)
+    rt = SimpleNamespace(resolution=SimpleNamespace(mpol=2, ntor=0))
+    assert jax.numpy.isinf(statephysics.min_boundary_curvature_radius(None, rt))
+
+    def half(x):  # one finite-curvature point beside the straight ones
+        d2z = jax.numpy.zeros(8).at[0].set(x)
+        return None, None, None, jax.numpy.ones(8), jax.numpy.zeros(8), jax.numpy.zeros(8), d2z
+
+    monkeypatch.setattr(statephysics, "_boundary_sections", lambda *a: half(a[0]))
+    gradient = jax.grad(lambda x: statephysics.min_boundary_curvature_radius(x, rt))(2.0)
+    assert np.isfinite(float(gradient))

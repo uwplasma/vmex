@@ -53,7 +53,7 @@ dependencies = [
   # Boozer spectra and differentiable geometry, including asymmetric fields.
   "booz_xform_jax>=0.5.1",
   # Checked tridiagonal solves support broadcast bands and preserve pivot diagnostics.
-  "solvax>=0.35.1",
+  "solvax>=0.36.1",
 ]
 
 [project.scripts]
@@ -77,11 +77,11 @@ optimizers = [
 # 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
   "neo-jax>=1.1.1",
-  "dkx>=2.13.0",
+  "dkx>=2.14.0",
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.12",
+    "virtual-casing-jax>=0.0.15",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -155,7 +155,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.12
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.15
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is

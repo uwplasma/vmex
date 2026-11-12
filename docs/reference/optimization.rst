@@ -232,6 +232,13 @@ Krylov solves.  The block adjoint is accepted when its residual is below
 (10 eps ``|| |J|^T |mu| ||``), whichever is larger, so a right-hand side that
 is small against the multiplier, such as the energy ``wb``, does not fall
 through to the Krylov solve.
+``adjoint_restart`` (default 30) is the restart length of that GMRES solve.
+``adjoint_gcrot_m`` (default 100) and ``adjoint_gcrot_k`` (default 20) are the
+inner cycle size and the number of deflation directions of the GCROT(m, k)
+recycling solve used for the reverse adjoint at high mode number, where plain
+restarted GMRES stalls. ``lconm1`` (default true) keeps VMEC2000's m=1 R/Z
+constraint pair in the forward solve, and ``max_iterations`` caps its
+iterations (default: the last ``NITER_ARRAY`` entry).
 
 ``derivative_method="finite_difference"`` accepts opaque host objectives. It
 uses independent equilibrium probes and ``workers=None`` automatically uses
