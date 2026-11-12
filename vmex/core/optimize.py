@@ -797,6 +797,7 @@ class QuasisymmetryRatioResidual:
 # ``edge_iota`` (implicit.py exposes the mirror alias).
 
 
+@functools.partial(jax.tree_util.register_dataclass, data_fields=["lower", "upper"], meta_fields=[])
 @dataclass(frozen=True)
 class Band:
     """The interval a term may occupy: its residual is the distance outside it.
@@ -830,7 +831,9 @@ def at_most(upper: Any) -> Band:
 
 
 def between(lower: Any, upper: Any) -> Band:
-    """Target ``lower <= value <= upper``."""
+    """Target ``lower <= value <= upper``; ``lower > upper`` is an error."""
+    if np.any(np.asarray(lower) > np.asarray(upper)):
+        raise ValueError(f"between needs lower <= upper, got {lower} > {upper}")
     return Band(lower, upper)
 
 

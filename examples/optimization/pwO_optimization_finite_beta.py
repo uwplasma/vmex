@@ -131,7 +131,7 @@ def dmerc(equilibrium_state, solver_context):
 
 def mercier(equilibrium_state, solver_context):
     """DMerc hinge, log-bounded: DMerc diverges at zero shear and would swamp every other row."""
-    return jnp.log1p(opt.Hinge(dmerc, floor=MERCIER_MARGIN)(equilibrium_state, solver_context))
+    return jnp.log1p(opt.at_least(MERCIER_MARGIN)(dmerc(equilibrium_state, solver_context)))
 
 
 # Each term is (function, target, weight).
@@ -140,13 +140,13 @@ pwo = MappedPwOResidual(SURFACES, mboz=MBOZ, nboz=MBOZ, oversample=2, limit_map=
 objective_function_terms = [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_FLOOR), MAGNETIC_WELL_WEIGHT),
     (mercier, 0.0, MERCIER_WEIGHT),
-    (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, 100.0),
-    (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, 100.0),
-    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
-    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
+    (max_mirror, opt.at_most(MIRROR_LIMIT), 100.0),
+    (opt.axis_excursion, opt.at_most(AXIS_LIMIT), 100.0),
+    (opt.edge_jacobian_ratio, opt.at_least(EDGE_JACOBIAN_FLOOR), 100.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT / TARGET_BETA**2),
 ]
 

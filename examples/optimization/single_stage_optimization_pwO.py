@@ -113,15 +113,15 @@ def boozer_spectrum(state, runtime):
 
 seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iterations=True)
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2, limit_map=True, **MAP_PARAMETERS)
-edge_jacobian = (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0)
+edge_jacobian = (opt.edge_jacobian_ratio, opt.at_least(EDGE_JACOBIAN_FLOOR), 100.0)
 beta_term = [(relative_beta, 1.0, 1.0)] if TARGET_BETA else []
 
 # Plasma stage: boundary and pwO map together, as in pwO_optimization.py.
 start_inp, start = inp, seed
 stage = opt.VmecProblem.from_tuples(inp, [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 100.0),
-    (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0), edge_jacobian] + beta_term,
+    (opt.min_abs_iota, opt.at_least(IOTA_CONSTRAINT), 100.0),
+    (opt.aspect_ratio, opt.at_most(ASPECT_CONSTRAINT), 100.0), edge_jacobian] + beta_term,
     max_mode=MAX_MODES[-1], use_ess=True, restart_from=seed, progress=not ci_smoke)
 x = stage.x0
 for max_mode in MAX_MODES:

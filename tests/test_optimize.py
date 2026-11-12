@@ -308,6 +308,99 @@ def test_band_is_zero_inside_and_the_distance_outside(solovev_eq):
     assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
 
 
+def test_band_edge_values_bounds_and_gradients():
+    """Degenerate and infinite bounds, NaN, array broadcasting, ties, jit and vmap."""
+    x = jnp.asarray([-1.0, 0.0, 0.5, 2.0])
+    np.testing.assert_array_equal(opt.between(0.5, 0.5)(x), jnp.abs(x - 0.5))
+    with pytest.raises(ValueError, match="lower <= upper"):
+        opt.between(2.0, 1.0)
+    with pytest.raises(ValueError, match="lower <= upper"):
+        opt.between(np.array([0.0, 3.0]), np.array([1.0, 2.0]))
+    inf = np.inf
+    for band in (opt.at_least(-inf), opt.at_most(inf), opt.between(-inf, inf)):
+        assert np.all(np.asarray(band(x)) == 0.0)
+    assert np.all(np.isposinf(np.asarray(opt.at_least(inf)(x))))
+    assert np.all(np.isposinf(np.asarray(opt.at_most(-inf)(x))))
+    # NaN is a failed evaluation, not a satisfied limit.
+    for band in (opt.at_least(0.0), opt.at_most(0.0), opt.between(0.0, 1.0)):
+        assert np.isnan(float(band(jnp.nan)))
+    # Per-element bounds and broadcasting against vector, scalar and column values.
+    np.testing.assert_array_equal(
+        opt.between(jnp.asarray([0.0, 1.0]), jnp.asarray([0.5, 1.5]))(jnp.asarray([1.0, 0.0])),
+        [0.5, 1.0])
+    np.testing.assert_array_equal(opt.at_least(jnp.asarray([1.0, 2.0]))(0.0), [1.0, 2.0])
+    assert opt.at_most(1.0)(jnp.zeros((3, 1))).shape == (3, 1)
+    assert opt.at_least(jnp.zeros(3))(jnp.zeros((2, 3))).shape == (2, 3)
+    assert float(opt.at_most(1.0)(0.5)) == 0.0
+
+    # On the bound the value is 0 and the derivative is finite and equals the
+    # excess-function convention jnp.maximum(value - bound, 0) (JAX gives 1/2).
+    for band, ref in ((opt.at_most(0.5), lambda v: jnp.maximum(v - 0.5, 0.0)),
+                      (opt.at_least(0.5), lambda v: jnp.maximum(0.5 - v, 0.0))):
+        value, slope = jax.value_and_grad(band)(0.5)
+        assert float(value) == 0.0 and np.isfinite(float(slope))
+        assert float(slope) == float(jax.grad(ref)(0.5))
+        assert float(jax.jvp(band, (0.5,), (1.0,))[1]) == float(slope)
+        assert float(jax.grad(band)(0.7)) in (0.0, 1.0, -1.0)
+
+    # A Band is a pytree: it crosses jit and vmap, bounds as arguments.
+    jitted = jax.jit(lambda band, v: band(v))
+    np.testing.assert_array_equal(jitted(opt.at_most(1.0), x), np.maximum(np.asarray(x) - 1.0, 0.0))
+    rows = jax.vmap(lambda band: band(1.0))(opt.at_least(jnp.asarray([0.0, 1.5, 3.0])))
+    np.testing.assert_array_equal(rows, [0.0, 0.5, 2.0])
+    assert jax.tree_util.tree_leaves(opt.at_most(2.0)) == [2.0]
+
+
+def test_band_target_in_every_residual_lane(solovev_eq):
+    """Weights of 0, per-row weights, one-argument callables, minimize and staged lanes."""
+    eq = solovev_eq
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    aspect = float(opt.aspect_ratio(eq.state, eq.runtime))
+    zero = opt.residuals_from_tuples(eq.state, eq.runtime, [(opt.aspect_ratio, opt.at_most(1.0), 0.0)])
+    assert float(zero[0]) == 0.0
+    edge = [(opt.edge_jacobian_ratio, opt.at_least(1.5), np.array([1.0, 4.0, 0.0]))]
+    ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
+    np.testing.assert_array_equal(
+        np.asarray(opt.residuals_from_tuples(eq.state, eq.runtime, edge, weight_semantics="residual")),
+        np.array([1.0, 4.0, 0.0]) * (1.5 - ratio))
+    with pytest.raises(ValueError, match="non-negative"):
+        opt.residuals_from_tuples(eq.state, eq.runtime, [(opt.aspect_ratio, opt.at_most(1.0), -1.0)])
+
+    def excess(state, runtime):
+        return jnp.maximum(opt.aspect_ratio(state, runtime) - 3.0, 0.0)
+
+    assert aspect > 3.0
+    kw = dict(max_mode=1, max_nfev=2)
+    # One-argument Equilibrium callable in the finite-difference lane, two stages.
+    ref = opt.least_squares([(excess, 0.0, 100.0)], inp, **kw)
+    got = opt.least_squares([(lambda e: opt.aspect_ratio(e.state, e.runtime), opt.at_most(3.0), 100.0)],
+                            inp, **kw)
+    np.testing.assert_array_equal(got.x, ref.x)
+    staged = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, max_mode=[1, 1], max_nfev=1)
+    staged_ref = opt.least_squares([(excess, 0.0, 100.0)], inp, max_mode=[1, 1], max_nfev=1)
+    np.testing.assert_array_equal(staged.x, staged_ref.x)
+    # Scalarized minimize in the implicit lane.
+    x0 = opt.pack_boundary(inp, 1)
+    bounds = list(zip(x0 - 0.5, x0 + 0.5))
+    minimized = opt.minimize([(excess, 0.0, 100.0)], inp, max_mode=1, bounds=bounds, options={"maxiter": 1})
+    banded = opt.minimize([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, max_mode=1,
+                          bounds=bounds, options={"maxiter": 1})
+    np.testing.assert_array_equal(banded.x, minimized.x)
+    # Different bounds in one process give different problems (cache key).
+    first = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, jac="implicit", **kw)
+    second = opt.least_squares([(opt.aspect_ratio, opt.at_most(9.0), 100.0)], inp, jac="implicit", **kw)
+    assert not np.array_equal(first.x, second.x)  # the loose limit holds, so x stays at the seed
+    # A NaN metric is a failed term, never a satisfied one.
+    nan_rows = opt.residuals_from_tuples(eq.state, eq.runtime,
+                                         [(lambda s, r: jnp.nan * s.R_cos.sum(), opt.at_most(0.0), 1.0)])
+    assert np.all(np.isnan(np.asarray(nan_rows)))
+
+
+def test_removed_hinge_raises_attribute_error():
+    with pytest.raises(AttributeError):
+        opt.Hinge  # noqa: B018
+
+
 def test_stability_terms_match_the_stability_residuals(solovev_eq):
     """The two tuples reproduce the PHIEDGE-scaled hinge rows of the stability residuals."""
     eq = solovev_eq
@@ -1954,3 +2047,31 @@ def test_min_boundary_curvature_radius_gradient_is_finite_at_an_inflection(monke
     monkeypatch.setattr(statephysics, "_boundary_sections", lambda *a: half(a[0]))
     gradient = jax.grad(lambda x: statephysics.min_boundary_curvature_radius(x, rt))(2.0)
     assert np.isfinite(float(gradient))
+
+
+@pytest.mark.parametrize("from_s, edge_factor", [(0.0, 1.0), (1.0, 5.0), (0.5, 1.0)])
+def test_stability_terms_weight_profile(solovev_eq, from_s, edge_factor):
+    """from_s = 0 weights every interior surface, from_s = 1 none; edge_factor = 1 is flat."""
+    n = int(np.shape(opt.d_merc_state(solovev_eq.state, solovev_eq.runtime))[0])
+    inp = SimpleNamespace(phiedge=1.0, ns_array=np.array([5, n]))
+    terms = opt.stability_terms(inp, margin=0.1, weight=2.0, from_s=from_s, edge_factor=edge_factor)
+    weights = terms[0][2]
+    assert weights.shape == (n - 3,) and terms[1][2] is weights
+    s = np.linspace(0.0, 1.0, n)[2:-1]
+    assert np.all(weights[s < from_s] == 0.0)
+    if from_s == 1.0:
+        assert np.count_nonzero(weights) == 0
+    if edge_factor == 1.0:
+        assert np.all(weights[s >= from_s] == 2.0)
+    assert terms[0][1] == opt.at_least(0.1) and terms[1][1] == opt.at_most(-0.1)
+    rows = [np.asarray(f(solovev_eq.state, solovev_eq.runtime)) for f, _, _ in terms]
+    assert all(r.shape == weights.shape and np.all(np.isfinite(r)) for r in rows)
+
+
+def test_stability_terms_on_an_asymmetric_state():
+    inp = dataclasses.replace(VmecInput.from_file(DATA_DIR / "input.solovev"), lasym=True)
+    eq = opt.solve_equilibrium(inp)
+    (merc, band, weights), (res, band_r, _) = opt.stability_terms(inp, margin=0.0, weight=1.0)
+    rows = np.sqrt(weights) * np.asarray(band(merc(eq.state, eq.runtime)))
+    assert rows.shape == weights.shape and np.all(np.isfinite(rows))
+    assert np.all(np.isfinite(np.asarray(band_r(res(eq.state, eq.runtime)))))
