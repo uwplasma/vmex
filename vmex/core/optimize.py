@@ -1315,7 +1315,6 @@ def boozer_modes_from_wout(
     surfaces,
     mboz: int = 18,
     nboz: int = 18,
-    jit: bool = False,
 ) -> dict[str, Any]:
     """Boozer ``|B|`` spectrum of selected surfaces via ``booz_xform_jax``.
 
@@ -1342,7 +1341,7 @@ def boozer_modes_from_wout(
     values = np.atleast_1d(np.asarray(list(np.ravel(surfaces)), dtype=float))
     indices = sorted({int(np.argmin(np.abs(s_in - v))) for v in values})
     bx.compute_surfs = indices
-    bx.run(jit=bool(jit))
+    bx.run()
     bmnc_b = np.asarray(bx.bmnc_b, dtype=float)
     bmns_raw = getattr(bx, "bmns_b", None)
     bmns_b = (np.zeros_like(bmnc_b) if bmns_raw is None
@@ -1369,7 +1368,6 @@ def quasi_isodynamic_residual_from_wout(
     surfaces,
     mboz: int = 18,
     nboz: int = 18,
-    jit_booz: bool = False,
     **qi_kwargs,
 ) -> dict[str, Array]:
     """QI residual of a converged equilibrium: wout -> Boozer -> residual.
@@ -1380,8 +1378,7 @@ def quasi_isodynamic_residual_from_wout(
     used directly as a :func:`least_squares` objective term via
     ``lambda eq: quasi_isodynamic_residual_from_wout(eq, surfaces=...)["residuals1d"]``.
     """
-    booz = boozer_modes_from_wout(wout, surfaces=surfaces, mboz=mboz, nboz=nboz,
-                                  jit=jit_booz)
+    booz = boozer_modes_from_wout(wout, surfaces=surfaces, mboz=mboz, nboz=nboz)
     return quasi_isodynamic_residual(
         bmnc_b=booz["bmnc_b"], bmns_b=booz["bmns_b"],
         xm_b=booz["xm_b"], xn_b=booz["xn_b"],
