@@ -138,6 +138,8 @@ _KNOWN_INDATA_NAMES = {
     "LBOOZ", "MBOOZ", "NBOOZ", "BOOZ_SURFACES",
     # VMEX extension: hot restart from a wout file (no VMEC2000 equivalent).
     "RESTART_WOUT",
+    # educational_VMEC: 1 selects NESTOR, 2 its alternative vacuum solver.
+    "VAC_1_2",
     # VMEX extension: free-boundary position control (see core/position_control.py).
     "LPOSITION_CONTROL", "POSITION_TARGET", "POSITION_INTERVAL",
     "POSITION_GAIN", "POSITION_NMAX",
@@ -665,6 +667,13 @@ def _validate_indata_modes(
             "D00J_OUTPUT_MODE_UNSUPPORTED",
             "LBOOZ",
             "INDATA-driven Boozer output is not implemented; use the --booz CLI option",
+        )
+    if int(first("VAC_1_2", 1)) != 1:
+        warnings.warn(
+            "VAC_1_2: the alternative vacuum solver of educational_VMEC is not "
+            "implemented; VMEX uses its NESTOR port",
+            RuntimeWarning,
+            stacklevel=3,
         )
     requested_legacy_artifacts = [
         name
