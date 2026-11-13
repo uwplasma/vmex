@@ -269,13 +269,14 @@ Sanity anchors, asserted for :class:`~vmex.core.omnigenity.QIResidual` in
 ``tests/test_omnigenity.py``: an analytically QI field scores ``< 1e-24``;
 the bundled ``nfp1_QI`` deck scores at least 20x below a circular tokamak,
 and lowest of the three when the (QA, deliberately non-QI) Landreman–Paul
-configuration is added.  ``examples/optimization/QI_optimization.py`` starts
-from the near-QI ``input.QI_nfp2_initial`` seed and runs one ``max_mode = 2``
-stage of 20 evaluations: on a 36-core workstation at four threads it reaches
-constructed QI 3.0e-3 (fine-grid validation 2.8e-3) with the ι, mirror and
-elongation limits met in 612 s, where the previous circular-seed example ran
-1,456 s and ended in a final solve that did not converge
-(``benchmarks/qi_optimization_profile_cpu.json``);
+configuration is added.  ``examples/optimization/QI_optimization.py``
+starts from the circular ``input.minimal_seed_nfp2`` torus with a 0.05
+rotating ellipse, spends one 15-evaluation stage with the shape terms
+multiplied by 30 and then three 30-evaluation stages at ``max_mode`` 1, 2
+and 3, and reaches constructed QI 1.4e-3 with the aspect, ι, mirror and
+elongation limits met.  Stages of 15 evaluations stall near 5e-3: with the
+grid argmin the constructed-QI rows are discontinuous in the boundary and
+trust-region steps stay near 1e-4;
 :doc:`/howto/optimize-a-boundary` describes the workflow.  The
 earlier Goodman-style *wout-lane* residual
 (:func:`~vmex.core.qi.quasi_isodynamic_residual`, host NumPy,

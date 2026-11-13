@@ -559,6 +559,20 @@ def test_minimize_scalarized_implicit_smoke(solovev_eq):
     assert isinstance(res.input, VmecInput)
 
 
+def test_least_squares_forwards_the_jacobian_certificate_knobs(monkeypatch):
+    """``jacobian_adjoint_tol`` and ``jacobian_adjoint_maxiter`` reach the solver config, per stage."""
+    from vmex.core import implicit as imp
+
+    seen = []
+    make_config = imp.make_config
+    monkeypatch.setattr(imp, "make_config", lambda *a, **k: seen.append(k) or make_config(*a, **k))
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1), jac="implicit",
+                      jacobian_adjoint_tol=3e-5, jacobian_adjoint_maxiter=7, max_nfev=1)
+    assert len(seen) == 2
+    assert all(k["jacobian_adjoint_tol"] == 3e-5 and k["jacobian_adjoint_maxiter"] == 7 for k in seen)
+
+
 def test_minimize_max_mode_schedule():
     """A ``max_mode`` schedule chains scalar stages through ``result.input``."""
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
