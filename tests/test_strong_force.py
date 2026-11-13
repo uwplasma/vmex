@@ -14,7 +14,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from vmex.core import strong_force
+from vmex.core import strong_force, spline_solve as ss
 from vmex.core.fourier import Resolution
 from vmex.core.boozer_tables import high_order_boozer_input_tables
 from vmex.core.input import VmecInput
@@ -1674,3 +1674,91 @@ def test_traced_lift_differentiates_through_state_and_runtime(qa_finite_beta):
     fd = (scalar(moved[0], runtime) - scalar(moved[1], runtime)) / (2 * h)
     assert float(jnp.vdot(g_state.R_cos, state.R_cos)) == pytest.approx(float(fd), rel=1e-6)
     assert float(jnp.abs(g_runtime.setup.phips).max()) > 0.0  # profiles stay live
+
+
+@pytest.fixture(scope="module")
+def spline_solovev():
+    inp = VmecInput.from_file(str(Path(__file__).resolve().parents[1] / "examples" / "data" / "input.solovev"))
+    state = ss.initial_spline_state(inp, BSplineBasis.clamped(np.linspace(0.0, 1.0, 3), degree=3))
+    plan = ss.make_spline_plan(state, ntheta=18)
+    full, info = ss.solve_spline(plan, verbose=True)
+    return plan, full, info
+
+
+def test_spline_structured_hessian_matches_autodiff(spline_solovev):
+    plan, full, _ = spline_solovev
+    index = jnp.asarray(plan.free)
+    expected = jax.jit(jax.hessian(lambda x: ss.spline_energy(plan, full.at[index].set(x))))(full[index])
+    actual = jax.jit(ss.spline_hessian)(plan, full)
+    assert float(jnp.max(jnp.abs(actual - expected)) / jnp.max(jnp.abs(expected))) < 1e-12
+
+
+def test_spline_energy_matches_extrapolated_finite_difference_limit(spline_solovev):
+    # VMEX on the same deck and angular grid (NTHETA = 18) converges as ns^-2:
+    # W(129) = 2027913.32760, W(257) = 2027913.24438 J, so W(inf) = 2027913.2166 J.
+    # Two cubic spans (69 unknowns) land within 1e-10 of that limit.
+    plan, full, info = spline_solovev
+    assert info["iterations"] <= 15 and info["history"][-1][1] < 1e-10
+    assert abs(float(ss.spline_energy(plan, full)) / 2027913.2166 - 1.0) < 1e-9
+
+
+def test_spline_implicit_gradient_matches_central_differences(spline_solovev):
+    plan, full, info = spline_solovev
+    parameters = ss.boundary_indices(plan)
+    m = np.asarray(plan.m)
+    pick = int(np.flatnonzero(m == 1)[0])  # RBC(0,1)
+
+    def axis(f):
+        return f[0]  # R_00 at s = 0: the magnetic axis
+
+    gradient = ss.implicit_gradient(plan, full, axis, parameters, info["multipliers"])[pick]
+    h = 1e-4
+    values = [float(axis(ss.solve_spline(plan, full.at[parameters[pick]].add(sign * h))[0]))
+              for sign in (1.0, -1.0)]
+    assert abs(float(gradient) - (values[0] - values[1]) / (2 * h)) < 1e-6 * abs(float(gradient))
+
+
+def test_spline_rho_basis_preserves_polynomial_values_and_derivatives():
+    inp = VmecInput.from_file("examples/data/input.solovev")
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 3), degree=3)
+    state = ss.initial_spline_state(inp, basis, reguess_axis=False)
+    nodes = np.asarray(basis.collocation_nodes)
+    linear = np.linalg.solve(np.asarray(basis.basis_matrix(nodes)), nodes)
+    names = ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin")
+    state = replace(state, **{name: jnp.asarray(getattr(state, name))[:, :1] + 0.01 * linear for name in names})
+    plan = ss.make_spline_plan(state, rho_basis=basis, ntheta=18)
+    converted = ss._to_rho_basis(state, basis)
+    rho = np.linspace(0.01, 1.0, 23)
+    for name in names:
+        original, transformed = np.asarray(getattr(state, name)), np.asarray(getattr(converted, name))
+        np.testing.assert_allclose(transformed @ basis.basis_matrix(rho).T, original @ basis.basis_matrix(rho**2).T, atol=2e-14)
+        np.testing.assert_allclose(transformed @ basis.basis_matrix(rho, derivative=1).T,
+                                   original @ basis.basis_matrix(rho**2, derivative=1).T * (2 * rho), atol=2e-13)
+    assert plan.size == plan.free.size
+    assert np.sum(plan.weight) == pytest.approx(1.0, abs=2e-14)
+
+
+def test_spline_prescribed_current_normalization_and_node_profile_roundtrip():
+    inp = replace(VmecInput.from_file("examples/data/input.solovev"), curtor=1250.0, ac=(1.0,))
+    basis = BSplineBasis.clamped(np.linspace(0.0, 1.0, 3), degree=3)
+    state = ss.initial_spline_state(inp, basis)
+    current = ss.current_profile(inp, state.jacobian_sign)
+    s = np.asarray([0.0, 0.3, 1.0])
+    np.testing.assert_allclose(current(s), state.jacobian_sign * MU0 * inp.curtor / (2 * np.pi) * s)
+    np.testing.assert_array_equal(ss.current_profile(replace(inp, ac=(0.0,)), state.jacobian_sign)(s), 0.0)
+    plan = ss.make_spline_plan(state, icurv=current, ntheta=18)
+    full = plan.template.at[-plan.rho.size:].set(0.3 + plan.rho**2)
+    restored = ss.unpack_state(state, plan, full)
+    np.testing.assert_allclose(basis.basis_matrix(plan.rho**2) @ restored.chipf, 0.3 + plan.rho**2, atol=2e-14)
+    without_current = ss.spline_energy(replace(plan, icurv=None), full)
+    expected = (2 * np.pi) ** 2 / MU0 * np.sum(plan.weight * plan.icurv * (0.3 + plan.rho**2))
+    assert float(ss.spline_energy(plan, full) - without_current) == pytest.approx(expected, rel=2e-12)
+
+
+def test_spline_ladder_preserves_boundary_and_reaches_each_stationary_level():
+    inp = VmecInput.from_file("examples/data/input.solovev").change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    plan, full, info = ss.solve_spline_ladder(inp, spans=(2, 4), degree=3, verbose=True, ntheta=12)
+    assert [level[0] for level in info["levels"]] == [2, 4]
+    assert info["levels"][1][1] > info["levels"][0][1]
+    assert info["history"][-1][1] < 1e-10
+    np.testing.assert_array_equal(full[ss.boundary_indices(plan)], plan.template[ss.boundary_indices(plan)])
