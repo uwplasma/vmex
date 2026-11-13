@@ -73,8 +73,8 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.36.1 | `pip install vmex` | `pip install "solvax>=0.36.1"` |
-| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
+| `solvax` | 0.36.2 | `pip install vmex` | `pip install "solvax>=0.36.2"` |
+| `booz_xform_jax` | 0.5.2 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.2"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.15 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.15"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
