@@ -129,8 +129,8 @@ GPU checks
 ----------
 
 CI runs a short subset (``pr-gpu-ci`` in ``tests/manifest.json``) on the
-organization's self-hosted GPU runners for pull requests from this repository;
-fork pull requests never reach them. The check is advisory and is not part of
+organization's self-hosted GPU runners on pushes to ``main``, the nightly
+schedule and manual dispatch; pull requests never queue it. It is not part of
 ``PR gate``. The full GPU tests are the local-only
 ``gpu-smoke`` lane in ``tests/manifest.json``. Run them on a machine with an
 NVIDIA driver 580 or newer, without ``JAX_PLATFORMS`` or

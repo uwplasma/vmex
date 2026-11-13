@@ -456,13 +456,14 @@ jobs:
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
   gpu:
-    # Short accelerator check on the org's self-hosted GPU runners. Advisory:
-    # not part of PR gate, so a GPU-box outage cannot block merges.
+    # Short accelerator check on the org's self-hosted GPU runners. It runs on
+    # main, nightly and on demand, never on pull requests: no hosted runner
+    # carries the GPU labels, so a pull-request job would queue indefinitely.
     name: GPU smoke (CUDA)
     needs: changes
     if: >-
       needs.changes.outputs.run_tests == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+      github.event_name != 'pull_request'
     runs-on: [self-hosted, Linux, uwplasma-gpu]
     timeout-minutes: 5
     env:

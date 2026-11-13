@@ -241,13 +241,14 @@ def test_every_manifest_lane_runs_in_a_workflow_or_is_declared_local_only() -> N
         "workflow, move their tests to a lane that runs, or declare them under "
         "local_only with a reason and command."
     )
-    # Self-hosted runners never take fork code: every self-hosted job carries
-    # the same-repository guard.
+    # Self-hosted runners never take fork code: every self-hosted job either
+    # carries the same-repository guard or never runs on pull requests.
     for name, text in {path.name: path.read_text()
                        for path in (ROOT / ".github" / "workflows").glob("*.yml")}.items():
         for job in re.split(r"\n  (?=[a-z][a-z-]*:\n)", text)[1:]:
             if "self-hosted" in job:
-                assert "head.repo.full_name == github.repository" in job, (name, job[:60])
+                assert ("head.repo.full_name == github.repository" in job
+                        or "github.event_name != 'pull_request'" in job), (name, job[:60])
 
 
 def test_workflow_selects_manifest_lanes() -> None:
