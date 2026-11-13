@@ -255,7 +255,7 @@ Every figure below has a generator beside it, using repository decks or retained
 
 ### Quasisymmetric and quasi-isodynamic boundaries
 
-![QA at nfp 2, QH at nfp 4 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
+![QA at nfp 2, QH at nfp 3 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
 
 Boundary optimization for quasi-axisymmetry, quasi-helical symmetry and quasi-poloidal symmetry, each at its own
 field-period count, from `examples/optimization/QA_optimization.py` and its QH and QP siblings.

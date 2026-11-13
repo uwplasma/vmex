@@ -144,6 +144,15 @@ that research budget as one commented set of constants next to the default.
   The scalar lane trades objective progress per evaluation (measured: QA
   final QS 2.7x above least squares with 40 mode-2 iterations; QI on an equal seed, weights and solve count ends 0.7x the least-squares value) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
+  `QA_optimization.py`, `QH_optimization.py` and `QP_optimization.py` share one
+  ladder (`MAX_MODES = [1, 2, 3]`) and one-sided `opt.Hinge` rows for the
+  rotational-transform floor and, in QA and QH, the magnetic well, so a row
+  costs nothing once its floor holds. The seed is the circular deck plus a
+  rotating-ellipse amplitude. From amplitudes of about 0.5 to 1.4 times the
+  default, and with an added m = 2 mode, QA ends at QS 5e-5 to 9e-5 with
+  `epsilon_eff^(3/2)` below 3e-7, and QH (`NFP = 3`) at 5e-4 to 1.3e-3 with
+  `epsilon_eff^(3/2)` below 2e-5. QP is limited by its shape limits (see the
+  script docstring).
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B

@@ -23,7 +23,7 @@ import vmex as vj
 from vmex import optimize as opt
 
 # Number of field periods, and the seed deck the boundary is shaped from:
-NFP = 4
+NFP = 3
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Rotating-ellipse amplitude added to the circular seed. A circular torus
@@ -35,11 +35,16 @@ SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
 # residual evaluations each stage may spend:
-MAX_MODES = [1, 2]
-MAX_NFEV = [10, 15]
+MAX_MODES = [1, 2, 3]
+MAX_NFEV = [10, 15, 20]
 
-# Targets:
+# Targets. The iota floor keeps a stage from trading transform for quasisymmetry;
+# a limit costs nothing once its floor is met:
 ASPECT_TARGET = 6.0
+IOTA_FLOOR = 0.8                  # minimum |iota| over the profile
+IOTA_WEIGHT = 10.0
+MAGNETIC_WELL_TARGET = 0.0
+WELL_WEIGHT = 100.0
 
 # Trial-pressure stability screen, added from the second stage on. TRIAL_BETA
 # is the pressure proxy: beta = 2.5 %, p(s) proportional to 1 - s:
@@ -111,6 +116,8 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=-1)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_TARGET), WELL_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
@@ -194,7 +201,8 @@ final_equilibrium = opt.solve_equilibrium(
 ### Print, plot and save ######################################################
 
 final_total = report("final", final_equilibrium)["QS total"]
-opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET)
+opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
+                   well_floor=MAGNETIC_WELL_TARGET)
 print(f"\nQS total {final_total:.3e}")
 if USE_TRIAL_STABILITY:
     final_s = np.linspace(0.0, 1.0, int(final_input.ns_array[-1]))[2:-1]
