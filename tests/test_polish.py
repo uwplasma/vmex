@@ -70,10 +70,11 @@ def test_sample_high_order_state_requires_matching_mode_tables(small_lift):
 
 
 def test_polished_wout_mesh_and_modes_carry_the_native_state():
-    def native(size, breakpoints=None, m_max=3):
+    def native(size, breakpoints=None, m_max=3, n_max=0):
         spans = size - 3 if breakpoints is None else len(breakpoints) - 1
         breaks = np.linspace(0.0, 1.0, spans + 1) if breakpoints is None else np.asarray(breakpoints)
-        return SimpleNamespace(radial_basis=SimpleNamespace(size=size, breakpoints=breaks), m=np.arange(m_max + 1))
+        return SimpleNamespace(radial_basis=SimpleNamespace(size=size, breakpoints=breaks),
+                               m=np.arange(m_max + 1), n=np.full(m_max + 1, n_max))
 
     # Four samples per default reconstruction span, never coarser than the solve.
     assert polished_wout_ns(native(17), solve_ns=31) == 129
@@ -81,10 +82,14 @@ def test_polished_wout_mesh_and_modes_carry_the_native_state():
     # Two samples per coefficient, and two uniform-s samples in the narrowest span.
     assert polished_wout_ns(native(90), solve_ns=31) == 181
     assert polished_wout_ns(native(20, [0.0, 0.01, 0.02, 0.5, 1.0]), solve_ns=31) == 201
-    # MPOL grows only when padded modes exceed it.
+    # Fourier resolutions grow only when padded modes exceed them.
     deck = _small_solovev_input()
     assert polished_wout_input(native(17, m_max=2), deck) is deck
     assert int(polished_wout_input(native(17, m_max=8), deck).mpol) == 9
+    toroidal = polished_wout_input(native(17, m_max=2, n_max=-3), deck)
+    assert (int(toroidal.mpol), int(toroidal.ntor)) == (int(deck.mpol), 3)
+    both = polished_wout_input(native(17, m_max=8, n_max=4), deck)
+    assert (int(both.mpol), int(both.ntor)) == (9, 4)
 
 
 def test_polish_scope_and_configuration():

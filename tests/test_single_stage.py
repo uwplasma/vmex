@@ -6,6 +6,7 @@ import sys
 
 import numpy as np
 import pytest
+import jax
 import jax.numpy as jnp
 
 from vmex.core import single_stage as ss
@@ -348,6 +349,34 @@ def test_normalized_geometry_costs_are_invariant_under_physical_scale_and_node_c
         np.testing.assert_allclose(scaled_penalty(dense, NS(gamma=surface.gamma * scale)), initial)
     if ncoils == 1:
         assert initial[2] == 0.  # No distinct coil pair exists.
+
+
+def test_normalized_geometry_costs_are_smooth_power_means_of_the_worst_violations(monkeypatch):
+    module = ModuleType("essos.objective_functions")
+    module.loss_coil_separation = module.loss_coil_surface_distance = lambda *a, **kw: 0.
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    t = jnp.linspace(0., 2 * jnp.pi, 8, endpoint=False)
+    ring = jnp.stack((jnp.cos(t), jnp.sin(t), 0 * t), axis=-1)
+    penalty = ss.CoilPenalty(10., 1., .1, .1, normalized=True, curvature_weight=1., distance_weight=1., surface_weight=1.)
+    surface = NS(gamma=jnp.asarray([[[5., 5., 5.]]]))
+
+    def costs(scale, curvature, shift=3.):
+        class Coils(NS):
+            def __len__(self):
+                return 2
+
+        return penalty(Coils(gamma=jnp.stack((scale * ring, scale * ring + shift)), length=jnp.ones(2),
+                             curvature=jnp.stack((curvature, curvature)), dofs_currents=jnp.ones(2)), surface)
+
+    quiet = jnp.zeros(8)
+    assert float(jnp.sum(costs(1., quiet))) < 1e-9
+    # One of eight nodes at twice the limit: the p = 8 power mean is 8**(-1/8) of the maximum.
+    one_node = quiet.at[0].set(2.)
+    np.testing.assert_allclose(costs(1., one_node)[1], .5 * 8**(-.25), rtol=1e-6)
+    # No violation anywhere (and a coil gap violation next to it) still differentiates without NaN.
+    gradient = jax.grad(lambda scale: jnp.sum(costs(scale, quiet, shift=.05)))(1.)
+    assert np.isfinite(float(gradient))
+    assert np.isfinite(float(jax.grad(lambda scale: jnp.sum(costs(scale, quiet)))(1.)))
 
 
 def test_legacy_coil_self_costs_count_only_unique_coils(harness, monkeypatch):

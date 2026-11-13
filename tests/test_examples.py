@@ -118,7 +118,6 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
     "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
-    "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
@@ -182,6 +181,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
     "examples/optimization/pwO_optimization.py",
+    "examples/optimization/pwO_optimization_finite_beta.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_bootstrap_er.py",
@@ -1180,6 +1180,16 @@ def test_low_transport_example(tmp_path):
     _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
     for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
                  "pwO_optimized_nfp3_objectives.csv"):
+        assert (tmp_path / name).exists()
+
+
+@pytest.mark.full
+def test_finite_beta_low_transport_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    pytest.importorskip("neo_jax")
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization_finite_beta.py", tmp_path)
+    for name in ("input.pwO_finite_beta_nfp3", "wout_pwO_finite_beta_nfp3.nc",
+                 "pwO_finite_beta_nfp3_objectives.csv"):
         assert (tmp_path / name).exists()
 
 

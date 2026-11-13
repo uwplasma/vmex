@@ -11,7 +11,7 @@ import jax.numpy as jnp
 
 from .bounce import bounce_action, bounce_action_from_boozer
 from .omnigenity import _ResidualTerm, boozer_spectrum_state
-from .optimize import quasi_isodynamic_residual
+from .qi import quasi_isodynamic_residual
 from .qi import j_invariant_qi_residual_from_boozer
 from .statephysics import _as_1d
 
