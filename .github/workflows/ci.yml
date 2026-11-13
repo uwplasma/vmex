@@ -117,6 +117,10 @@ jobs:
         run: |
           uv pip install ".[dev]"
       - name: Check source, package, and docs
+        # The Mac runners have no C.UTF-8 locale and Sphinx sets the locale at start.
+        env:
+          LC_ALL: ${{ runner.os == 'macOS' && 'en_US.UTF-8' || 'C.UTF-8' }}
+          LANG: ${{ runner.os == 'macOS' && 'en_US.UTF-8' || 'C.UTF-8' }}
         run: |
           ruff check vmex tests examples tools
           mypy vmex
