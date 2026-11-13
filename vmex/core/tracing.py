@@ -235,7 +235,12 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
             raise ImportError("Non-symmetric tracing requires ESSOS sine-spectrum support; upgrade ESSOS")
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
     bx.read_wout_data(wout, flux=False)
-    bx.run()
+    # One jitted batched pass over every half-mesh surface; the spectra are stored as bx.run() stores them.
+    out = bx.run_jax()
+    asym = bool(bx.asym)
+    for name in ("bmnc_b", "rmnc_b", "zmns_b", "numns_b") + (("bmns_b", "rmns_b", "zmnc_b", "numnc_b") if asym else ()):
+        setattr(bx, name, np.asarray(out[name]).T)
+    bx.Boozer_G, bx.Boozer_I, bx.s_b = np.asarray(out["bvco_b"]), np.asarray(out["buco_b"]), np.asarray(bx.s_in)
     # Boozer guiding-centre equations use psi = -Phi_tor/(2 pi) for VMEC's phi.
     psi0 = -float(np.asarray(wout.phi)[-1]) / (2 * np.pi)
     return BoozerField.from_booz_xform(bx, psi0, mode_tolerance, angle_grid=angle_grid), bx
