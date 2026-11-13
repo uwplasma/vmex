@@ -132,7 +132,7 @@ def screen_transport(wout, surfaces, *, mboz=24, nboz=24, config=None):
     if not np.allclose(np.asarray(bx.s_in)[indices], surfaces, rtol=0, atol=1e-12):
         raise ValueError("The NEO screen requires the requested half-mesh radii")
     bx.compute_surfs = indices
-    bx.run(jit=True)
+    bx.run()
     config = config if config is not None else NeoConfig(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
                        nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
                        max_rational_field_periods=100000, rational_surface_policy="error")
