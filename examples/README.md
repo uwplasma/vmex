@@ -5,7 +5,7 @@ a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
 stellarator-symmetric first-order QA example; it does not constrain the
 converged equilibrium to the near-axis expansion or differentiate the generator.
 
-All runnable examples live under this single `examples/` tree. The coil and
+All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16); the package itself supports Python 3.10. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
 
