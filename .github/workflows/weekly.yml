@@ -33,8 +33,10 @@ jobs:
           - {os: macos-latest, python: "3.13", extra: "[all]"}
           - {os: windows-latest, python: "3.13", extra: "[all]"}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install, import and run the CLI
@@ -56,8 +58,10 @@ jobs:
       matrix:
         campaign: [hmfb-fixed, hmfb-free, mirror, free-boundary-adjoint]
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -65,7 +69,7 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install ".[coils,turbulence,freeb]" pytest
-      - uses: actions/cache@v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/vmex
           key: vmex-v4-${{ runner.os }}-weekly-${{ matrix.campaign }}-${{ hashFiles('pyproject.toml') }}-${{ github.run_id }}
@@ -87,7 +91,7 @@ jobs:
           FILES="$(python tools/test_manifest.py select weekly-${{ matrix.campaign }})"
           pytest -q $FILES --durations=25 \
             --vmex-report="test-report-weekly-${{ matrix.campaign }}.json"
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: test-report-weekly-${{ matrix.campaign }}
@@ -185,8 +189,10 @@ jobs:
             parallel: "-n 2"
             timeout: 120
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -223,7 +229,7 @@ jobs:
           (( ${#NODES[@]} )) || { echo "no full nodes selected"; exit 1; }
           pytest -q ${{ matrix.parallel }} "${NODES[@]}" --durations=25 \
             --vmex-report="test-report-full-${{ matrix.lane }}.json"
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: test-report-full-${{ matrix.lane }}

@@ -51,9 +51,9 @@ dependencies = [
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
   # Boozer spectra and differentiable geometry, including asymmetric fields.
-  "booz_xform_jax>=0.5.1",
+  "booz_xform_jax>=0.5.2",
   # Checked tridiagonal solves support broadcast bands and preserve pivot diagnostics.
-  "solvax>=0.36.1",
+  "solvax>=0.36.2",
 ]
 
 [project.scripts]
@@ -65,7 +65,7 @@ Homepage = "https://github.com/uwplasma/vmex"
 Documentation = "https://vmex.readthedocs.io/en/latest/"
 Repository = "https://github.com/uwplasma/vmex"
 Issues = "https://github.com/uwplasma/vmex/issues"
-Changelog = "https://github.com/uwplasma/vmex/releases"
+"Release notes" = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
 optimizers = [
