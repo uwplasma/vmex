@@ -155,6 +155,9 @@ markers = [
 ]
 
 [tool.coverage.run]
+# Coverage files from different runners (Linux and macOS paths) combine only
+# when the recorded paths are relative to the repository root.
+relative_files = true
 # virtual_casing.py requires the optional virtual-casing-jax >= 0.0.15
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
@@ -163,17 +166,6 @@ markers = [
 # likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
 # (the ``vmex --turbulence`` driver).
 omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
-
-# Shards run on self-hosted macOS checkouts and on hosted Linux; they are combined
-# on Linux. Map every absolute prefix onto the combining checkout so ``coverage
-# combine`` finds the sources. vmex is installed non-editable in CI, so shard data
-# points into site-packages.
-[tool.coverage.paths]
-source = [
-  "vmex",
-  "*/vmex",
-  "*/site-packages/vmex",
-]
 
 [tool.coverage.report]
 omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]

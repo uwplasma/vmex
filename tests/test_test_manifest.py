@@ -242,12 +242,11 @@ def test_every_manifest_lane_runs_in_a_workflow_or_is_declared_local_only() -> N
         "local_only with a reason and command."
     )
     # Self-hosted runners never take fork code: every self-hosted job carries
-    # the same-repository guard. ``parity`` never runs on pull requests, so it
-    # has no fork code to guard against.
+    # the same-repository guard.
     for name, text in {path.name: path.read_text()
                        for path in (ROOT / ".github" / "workflows").glob("*.yml")}.items():
         for job in re.split(r"\n  (?=[a-z][a-z-]*:\n)", text)[1:]:
-            if "self-hosted" in job and "parity" not in job.split("\n", 1)[0]:
+            if "self-hosted" in job:
                 assert "head.repo.full_name == github.repository" in job, (name, job[:60])
 
 
