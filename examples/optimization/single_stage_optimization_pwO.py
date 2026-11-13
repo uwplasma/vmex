@@ -2,7 +2,7 @@
 """Optimize a finite-beta pwO plasma and ESSOS coils together.
 
 Run ``pwO_optimization.py`` first. A finite-beta plasma stage frees the pwO
-map as in that example, with hinges on the boundary elongation and smallest
+map as in that example, with limits on the boundary elongation and smallest
 radius of curvature that keep the shape coil-friendly; the pressure is then
 rescaled to the target beta. The coils are fitted to that plasma with a normal
 field tolerance that tightens in two steps (a tight one from the start
@@ -124,17 +124,17 @@ seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iter
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2, limit_map=True, **MAP_PARAMETERS)
 a = float(seed.wout.Aminor_p)
 shape_terms = [
-    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
-    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 1.0e3),
-    (opt.Hinge(opt.min_boundary_curvature_radius, floor=CURVATURE_RADIUS_A * a), 0.0, SHAPE_WEIGHT)]
+    (opt.edge_jacobian_ratio, opt.at_least(EDGE_JACOBIAN_FLOOR), 100.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 1.0e3),
+    (opt.min_boundary_curvature_radius, opt.at_least(CURVATURE_RADIUS_A * a), SHAPE_WEIGHT)]
 beta_term = [(relative_beta, 1.0, 1.0)] if TARGET_BETA else []
 
 # Plasma stage: boundary and pwO map together, as in pwO_optimization.py.
 start_inp, start = inp, seed
 stage = opt.VmecProblem.from_tuples(inp, [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 100.0),
-    (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0)] + shape_terms + beta_term,
+    (opt.min_abs_iota, opt.at_least(IOTA_CONSTRAINT), 100.0),
+    (opt.aspect_ratio, opt.at_most(ASPECT_CONSTRAINT), 100.0)] + shape_terms + beta_term,
     max_mode=MAX_MODES[-1], use_ess=True, restart_from=seed, progress=not ci_smoke)
 x = stage.x0
 for max_mode in MAX_MODES:

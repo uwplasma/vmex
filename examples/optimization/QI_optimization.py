@@ -5,7 +5,7 @@ SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number, starting from a
 near-circular torus with a rotating ellipse (no QI-shaped warm start). The
 residual vector holds the constructed-QI residual, the aspect ratio, and
-one-sided hinges on the rotational transform, the mirror ratio and the
+one-sided limits on the rotational transform, the mirror ratio and the
 elongation; VMEX supplies its exact Jacobian. The first stage multiplies the
 shape terms so the optimizer reaches the aspect, transform and mirror limits
 before the QI residual shapes the boundary.
@@ -69,10 +69,10 @@ IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21               # 0.16 also converges, to QI 2.0e-3
 ELONGATION_LIMIT = 8.0
 
-# A finite-weight hinge settles just above its threshold, and the final
+# A finite-weight limit settles just above its threshold, and the final
 # FINAL_NS solve reads the mirror ratio about 4e-4 above the stage grid, so
-# the mirror hinge starts pulling this far below the limit:
-MIRROR_HINGE_FRACTION = 0.99
+# the mirror limit starts pulling this far below the limit:
+MIRROR_LIMIT_FRACTION = 0.99
 
 # Step control:
 ESS_ALPHA = 1.2                   # lower only after a low-mode QI basin has converged
@@ -117,9 +117,9 @@ inp = replace(inp, rbc=rbc, zbs=zbs, ns_array=np.array([STAGE_NS]),
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
     (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_HINGE_FRACTION * MIRROR_LIMIT), 0.0, MIRROR_WEIGHT),
-    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, ELONGATION_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT_FRACTION * MIRROR_LIMIT), MIRROR_WEIGHT),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), ELONGATION_WEIGHT),
 ]
 qi_terms = [(qi, 0.0, QI_WEIGHT), *objective_function_terms]
 

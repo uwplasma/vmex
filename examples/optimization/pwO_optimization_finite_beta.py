@@ -7,13 +7,13 @@ vacuum and then ramps beta to the target: the circular seed needs no
 vacuum optimization first. SciPy nonlinear least squares varies the boundary,
 and the residual vector holds the mapped pwO variance, aspect ratio,
 rotational transform floor, mirror ratio and shaping limits. The magnetic well,
-Mercier stability (both hinges), GammaC and bootstrap-current control are
+Mercier stability (both limits), GammaC and bootstrap-current control are
 independent switches below. NEO compares the vacuum seed with the result.
 
-The hinges and the transport compete. Good pwO and a low alpha loss at finite
+The limits and the transport compete. Good pwO and a low alpha loss at finite
 beta come only with a Mercier-unstable magnetic hill: at NFP 4 and 3 % beta
-a design with both hinges off loses 1.8 % of its alphas, one with Mercier
-stability alone 24 % and one with both hinges 37 %. With both hinges on, the
+a design with both limits off loses 1.8 % of its alphas, one with Mercier
+stability alone 24 % and one with both limits 37 %. With both limits on, the
 defaults (NFP 3) meet every target at 3 to 5 % beta with 25 to 27 % of the
 alphas lost (2000 alphas, 10 ms, ARIES-CS size; 15 % at 1 % beta, where the
 well floor is missed by 0.002); NFP 4 and NFP 2 do worse.
@@ -66,9 +66,9 @@ MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 
 # Physics terms, each independent. A floor of None (or a bootstrap term of None)
-# removes the term. The well and Mercier hinges act at finite beta only: the
+# removes the term. The well and Mercier limits act at finite beta only: the
 # pressure itself deepens the well, so the vacuum stages keep the pwO geometry:
-MAGNETIC_WELL_FLOOR = 0.01        # hinge on the magnetic well
+MAGNETIC_WELL_FLOOR = 0.01        # limit on the magnetic well
 MAGNETIC_WELL_WEIGHT = 1.0e5
 MERCIER_MARGIN = 0.3              # DMerc floor on the optimizer grid; the final grid differs
 MERCIER_S_MIN = 0.2               # DMerc inward of this is set by the radial grid
@@ -111,7 +111,7 @@ AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magneti
 ELONGATION_LIMIT = 6.0
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
 PWO_WEIGHT = 1.0e3                # the seed's raw pwO variance is of order 0.01
-BETA_PWO_WEIGHT = 1.0e6           # at finite beta the hinges otherwise win and the transport degrades
+BETA_PWO_WEIGHT = 1.0e6           # at finite beta the limits otherwise win and the transport degrades
 
 # Step control. One scaled variable moves a low-order coefficient by
 # PARAMETER_STEP metres, and a stage may move it MAX_PARAMETER_CHANGE steps:
@@ -196,8 +196,8 @@ def dmerc(equilibrium_state, solver_context):
 
 
 def mercier(equilibrium_state, solver_context):
-    """DMerc hinge, log-bounded: DMerc diverges at zero shear and would swamp every other row."""
-    return jnp.log1p(opt.Hinge(dmerc, floor=MERCIER_MARGIN)(equilibrium_state, solver_context))
+    """DMerc limit, log-bounded: DMerc diverges at zero shear and would swamp every other row."""
+    return jnp.log1p(opt.at_least(MERCIER_MARGIN)(dmerc(equilibrium_state, solver_context)))
 
 
 def stage_terms(beta, with_dkx, with_gamma_c):
@@ -206,16 +206,16 @@ def stage_terms(beta, with_dkx, with_gamma_c):
     terms = [
         (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
         (opt.aspect_ratio, ASPECT_TARGET, scale * ASPECT_WEIGHT),
-        (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, scale * IOTA_WEIGHT),
-        (opt.Hinge(max_mirror, ceiling=MIRROR_LIMIT), 0.0, scale * MIRROR_WEIGHT),
-        (opt.Hinge(opt.axis_excursion, ceiling=AXIS_LIMIT), 0.0, scale * 100.0),
-        (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, scale * 100.0),
-        (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, scale * 10.0),
+        (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), scale * IOTA_WEIGHT),
+        (max_mirror, opt.at_most(MIRROR_LIMIT), scale * MIRROR_WEIGHT),
+        (opt.axis_excursion, opt.at_most(AXIS_LIMIT), scale * 100.0),
+        (opt.edge_jacobian_ratio, opt.at_least(EDGE_JACOBIAN_FLOOR), scale * 100.0),
+        (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), scale * 10.0),
     ]
     if beta > 0:
         terms.append((opt.volume_average_beta, beta, BETA_WEIGHT / beta**2))
         if MAGNETIC_WELL_FLOOR is not None:
-            terms.append((opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0, MAGNETIC_WELL_WEIGHT))
+            terms.append((opt.magnetic_well, opt.at_least(MAGNETIC_WELL_FLOOR), MAGNETIC_WELL_WEIGHT))
         if MERCIER_MARGIN is not None:
             terms.append((mercier, 0.0, MERCIER_WEIGHT))
     if with_gamma_c:
