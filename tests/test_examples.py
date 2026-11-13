@@ -118,26 +118,11 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
     "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
-    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
     "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
-    "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
-    "examples/optimization/QA_maxJ_continuation.py": "covered by the source test above; a run is the QI sibling's",
-    "examples/optimization/QA_optimization_DMerc_vacuum.py": "covered by the source test above; its certificate lane has no smoke path",
-    "examples/optimization/QA_optimization_global.py": "covered by the source test above; basin hopping has no meaningful smoke budget",
-    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+        "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
 }
 
 
@@ -169,7 +154,18 @@ EXECUTED_EXAMPLES = {
     "examples/mirror/mirror_exterior_field.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
+    "examples/optimization/QA_maxJ_continuation.py",
+    "examples/optimization/drift_surfaces_optimization.py",
     "examples/optimization/QA_optimization.py",
+    "examples/optimization/QP_optimization_scipy.py",
+    "examples/optimization/QP_optimization_finite_beta_scalar.py",
+    "examples/optimization/QP_optimization_scalar.py",
+    "examples/optimization/QI_optimization_finite_beta_scalar.py",
+    "examples/optimization/QI_optimization_scalar.py",
+    "examples/optimization/QH_optimization_finite_beta_scalar.py",
+    "examples/optimization/QH_optimization_scalar.py",
+    "examples/optimization/QA_optimization_global.py",
+    "examples/optimization/QA_optimization_DMerc_vacuum.py",
     "examples/optimization/QA_optimization_alpha_losses.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
@@ -202,6 +198,10 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization_least_squares.py",
     "examples/optimization/stellarator_asymmetry/QA_optimization.py",
+    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py",
     "examples/optimization/stellarator_asymmetry/QH_optimization.py",
     "examples/optimization/stellarator_asymmetry/QI_optimization.py",
     "examples/optimization/stellarator_asymmetry/QP_optimization.py",
@@ -1036,6 +1036,37 @@ def test_qs_optimization_examples(case, tmp_path):
     assert (tmp_path / f"{case}_optimized_summary.png").exists()
     match = re.search(r"\[final\] QS total = ([0-9.eE+-]+)", out)
     assert match is not None and np.isfinite(float(match.group(1)))
+
+
+@pytest.mark.full
+@pytest.mark.parametrize("name", [
+    "QA_optimization_DMerc_vacuum",
+    "QA_optimization_global",
+    "QH_optimization_scalar",
+    "QH_optimization_finite_beta_scalar",
+    "QI_optimization_scalar",
+    "QI_optimization_finite_beta_scalar",
+    "QP_optimization_scalar",
+    "QP_optimization_finite_beta_scalar",
+    "QP_optimization_scipy",
+    "stellarator_asymmetry/QA_optimization_finite_beta",
+    "stellarator_asymmetry/QH_optimization_finite_beta",
+    "stellarator_asymmetry/QI_optimization_finite_beta",
+    "stellarator_asymmetry/QP_optimization_finite_beta",
+    "QA_maxJ_continuation",
+    "drift_surfaces_optimization",
+])
+def test_sibling_optimization_examples_run(name, tmp_path):
+    """The symmetry-class and optimizer siblings of a PR-tested example run at smoke budget.
+
+    Each shares its driver with a QA or QI script the PR lanes run, so only the
+    weekly examples lanes spend the 6-10 minutes each takes; a clean exit and a
+    written equilibrium prove the deck, the objective terms and the output
+    naming still work.
+    """
+    out = _run_example(EXAMPLES / "optimization" / f"{name}.py", tmp_path)
+    assert list(tmp_path.glob("wout_*.nc")), out[-2000:]
+    assert list(tmp_path.glob("input.*")), out[-2000:]
 
 
 def test_qa_scalar_optimization_example(tmp_path):
