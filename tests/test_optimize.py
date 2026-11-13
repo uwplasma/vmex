@@ -27,6 +27,7 @@ from vmex.core.errors import AdjointSolveError  # noqa: E402
 from vmex.core.problem import Evaluation, FunctionProblem  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
+from vmex.core import qi  # noqa: E402
 
 from tests.conftest import resolve_golden_dir  # noqa: E402
 
@@ -254,6 +255,8 @@ def test_min_abs_iota_floors_the_profile_not_its_average(solovev_eq):
         float(iotas.min()), rel=1e-10)
     assert (float(opt.soft_min_abs_iota(eq.state, eq.runtime))
             >= float(iotas.min()) - 1.0e-12)
+    assert float(opt.max_abs_iota(eq.state, eq.runtime)) == pytest.approx(
+        float(iotas.max()), rel=1e-10)
 
     # Reducer separation on a profile with a genuine interior minimum, and on
     # its negation: a magnitude floor must not see the transform sign.
@@ -289,15 +292,158 @@ def test_min_abs_iota_gradient_is_finite_and_matches_fd(solovev_eq):
     np.testing.assert_allclose(float(jvp), float(fd), rtol=2e-5, atol=1e-10)
 
 
-def test_hinge_is_zero_inside_its_band_and_the_distance_outside(solovev_eq):
+def test_band_is_zero_inside_and_the_distance_outside(solovev_eq):
     eq = solovev_eq
     ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
     assert ratio.shape == (3,) and np.all((ratio > 0) & (ratio <= 1))
-    inside = opt.Hinge(opt.edge_jacobian_ratio, floor=0.0, ceiling=1.0)
-    assert np.all(np.asarray(inside(eq.state, eq.runtime)) == 0.0)
-    above = opt.Hinge(opt.edge_jacobian_ratio, floor=1.5)
-    np.testing.assert_allclose(above(eq.state, eq.runtime), 1.5 - ratio, rtol=1e-12)
+    weight = 4.0
+    rows = lambda target: np.asarray(opt.residuals_from_tuples(  # noqa: E731
+        eq.state, eq.runtime, [(opt.edge_jacobian_ratio, target, weight)]))
+    assert np.all(rows(opt.between(0.0, 1.0)) == 0.0)
+    assert np.all(rows(opt.at_most(1.5)) == 0.0)
+    below = jnp.maximum(1.5 - ratio, 0.0)
+    np.testing.assert_array_equal(rows(opt.at_least(1.5)), 2.0 * np.asarray(below))
+    np.testing.assert_allclose(rows(opt.at_least(1.5)), 2.0 * (1.5 - ratio), rtol=1e-12)
+    np.testing.assert_array_equal(rows(opt.at_most(0.5)),
+                                  2.0 * np.maximum(ratio - 0.5, 0.0))
+    np.testing.assert_array_equal(rows(opt.between(0.4, 0.6)),
+                                  2.0 * (np.maximum(0.4 - ratio, 0.0) + np.maximum(ratio - 0.6, 0.0)))
     assert float(opt.axis_excursion(eq.state, eq.runtime)) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_band_edge_values_bounds_and_gradients():
+    """Degenerate and infinite bounds, NaN, array broadcasting, ties, jit and vmap."""
+    x = jnp.asarray([-1.0, 0.0, 0.5, 2.0])
+    np.testing.assert_array_equal(opt.between(0.5, 0.5)(x), jnp.abs(x - 0.5))
+    with pytest.raises(ValueError, match="lower <= upper"):
+        opt.between(2.0, 1.0)
+    with pytest.raises(ValueError, match="lower <= upper"):
+        opt.between(np.array([0.0, 3.0]), np.array([1.0, 2.0]))
+    inf = np.inf
+    for band in (opt.at_least(-inf), opt.at_most(inf), opt.between(-inf, inf)):
+        assert np.all(np.asarray(band(x)) == 0.0)
+    assert np.all(np.isposinf(np.asarray(opt.at_least(inf)(x))))
+    assert np.all(np.isposinf(np.asarray(opt.at_most(-inf)(x))))
+    # NaN is a failed evaluation, not a satisfied limit.
+    for band in (opt.at_least(0.0), opt.at_most(0.0), opt.between(0.0, 1.0)):
+        assert np.isnan(float(band(jnp.nan)))
+    # Per-element bounds and broadcasting against vector, scalar and column values.
+    np.testing.assert_array_equal(
+        opt.between(jnp.asarray([0.0, 1.0]), jnp.asarray([0.5, 1.5]))(jnp.asarray([1.0, 0.0])),
+        [0.5, 1.0])
+    np.testing.assert_array_equal(opt.at_least(jnp.asarray([1.0, 2.0]))(0.0), [1.0, 2.0])
+    assert opt.at_most(1.0)(jnp.zeros((3, 1))).shape == (3, 1)
+    assert opt.at_least(jnp.zeros(3))(jnp.zeros((2, 3))).shape == (2, 3)
+    assert float(opt.at_most(1.0)(0.5)) == 0.0
+
+    # On the bound the value is 0 and the derivative is finite and equals the
+    # excess-function convention jnp.maximum(value - bound, 0) (JAX gives 1/2).
+    for band, ref in ((opt.at_most(0.5), lambda v: jnp.maximum(v - 0.5, 0.0)),
+                      (opt.at_least(0.5), lambda v: jnp.maximum(0.5 - v, 0.0))):
+        value, slope = jax.value_and_grad(band)(0.5)
+        assert float(value) == 0.0 and np.isfinite(float(slope))
+        assert float(slope) == float(jax.grad(ref)(0.5))
+        assert float(jax.jvp(band, (0.5,), (1.0,))[1]) == float(slope)
+        assert float(jax.grad(band)(0.7)) in (0.0, 1.0, -1.0)
+
+    # A Band is a pytree: it crosses jit and vmap, bounds as arguments.
+    jitted = jax.jit(lambda band, v: band(v))
+    np.testing.assert_array_equal(jitted(opt.at_most(1.0), x), np.maximum(np.asarray(x) - 1.0, 0.0))
+    rows = jax.vmap(lambda band: band(1.0))(opt.at_least(jnp.asarray([0.0, 1.5, 3.0])))
+    np.testing.assert_array_equal(rows, [0.0, 0.5, 2.0])
+    assert jax.tree_util.tree_leaves(opt.at_most(2.0)) == [2.0]
+
+
+def test_band_target_in_every_residual_lane(solovev_eq):
+    """Weights of 0, per-row weights, one-argument callables, minimize and staged lanes."""
+    eq = solovev_eq
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    aspect = float(opt.aspect_ratio(eq.state, eq.runtime))
+    zero = opt.residuals_from_tuples(eq.state, eq.runtime, [(opt.aspect_ratio, opt.at_most(1.0), 0.0)])
+    assert float(zero[0]) == 0.0
+    edge = [(opt.edge_jacobian_ratio, opt.at_least(1.5), np.array([1.0, 4.0, 0.0]))]
+    ratio = np.asarray(opt.edge_jacobian_ratio(eq.state, eq.runtime))
+    np.testing.assert_array_equal(
+        np.asarray(opt.residuals_from_tuples(eq.state, eq.runtime, edge, weight_semantics="residual")),
+        np.array([1.0, 4.0, 0.0]) * (1.5 - ratio))
+    with pytest.raises(ValueError, match="non-negative"):
+        opt.residuals_from_tuples(eq.state, eq.runtime, [(opt.aspect_ratio, opt.at_most(1.0), -1.0)])
+
+    def excess(state, runtime):
+        return jnp.maximum(opt.aspect_ratio(state, runtime) - 3.0, 0.0)
+
+    assert aspect > 3.0
+    kw = dict(max_mode=1, max_nfev=2)
+    # One-argument Equilibrium callable in the finite-difference lane, two stages.
+    ref = opt.least_squares([(excess, 0.0, 100.0)], inp, **kw)
+    got = opt.least_squares([(lambda e: opt.aspect_ratio(e.state, e.runtime), opt.at_most(3.0), 100.0)],
+                            inp, **kw)
+    np.testing.assert_array_equal(got.x, ref.x)
+    staged = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, max_mode=[1, 1], max_nfev=1)
+    staged_ref = opt.least_squares([(excess, 0.0, 100.0)], inp, max_mode=[1, 1], max_nfev=1)
+    np.testing.assert_array_equal(staged.x, staged_ref.x)
+    # Scalarized minimize in the implicit lane.
+    x0 = opt.pack_boundary(inp, 1)
+    bounds = list(zip(x0 - 0.5, x0 + 0.5))
+    minimized = opt.minimize([(excess, 0.0, 100.0)], inp, max_mode=1, bounds=bounds, options={"maxiter": 1})
+    banded = opt.minimize([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, max_mode=1,
+                          bounds=bounds, options={"maxiter": 1})
+    np.testing.assert_array_equal(banded.x, minimized.x)
+    # Different bounds in one process give different problems (cache key).
+    first = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, jac="implicit", **kw)
+    second = opt.least_squares([(opt.aspect_ratio, opt.at_most(9.0), 100.0)], inp, jac="implicit", **kw)
+    assert not np.array_equal(first.x, second.x)  # the loose limit holds, so x stays at the seed
+    # A NaN metric is a failed term, never a satisfied one.
+    nan_rows = opt.residuals_from_tuples(eq.state, eq.runtime,
+                                         [(lambda s, r: jnp.nan * s.R_cos.sum(), opt.at_most(0.0), 1.0)])
+    assert np.all(np.isnan(np.asarray(nan_rows)))
+
+
+def test_removed_hinge_raises_attribute_error():
+    with pytest.raises(AttributeError):
+        opt.Hinge  # noqa: B018
+
+
+def test_stability_terms_match_the_stability_residuals(solovev_eq):
+    """The two tuples reproduce the PHIEDGE-scaled hinge rows of the stability residuals."""
+    eq = solovev_eq
+    state, rt = eq.state, eq.runtime
+    dmerc = np.asarray(opt.d_merc_state(state, rt))[2:-1]
+    inp = SimpleNamespace(phiedge=1.7, ns_array=[dmerc.size + 3])
+    margin = 2.0 * float(np.abs(1.7**2 * dmerc).max())
+    terms = opt.stability_terms(inp, margin=margin, weight=9.0, from_s=0.3, edge_factor=3.0)
+    s = np.linspace(0.0, 1.0, dmerc.size + 3)[2:-1]
+    weights = np.where(s >= 0.3, 9.0 * (1.0 + 2.0 * s**4), 0.0)
+    reference = [
+        1.7**2 * opt.mercier_stability_residual(state, rt, margin=margin / 1.7**2, smoothing=1e-12),
+        1.7**2 * opt.glasser_stability_residual(state, rt, margin=margin / 1.7**2, smoothing=1e-12)]
+    for (fun, band, weight), expected in zip(terms, reference):
+        np.testing.assert_array_equal(weight, weights)
+        rows = np.sqrt(weight) * np.asarray(band(fun(state, rt)))
+        np.testing.assert_allclose(rows, np.sqrt(weights) * np.asarray(expected), atol=1e-10)
+        assert np.any(rows > 0.0)
+
+
+@pytest.mark.parametrize("jac", [None, "implicit"])
+def test_band_target_matches_a_hand_written_one_sided_term(jac):
+    """A band target takes the same optimizer steps as the equivalent excess function.
+
+    Aspect starts near 3.12; the limit 3.0 binds, so the band row is active.
+    A second limit that already holds must leave the result unchanged (the jit
+    cache keys on the bounds, so a different limit must not reuse the first).
+    """
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+
+    def excess(state, runtime):
+        return jnp.maximum(opt.aspect_ratio(state, runtime) - 3.0, 0.0)
+
+    kw = dict(max_mode=1, jac=jac, max_nfev=2)
+    ref = opt.least_squares([(excess, 0.0, 100.0)], inp, **kw)
+    got = opt.least_squares([(opt.aspect_ratio, opt.at_most(3.0), 100.0)], inp, **kw)
+    np.testing.assert_array_equal(got.x, ref.x)
+    assert float(got.cost) == float(ref.cost)
+    loose = opt.least_squares([(opt.aspect_ratio, opt.at_most(9.0), 100.0)], inp, **kw)
+    assert float(loose.cost) == 0.0
 
 
 def test_scalar_targets_vs_golden(solovev_eq):
@@ -421,7 +567,7 @@ def test_qi_regression_pin_and_jit():
     assert np.all(np.isfinite(res))
     # The residual's two argmins read normalized |B| (range 1) per field line
     # over the periodic and the endpoint-inclusive samples.
-    grid = opt._qi_grid(
+    grid = qi._qi_grid(
         booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
         weights=None, phimin=0.0,
         **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
@@ -556,6 +702,31 @@ def test_minimize_scalarized_implicit_smoke(solovev_eq):
     assert np.all(np.isfinite(res.jac))
     assert np.all(res.x >= x0 - 0.5) and np.all(res.x <= x0 + 0.5)
     assert isinstance(res.input, VmecInput)
+
+
+def test_least_squares_forwards_the_jacobian_certificate_knobs(monkeypatch):
+    """``jacobian_adjoint_tol`` and ``jacobian_adjoint_maxiter`` reach the solver config, per stage."""
+    from vmex.core import implicit as imp
+
+    seen = []
+    make_config = imp.make_config
+    monkeypatch.setattr(imp, "make_config", lambda *a, **k: seen.append(k) or make_config(*a, **k))
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1), jac="implicit",
+                      jacobian_adjoint_tol=3e-5, jacobian_adjoint_maxiter=7, max_nfev=1)
+    assert len(seen) == 2
+    assert all(k["jacobian_adjoint_tol"] == 3e-5 and k["jacobian_adjoint_maxiter"] == 7 for k in seen)
+
+
+def test_minimize_max_mode_schedule():
+    """A ``max_mode`` schedule chains scalar stages through ``result.input``."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    res = opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1),
+                       options={"maxiter": 1})
+    assert len(res.stage_results) == 2 and res.stage_results[-1] is res
+    np.testing.assert_array_equal(opt.pack_boundary(res.input, 1), res.x)
+    with pytest.raises(ValueError, match="x0 cannot be combined"):
+        opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 2), x0=res.x)
 
 
 def test_scipy_bfgs_scalar_lane_completes_and_descends():
@@ -1904,3 +2075,31 @@ def test_min_boundary_curvature_radius_gradient_is_finite_at_an_inflection(monke
     monkeypatch.setattr(statephysics, "_boundary_sections", lambda *a: half(a[0]))
     gradient = jax.grad(lambda x: statephysics.min_boundary_curvature_radius(x, rt))(2.0)
     assert np.isfinite(float(gradient))
+
+
+@pytest.mark.parametrize("from_s, edge_factor", [(0.0, 1.0), (1.0, 5.0), (0.5, 1.0)])
+def test_stability_terms_weight_profile(solovev_eq, from_s, edge_factor):
+    """from_s = 0 weights every interior surface, from_s = 1 none; edge_factor = 1 is flat."""
+    n = int(np.shape(opt.d_merc_state(solovev_eq.state, solovev_eq.runtime))[0])
+    inp = SimpleNamespace(phiedge=1.0, ns_array=np.array([5, n]))
+    terms = opt.stability_terms(inp, margin=0.1, weight=2.0, from_s=from_s, edge_factor=edge_factor)
+    weights = terms[0][2]
+    assert weights.shape == (n - 3,) and terms[1][2] is weights
+    s = np.linspace(0.0, 1.0, n)[2:-1]
+    assert np.all(weights[s < from_s] == 0.0)
+    if from_s == 1.0:
+        assert np.count_nonzero(weights) == 0
+    if edge_factor == 1.0:
+        assert np.all(weights[s >= from_s] == 2.0)
+    assert terms[0][1] == opt.at_least(0.1) and terms[1][1] == opt.at_most(-0.1)
+    rows = [np.asarray(f(solovev_eq.state, solovev_eq.runtime)) for f, _, _ in terms]
+    assert all(r.shape == weights.shape and np.all(np.isfinite(r)) for r in rows)
+
+
+def test_stability_terms_on_an_asymmetric_state():
+    inp = dataclasses.replace(VmecInput.from_file(DATA_DIR / "input.solovev"), lasym=True)
+    eq = opt.solve_equilibrium(inp)
+    (merc, band, weights), (res, band_r, _) = opt.stability_terms(inp, margin=0.0, weight=1.0)
+    rows = np.sqrt(weights) * np.asarray(band(merc(eq.state, eq.runtime)))
+    assert rows.shape == weights.shape and np.all(np.isfinite(rows))
+    assert np.all(np.isfinite(np.asarray(band_r(res(eq.state, eq.runtime)))))

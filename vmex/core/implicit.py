@@ -131,6 +131,7 @@ verified against :func:`~vmex.core.setup.run_setup` in
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import contextlib
 import dataclasses
 import functools
@@ -150,6 +151,7 @@ from jax.flatten_util import ravel_pytree
 
 from solvax import (
     auto_chunk_size,
+    available_cpus,
     block_tridiag_matvec,
     block_cyclic_reduction_factor,
     block_thomas_factor,
@@ -1471,6 +1473,9 @@ _LAST_REFINED: weakref.WeakKeyDictionary[
 _LAST_BANDS: weakref.WeakKeyDictionary[
     ImplicitConfig, tuple[bytes, np.ndarray, tuple]] = weakref.WeakKeyDictionary()
 
+# cfg -> worker threads for the colored probes of its block factorization (None: automatic).
+_PROBE_WORKERS: weakref.WeakKeyDictionary[ImplicitConfig, int | None] = weakref.WeakKeyDictionary()
+
 # cfg -> whether its latest _refined_state call stopped at _REFINE_FAR_STALL.
 _ANCHOR_STALLED: dict[int, bool] = {}
 
@@ -1806,18 +1811,32 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     return z, fz, residual_norm, linear
 
 
+@functools.partial(jax.jit, static_argnames=("cfg", "chunk"))
+def _refine_probe_core(z: SpectralState, params: ImplicitParams,
+                       frozen: SpectralState, dof_mask: SpectralState,
+                       indices: Array, cfg: ImplicitConfig, chunk: int):
+    """Responses of the colored probes ``indices`` of the raw operator at ``z``."""
+    return _raw_block_system(params, cfg, frozen, dof_mask, _active_state_fields(cfg), chunk,
+                             z_star=z, probe_indices=indices)
+
+
 @functools.partial(jax.jit, static_argnames=("cfg",))
 def _refine_block_factor_core(z: SpectralState, params: ImplicitParams,
                               frozen: SpectralState, dof_mask: SpectralState,
-                              cfg: ImplicitConfig):
+                              cfg: ImplicitConfig, responses: tuple | None = None):
     """Raw block factors, scales and bands linearized at the iterate ``z``.
 
     The one compiled block factorization of a config: the anchor's Newton
-    steps, the Jacobian and the adjoint all consume its output.
+    steps, the Jacobian and the adjoint all consume its output.  ``responses``
+    are the probe responses of :func:`_refine_probe_core` run in pieces; without
+    them the probes run inside this program.
     """
     fields = _active_state_fields(cfg)
     probe = int(np.ceil(np.sqrt(len(fields) * int(dof_mask.R_cos.shape[1]))))
-    system = _raw_block_system(params, cfg, frozen, dof_mask, fields, probe, z_star=z)
+    if responses is not None:
+        responses = jnp.concatenate(responses)[:3 * len(fields) * int(dof_mask.R_cos.shape[1])]
+    system = _raw_block_system(params, cfg, frozen, dof_mask, fields, probe, z_star=z,
+                               responses=responses)
     return (system.factors, system.row_scale, system.column_scale,
             system.lower, system.diagonal, system.upper)
 
@@ -1880,6 +1899,51 @@ _BANDS_REUSE_TOL = 1.0e-2
 _STALE_BANDS_RTOL = 1.0e-12
 
 
+#: Most probe threads chosen automatically; one XLA:CPU program does not scale past a few
+#: threads, so concurrent programs are what use the remaining cores.
+_MAX_PROBE_WORKERS = 8
+
+
+def set_probe_workers(cfg: ImplicitConfig, workers: int | None) -> None:
+    """Run the colored probes of ``cfg``'s block factorization, and the column chunks of its
+    block Jacobian, on ``workers`` threads.
+
+    Each thread runs the same compiled program on its slice, so the result is the
+    single-program one.  ``1`` keeps one program; ``None`` takes the CPU count (at most
+    :data:`_MAX_PROBE_WORKERS`) on a CPU device and ``1`` on an accelerator.
+    """
+    if workers is not None and int(workers) < 1:
+        raise ValueError("probe_workers must be a positive integer or None")
+    _PROBE_WORKERS[cfg] = None if workers is None else int(workers)
+
+
+def probe_workers(cfg: ImplicitConfig) -> int:
+    """Threads the probes and Jacobian columns of ``cfg`` are split over (:func:`set_probe_workers`)."""
+    workers = _PROBE_WORKERS.get(cfg)
+    if workers is None:
+        cpu = getattr(cfg.device, "platform", jax.default_backend()) == "cpu"
+        workers = min(available_cpus(), _MAX_PROBE_WORKERS) if cpu else 1
+    return workers
+
+
+def _probe_responses(cfg: ImplicitConfig, arguments: tuple) -> tuple | None:
+    """Colored probe responses of the factorization at ``arguments`` from worker threads, in
+    slices of equal length (``None``: the factorization program runs its own probes)."""
+    workers = probe_workers(cfg)
+    if workers <= 1:
+        return None
+    mn = int(arguments[3].R_cos.shape[1])
+    block = len(_active_state_fields(cfg)) * mn
+    total = 3 * block
+    # Together the slices batch as many probes at a time as one program would.
+    budget = max(1, min(block, max(8, _COLORED_PROBE_BUDGET // int(cfg.resolution.ns))) // workers)
+    batches = -(-(-(-total // workers)) // budget)
+    chunk = -(-total // (workers * batches))
+    indices = np.minimum(np.arange(workers * batches * chunk), total - 1).reshape(workers, -1)
+    with concurrent.futures.ThreadPoolExecutor(workers) as pool:
+        return tuple(pool.map(lambda part: _refine_probe_core(*arguments, part, cfg, chunk), indices))
+
+
 def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
                  frozen: SpectralState, dof_mask: SpectralState,
                  z: SpectralState | None = None) -> tuple:
@@ -1904,7 +1968,7 @@ def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
         return hit[2]
     _count(cfg, block_factorizations=1,
            block_bands_rejected=int(z is None and hit is not None))
-    bands = _refine_block_factor_core(*arguments, cfg)
+    bands = _refine_block_factor_core(*arguments, cfg, _probe_responses(cfg, arguments))
     _LAST_BANDS[cfg] = (key, zp, bands)
     return bands
 
@@ -2889,16 +2953,8 @@ def _resolved_chunk_sizes(
 _COLORED_PROBE_BUDGET = 4096
 
 
-def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk):
-    """``(lower, diagonal, upper)`` of a nearest-neighbor block-tridiagonal operator.
-
-    Three-coloring of the radial index: perturbing component ``q`` on every
-    surface ``k`` with ``k % 3 == c`` leaves each output row ``i`` excited by
-    exactly one of its neighbors ``i - 1, i, i + 1``, so ``3 * block_size``
-    forward-mode probes of the full operator recover every block, in place of
-    ``ns * block_size`` sequential reverse sweeps of the local kernel.  Inactive
-    columns get the identity, as in the per-row build.
-    """
+def _colored_probes(operator, pack, unpack, project, ns, block_size, dtype, indices, chunk):
+    """Responses ``(len(indices), ns, block_size)`` of the colored forward-mode probes ``indices``."""
     surfaces = jnp.arange(ns)
 
     def probe(index):
@@ -2908,7 +2964,24 @@ def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk
         tangent = project(unpack(delta))
         return pack(project(operator(tangent))) + delta - pack(tangent)
 
-    responses = jax.lax.map(probe, jnp.arange(3 * block_size), batch_size=int(chunk))
+    return jax.lax.map(probe, indices, batch_size=int(chunk))
+
+
+def _colored_bands(operator, pack, unpack, project, ns, block_size, dtype, chunk, responses=None):
+    """``(lower, diagonal, upper)`` of a nearest-neighbor block-tridiagonal operator.
+
+    Three-coloring of the radial index: perturbing component ``q`` on every
+    surface ``k`` with ``k % 3 == c`` leaves each output row ``i`` excited by
+    exactly one of its neighbors ``i - 1, i, i + 1``, so ``3 * block_size``
+    forward-mode probes of the full operator recover every block, in place of
+    ``ns * block_size`` sequential reverse sweeps of the local kernel.  Inactive
+    columns get the identity, as in the per-row build.  ``responses`` are the
+    ``3 * block_size`` probe responses when the caller ran the probes itself.
+    """
+    surfaces = jnp.arange(ns)
+    if responses is None:
+        responses = _colored_probes(operator, pack, unpack, project, ns, block_size, dtype,
+                                    jnp.arange(3 * block_size), chunk)
     responses = responses.reshape(3, block_size, ns, block_size)  # color, input, row, output
 
     def band(offset):
@@ -2949,6 +3022,8 @@ def _raw_block_system(
     include_edge: bool = False,
     factor: bool = True,
     bands: tuple | None = None,
+    responses: Array | None = None,
+    probe_indices: Array | None = None,
 ) -> _RawBlockSystem:
     """Factor an exactly nearest-neighbor raw-force Jacobian once.
 
@@ -2961,6 +3036,9 @@ def _raw_block_system(
     ``bands`` takes ``(factors, row_scale, column_scale, lower, diagonal,
     upper)`` already built at this point by :func:`_block_bands`, so a graph
     that only consumes the system does not compile its assembly again.
+    ``responses`` are the colored probe responses computed outside the graph
+    (:func:`_refine_probe_core`); with ``probe_indices`` the call returns just those
+    probes' responses, batched ``probe_chunk_size`` at a time.
     """
     if not active_fields:
         raise ValueError("implicit response has no active state fields")
@@ -3000,8 +3078,10 @@ def _raw_block_system(
             lambda z: residual(z, params), (z_star,), (tangent,)
         )[1]
 
-    _, pullback = jax.vjp(lambda z: residual(z, params), z_star)
-    operator_t = lambda cotangent: pullback(cotangent)[0]  # noqa: E731
+    # Linearized where it is applied: only the transposed solves use it, and building
+    # it for every system traced a full extra residual linearization (seconds).
+    operator_t = lambda cotangent: jax.vjp(  # noqa: E731
+        lambda z: residual(z, params), z_star)[1](cotangent)[0]
     if bands is not None:
         factors, row_scale, column_scale, lower, diagonal, upper = bands
     else:
@@ -3065,11 +3145,14 @@ def _raw_block_system(
                 chunk_size=min(int(probe_chunk_size), block_size),
             )
 
+        if probe_indices is not None:
+            return _colored_probes(operator, pack, unpack, project, ns, block_size, dtype,
+                                   probe_indices, probe_chunk_size)
         if colored:
             lower, diagonal, upper = _colored_bands(
                 operator, pack, unpack, project, ns, block_size, dtype,
                 # each probe carries a full-operator tangent; bound the batch by ns
-                min(block_size, max(8, _COLORED_PROBE_BUDGET // ns)))
+                min(block_size, max(8, _COLORED_PROBE_BUDGET // ns)), responses)
         else:
             # Rows 0 and 1 depend on VMEC's lambda-axis closure. All later rows share
             # one ordinary local kernel; lax.map keeps the compile graph bounded in ns.

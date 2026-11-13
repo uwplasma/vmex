@@ -58,9 +58,9 @@ Scope notes
   the latter retain both cosine and sine Boozer ``|B|`` harmonics.
 - Requested surfaces are snapped to the *nearest half-mesh surface* (the
   Boozer transform is a per-surface construction — same convention as
-  :func:`vmex.core.optimize.boozer_modes_from_wout`), not interpolated.
+  :func:`vmex.core.qi.boozer_modes_from_wout`), not interpolated.
 - The wout-engine analogue for cross-checks is
-  :func:`vmex.core.optimize.quasi_isodynamic_residual_from_wout`
+  :func:`vmex.core.qi.quasi_isodynamic_residual_from_wout`
   (host booz_xform_jax, finite-difference-only).
 """
 
@@ -370,7 +370,7 @@ def boozer_spectrum_state(
 ) -> dict[str, Array]:
     """Boozer ``|B|`` spectrum of selected surfaces, fully traceable.
 
-    The jnp analogue of :func:`vmex.core.optimize.boozer_modes_from_wout`
+    The jnp analogue of :func:`vmex.core.qi.boozer_modes_from_wout`
     evaluated without a wout file: vmex snaps the requested surfaces and
     builds the wout-convention single-surface spectral tables from the
     solver's internal state (:func:`vmex.core.boozer_tables
@@ -392,7 +392,7 @@ def boozer_spectrum_state(
     are the signed toroidal flux divided by ``2*pi``.
     ``bmnc_b/xm_b/xn_b/iota_b/G_b/I_b/nfp`` are the inputs of
     :func:`omnigenity_residual` and of
-    :func:`vmex.core.optimize.quasi_isodynamic_residual`.
+    :func:`vmex.core.qi.quasi_isodynamic_residual`.
 
     ``geometry=True`` also returns the geometry of the same transform in
     booz_xform's ``boozmn`` names: ``rmnc_b``, ``rmns_b``, ``zmnc_b``,
