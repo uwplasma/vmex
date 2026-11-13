@@ -2032,12 +2032,13 @@ def polished_wout_ns(native: HighOrderEquilibriumState, *, solve_ns: int) -> int
 
 
 def polished_wout_input(native: HighOrderEquilibriumState, source):
-    """The deck whose ``MPOL`` holds every mode of ``native`` (a wider wout)."""
+    """The deck whose ``MPOL`` and ``NTOR`` hold every native Fourier mode."""
 
-    mpol = int(np.max(np.abs(np.asarray(native.m)))) + 1
-    if mpol <= int(source.mpol):
+    mpol = max(int(source.mpol), int(np.max(np.abs(np.asarray(native.m)))) + 1)
+    ntor = max(int(source.ntor), int(np.max(np.abs(np.asarray(native.n)))))
+    if mpol == int(source.mpol) and ntor == int(source.ntor):
         return source
-    return source.change_resolution(mpol=mpol, ntor=int(source.ntor))
+    return source.change_resolution(mpol=mpol, ntor=ntor)
 
 
 def polished_wout_state(native: HighOrderEquilibriumState, source, *, solve_ns: int):
