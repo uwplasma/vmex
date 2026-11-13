@@ -28,13 +28,13 @@ INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.LandremanPaul2021
 # Flux surfaces the effective ripple is evaluated on:
 SURFACES = np.linspace(0.15, 0.95, 5)
 
-# NEO controls.  This compact set keeps the example responsive while retaining
-# the radial trend; raise them for a publication calculation.  Setting
-# max_rational_field_periods to 0 asks for an unlimited exact rational
-# correction, which on a near-rational surface does not finish in an example's
-# budget, so it is bounded here:
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+# NEO controls: the resolution of vmex.core.neoclassical.diagnostic_neo_config,
+# about 2.5 % from a much finer reference on optimized equilibria; raise them
+# for a publication calculation.  Setting max_rational_field_periods to 0 asks
+# for an unlimited exact rational correction, which on a near-rational surface
+# does not finish in an example's budget, so it is bounded here:
+NEO_CONFIG_ARGS = dict(theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+                       nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
                        max_rational_field_periods=100000)
 
 # Figure written to the working directory:

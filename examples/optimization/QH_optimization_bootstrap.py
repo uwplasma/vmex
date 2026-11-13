@@ -188,7 +188,7 @@ objective_function_terms = [
     (qs, 0.0, 1.0), (bootstrap, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
-    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
+    (opt.edge_jacobian_ratio, opt.at_least(EDGE_JACOBIAN_FLOOR), 100.0),
 ]
 
 report = opt.EquilibriumReporter(

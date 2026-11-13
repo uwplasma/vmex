@@ -11,9 +11,8 @@ reverse implicit adjoint per gradient, and force balance is a constraint by
 construction: every evaluation is a converged hot-restarted equilibrium.
 
 Policy: optimize the surrogate, report the hard values.  Hard ``Gamma_c``
-and NEO_JAX ``epsilon_eff^(3/2)`` are evaluated before and after at the
-shared optimization resolution.  Minimizing the surrogate does not promise
-zero prompt orbit losses -- certify a design with collisionless tracing
+is evaluated before and after at the shared optimization resolution.
+Minimizing the surrogate does not promise zero prompt orbit losses -- certify a design with collisionless tracing
 (``examples/vmex_essos_workflow.py``) before quoting loss fractions.  The
 bootstrap-consistent current profile is frozen during this refinement; see
 ``QA_maxJ_continuation.py`` for the self-consistent Redl loop.
@@ -39,12 +38,10 @@ INPUT_FILE = (Path(__file__).resolve().parents[1] / "data"
 # Flux surfaces each term is evaluated on. The quasisymmetry ratio is the
 # differentiable proxy for effective ripple; Gamma_c is sampled on fewer
 # surfaces because it is expensive; maximum-J is an outer-volume quantity,
-# where pressure can reverse the precession; EPS_SURFACES is the hard NEO_JAX
-# validation, never differentiated:
+# where pressure can reverse the precession:
 QS_SURFACES = np.linspace(0.1, 0.9, 8)
 GC_SURFACES = (0.35, 0.6, 0.85)
 MAXJ_SURFACES = np.array([0.6, 0.7, 0.8, 0.9])
-EPS_SURFACES = (0.25, 0.5, 0.75)
 
 # Highest boundary Fourier mode number varied, and the L-BFGS-B iterations:
 MAX_MODE = 2
@@ -77,11 +74,6 @@ ACTION_MBOZ = 10
 #   ACTION = dict(nalpha=9, points_per_period=48, num_periods=10,
 #                 max_wells=24, quadrature_order=32)
 
-# NEO_JAX controls for the hard effective-ripple validation:
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
-                       max_rational_field_periods=100000)
-
 # Step control:
 PARAMETER_STEP = 0.02
 MAX_PARAMETER_CHANGE = 5.0
@@ -107,9 +99,6 @@ if ci_smoke:
     # the matched wells on the outer surfaces and returns NaN slopes.
     ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
                   max_wells=20, quadrature_order=16)
-    NEO_CONFIG_ARGS = dict(theta_n=16, phi_n=16, npart=8, multra=1, no_bins=12,
-                           nstep_per=4, nstep_min=20, nstep_max=40, acc_req=0.2,
-                           max_rational_field_periods=100000)
     # The optimizer's first solve holds the m = 1 family and needs about 330
     # iterations from the converged seed; 100 leaves it uncertified:
     STAGE_MAX_ITERATIONS = 600
@@ -202,15 +191,6 @@ def hard_confinement(eq):
     row["maxj_total"] = float(maxj["total"])
     row["maxj_fraction"] = float(maxj["maximum_j_fraction"])
     row["qs_total"] = float(qs.total_state(eq.solution, eq.solver_context))
-    try:
-        from neo_jax import NeoConfig  # optional: pip install vmex[neoclassical]
-
-        config = NeoConfig(**NEO_CONFIG_ARGS)
-        row["eps32"] = np.asarray(vj.epsilon_effective_from_wout(
-            eq.wout, surfaces=EPS_SURFACES, config=config)[1])
-    except ImportError as error:  # state the reason; never report a zero
-        print(f"epsilon_eff unavailable: {error}")
-        row["eps32"] = None
     return row
 
 
@@ -278,13 +258,6 @@ print(f"\nhard confinement, before -> after (s = {list(GC_SURFACES)}):")
 print(f"hard Gamma_c per surface = {np.array2string(before['gamma_c'], precision=4)} -> "
       f"{np.array2string(after['gamma_c'], precision=4)}")
 print(f"hard Gamma_c mean = {gc_before:.4e} -> {gc_after:.4e}")
-# epsilon_eff is reported, not optimized. A QS decrease can leave its
-# bounce-sensitive harmonics higher (6.45e-7 -> 7.32e-7 here).
-if before["eps32"] is not None and after["eps32"] is not None:
-    eps_before, eps_after = before["eps32"].mean(), after["eps32"].mean()
-    print(f"epsilon_eff^(3/2) mean = {eps_before:.4e} -> {eps_after:.4e} "
-          f"(s = {list(EPS_SURFACES)}; {'fell' if eps_after < eps_before else 'rose'}, "
-          "reported only: the QS ratio is its optimized proxy)")
 print(f"maximum-J residual = {before['maxj_total']:.4e} -> {after['maxj_total']:.4e}, "
       f"maximum-J fraction = {before['maxj_fraction']:.1%} -> {after['maxj_fraction']:.1%}")
 print(f"QS ratio total = {before['qs_total']:.4e} -> {after['qs_total']:.4e}")

@@ -73,8 +73,8 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.36.1 | `pip install vmex` | `pip install "solvax>=0.36.1"` |
-| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
+| `solvax` | 0.36.2 | `pip install vmex` | `pip install "solvax>=0.36.2"` |
+| `booz_xform_jax` | 0.5.2 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.2"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.15 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.15"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
@@ -255,7 +255,7 @@ Every figure below has a generator beside it, using repository decks or retained
 
 ### Quasisymmetric and quasi-isodynamic boundaries
 
-![QA at nfp 2, QH at nfp 4 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
+![QA at nfp 2, QH at nfp 3 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
 
 Boundary optimization for quasi-axisymmetry, quasi-helical symmetry and quasi-poloidal symmetry, each at its own
 field-period count, from `examples/optimization/QA_optimization.py` and its QH and QP siblings.
@@ -290,11 +290,11 @@ The consistency error is taken on four kinetic surfaces, between which the profi
 
 ### Piecewise omnigenity
 
-[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared one-sided limits on aspect ratio, rotational transform, mirror ratio, axis excursion, elongation and edge Jacobian.
 
 ![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 
-From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 95% (6.4e-3 to 3.2e-4), at aspect ratio 7.03 and min |ι| = 0.64. The elongation ceiling of 5 and the |ι| ceiling of 0.9 keep the alpha losses (`vmex --trace`, 1000 alphas born at s = 0.3, 5 ms, ARIES-CS size) at 0.0%, 0.2% and 0.3% for seed amplitudes 0.05, 0.03 and 0.08, against 5.3% with a ceiling of 9 and no |ι| ceiling. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) example runs the same ladder from the plain seed and ramps beta with magnetic-well and Mercier limits; the [single-stage](examples/optimization/single_stage_optimization_pwO.py) example continues from the vacuum run; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
 
 The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
 
@@ -671,7 +671,7 @@ python examples/take_fixed_boundary_gradients.py
 | QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants | core |
 | JAXopt and Optax drivers | `QI_optimization_jaxopt.py`, `QI_optimization_optax.py` | `vmex[optimizers]` |
 | Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts | core |
-| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
+| Single-stage plasma and coils | `single_stage_optimization_QA_QH_QI.py` (set `FAMILY`), `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
 | Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
 | Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
@@ -693,5 +693,5 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
-and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
+and `vmex --doctor` output. See [citation](CITATION.cff),
 [license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).
