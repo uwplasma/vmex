@@ -31,6 +31,7 @@
     ["tests/test_coverage_margin.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "full-core-a-c"]],
     ["tests/test_device.py", "infrastructure", "unit", "fast", "cpu-gpu", "none", "none", ["pr-parity-c1", "pr-fast", "gpu-smoke", "full-core-d-f0"]],
     ["tests/test_doctor.py", "interface", "unit", "fast", "cpu-gpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-d-f0"]],
+    ["tests/test_example_contracts.py", "interface", "unit", "fast", "cpu", "none", "none", ["pr-fast", "pr-parity-c1", "full-core-d-f0"]],
     ["tests/test_examples.py", "interface", "campaign", "campaign", "cpu-gpu", "reference-nc", "external", ["pr-examples", "full-examples"]],
     ["tests/test_fetch_assets.py", "infrastructure", "unit", "fast", "cpu", "none", "none", ["pr-parity-c1", "pr-fast", "full-core-d-f0"]],
     ["tests/test_first_divergence.py", "infrastructure", "unit", "fast", "cpu", "none", "analytic", ["pr-parity-c1", "full-core-d-f0"]],
@@ -133,11 +134,18 @@
   },
   "local_only": {
     "gpu-smoke": {
-      "reason": "needs an NVIDIA GPU; hosted CI has none and no self-hosted runner is registered, so the former manual GPU workflow was retired",
+      "reason": "the full GPU suite needs an NVIDIA GPU and minutes of compilation; CI runs only the short pr-gpu-ci subset on the self-hosted GPU runners",
       "command": "pytest -q $(python tools/test_manifest.py select gpu-smoke)"
     }
   },
   "selectors": {
+    "pr-gpu-ci": [
+      "tests/test_gpu_ci.py::test_gpu_is_default_without_platform_environment_pins",
+      "tests/test_gpu_ci.py::test_bounce_action_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_j_invariant_qi_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_maximum_j_cpu_gpu_parity",
+      "tests/test_gpu_ci.py::test_trapped_fraction_value_and_gradient_cpu_gpu_parity"
+    ],
     "pr-device": [
       "tests/test_device.py::test_fixed_boundary_builds_runtime_in_device_context",
       "tests/test_device.py::test_multigrid_moves_residual_continuation_with_the_state",
