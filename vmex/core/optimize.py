@@ -1951,6 +1951,9 @@ def least_squares(
     :class:`AdjointSolveError`; transformable JAX methods fall back to reverse
     so no compiled public path returns an uncertified matrix.
 
+    ``jacobian_adjoint_tol`` and ``jacobian_adjoint_maxiter`` set the
+    certificate of the Jacobian columns (relative tolerance and restart
+    budget of the warm-started GMRES pass).
     ``adjoint_tol`` and ``adjoint_maxiter`` control the certified linear
     response solves.  All public optimization paths allow 300 restarts by
     default so QI derivatives cannot fail merely because of the former
@@ -1992,6 +1995,8 @@ def least_squares(
             current_dofs=current_dofs, jac=jac,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
+            jacobian_adjoint_tol=jacobian_adjoint_tol,
+            jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
             hot_restart=hot_restart,
             warm_start=warm_start, use_ess=use_ess,
@@ -2009,6 +2014,8 @@ def least_squares(
             current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
+            jacobian_adjoint_tol=jacobian_adjoint_tol,
+            jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
