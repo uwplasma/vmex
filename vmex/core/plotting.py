@@ -1176,7 +1176,7 @@ def _booz_on_grid(booz: dict[str, Any], s_new: np.ndarray) -> dict[str, Any]:
         out = CubicSpline(x, flat, axis=0)(x_to)
         return out * scale_new if scale is not None else out
 
-    resampled = {key: spline(booz[key], x_old, x_new, scale_old if key[:4] == "bmnc" or key[:4] == "bmns" else None)
+    resampled: dict[str, Any] = {key: spline(booz[key], x_old, x_new, scale_old if key[:4] == "bmnc" or key[:4] == "bmns" else None)
                  for key in ("bmnc_b", "iota_b", "G_b", "I_b", "b_min", "b_max") if key in booz}
     resampled["bmns_b"] = None if booz["bmns_b"] is None else spline(
         booz["bmns_b"], x_old, x_new, scale_old)
