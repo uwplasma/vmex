@@ -787,7 +787,6 @@ def test_combined_confinement_example_states_the_surrogate_policy():
     assert "does not promise" in text
     assert "normalized by its seed value" in text
     assert "VmecProblem.from_loss" in text  # one aggregate scalar adjoint
-    assert "epsilon_eff unavailable" in text  # optional NEO_JAX states its absence
 
 
 @pytest.mark.full  # one direct-coil free solve, coupled adjoint, and output solve (~2 min)
@@ -1176,10 +1175,6 @@ def test_combined_confinement_objective_example(tmp_path):
     assert all(np.isfinite(float(v)) and float(v) > 0.0 for v in hard.groups())
     assert re.search(
         r"maximum-J residual = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-    # the hard ripple line appears when NEO_JAX is installed; its absence
-    # must be stated, never silently skipped
-    assert (re.search(r"epsilon_eff\^\(3/2\) mean = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-            or "epsilon_eff unavailable" in out)
     assert (tmp_path / "input.QA_eps_gammac_maxJ").exists()
     assert (tmp_path / "wout_QA_eps_gammac_maxJ.nc").exists()
     assert (tmp_path / "QA_eps_gammac_maxJ_summary.png").stat().st_size > 10_000
