@@ -69,6 +69,10 @@ that research budget as one commented set of constants next to the default.
     `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
     for a field deficit) while the controlled one is held and reports the
     missing `B_Z`.
+  - `free_boundary_tokamak_pf_response.py` — a shaped finite-beta tokamak held by
+    eight circular ESSOS PF loops plus a toroidal field: implicit derivatives of volume, aspect
+    and rotational transform with respect to a loop current, height and radius, checked against
+    reconverged central differences.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.

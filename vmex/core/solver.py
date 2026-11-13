@@ -1550,6 +1550,12 @@ def evaluate_forces(
     if cache is None:
         cache = _zero_cache(runtime)
         iter_last_reset = iteration  # force refresh
+    # A state solved on the host while the runtime sits on the default device
+    # (GPU) must not mix devices inside the jitted pass.
+    anchor = runtime.setup.s_full
+    if not (isinstance(state.R_cos, jax.core.Tracer)
+            or isinstance(anchor, jax.core.Tracer)):
+        state = jax.device_put(state, anchor.sharding)
     result = _evaluate_lane(
         state, cache, jnp.asarray(iteration), jnp.asarray(iter_last_reset),
         jnp.asarray(fsqz_previous), runtime, collect_health=True,
