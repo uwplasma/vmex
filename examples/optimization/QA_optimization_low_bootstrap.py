@@ -137,12 +137,6 @@ inp, equilibrium = picard.input, picard.equilibrium
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 def redl_j_dot_B(equilibrium_state, solver_context):
     """Redl <j.B> on SURFACES in MA T/m^2, the units of DKX's mismatch=False row."""
     geometry = redl_geometry_from_state(equilibrium_state, solver_context,
@@ -168,7 +162,7 @@ objective_function_terms = [
     (qs, 0.0, 1.0), (bootstrap, 0.0, 1.0),
     (bootstrap_current, 0.0, BOOTSTRAP_WEIGHT),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
 ]
 

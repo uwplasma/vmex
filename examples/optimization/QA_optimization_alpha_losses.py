@@ -34,7 +34,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares, minimize
 
@@ -116,14 +115,10 @@ seed_equilibrium = opt.solve_equilibrium(seed_input)
 
 ### Stage 1: quasi-axisymmetry ################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|."""
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 problem = opt.VmecProblem.from_tuples(
-    seed_input, [(qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0), (iota_floor, 0.0, 10.0),
+    seed_input, [(qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
                  (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0)],
     max_mode=max(MAX_MODES), use_ess=True, restart_from=seed_equilibrium)
 x = problem.x0

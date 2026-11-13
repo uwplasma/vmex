@@ -81,21 +81,14 @@ inp = replace(inp, delt=0.5).change_resolution(
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on |mean iota| below its floor."""
-    return jnp.maximum(
-        IOTA_FLOOR - jnp.abs(opt.mean_iota(equilibrium_state, solver_context)), 0.0)
-
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
+def abs_mean_iota(equilibrium_state, solver_context):
+    """Absolute value of the mean rotational transform."""
+    return jnp.abs(opt.mean_iota(equilibrium_state, solver_context))
 
 
 # Each term is (function, target, weight).
 terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
-         (iota_floor, 0.0, 10.0), (elongation_excess, 0.0, 1.0)]
+         (abs_mean_iota, opt.at_least(IOTA_FLOOR), 10.0), (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 1.0)]
 problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=MAX_MODE,
     vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True, evaluation_progress=True)
 print(f"dof_names = {problem.dof_names}")

@@ -132,15 +132,6 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 def growth_rate(state, runtime):
     """Dominant linear growth rate, reduced over the flux tubes."""
     rates = jnp.stack([
@@ -171,7 +162,7 @@ seed_growth = report("seed", equilibrium)["growth rate"]
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
     (growth_rate, 0.0, GROWTH_WEIGHT / max(abs(seed_growth), 1.0e-6) ** 2),
 ]

@@ -120,17 +120,13 @@ stability_weights = np.where(
     STABILITY_WEIGHT * (1.0 + (EDGE_WEIGHT_FACTOR - 1.0) * stability_s**4), 0.0)
 
 
-def iota_floor(state, runtime):
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0.0)
-
-
 ### Set up the objective ######################################################
 
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_terms = [
     (qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
     (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2),
     (opt.mercier_stability_residual, 0.0, stability_weights),

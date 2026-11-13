@@ -16,7 +16,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -95,19 +94,6 @@ equilibrium = opt.solve_equilibrium(inp)
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the LCFS mirror ratio. A strong mirror can empty the sampled
-    wells and close the drift surfaces of the few particles still trapped,
-    while tracing loses most of the others."""
-    return jnp.maximum(opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-
 # One physical lambda must describe the same particles on every radius and
 # field-line label, so the pitches are chosen once, on the seed, and held fixed.
 pitch = np.asarray(common_trapped_pitches_state(
@@ -121,9 +107,9 @@ drift = DriftConfinementResidual(SURFACES, pitch, START_RADII,
 objective_function_terms = [
     (drift, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
-    (mirror_excess, 0.0, 10.0),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
 ]
 
 
