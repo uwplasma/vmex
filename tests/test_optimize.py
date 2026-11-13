@@ -558,6 +558,17 @@ def test_minimize_scalarized_implicit_smoke(solovev_eq):
     assert isinstance(res.input, VmecInput)
 
 
+def test_minimize_max_mode_schedule():
+    """A ``max_mode`` schedule chains scalar stages through ``result.input``."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    res = opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1),
+                       options={"maxiter": 1})
+    assert len(res.stage_results) == 2 and res.stage_results[-1] is res
+    np.testing.assert_array_equal(opt.pack_boundary(res.input, 1), res.x)
+    with pytest.raises(ValueError, match="x0 cannot be combined"):
+        opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 2), x0=res.x)
+
+
 def test_scipy_bfgs_scalar_lane_completes_and_descends():
     """SciPy BFGS and L-BFGS-B complete on the public scalar lane and descend.
 
