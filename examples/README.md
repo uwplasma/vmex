@@ -171,10 +171,16 @@ that research budget as one commented set of constants next to the default.
   seed. It ends with a finer fixed-boundary solve and a cold free-boundary solve in
   the coil field, and reports every limit. It shares `vmex.core.single_stage`; set
   `STAGE_ONE_INPUT` to start from an `input.*_optimized` file instead.
-  `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
-  `QI_optimization_bootstrap.py` also vary
+  `QA_optimization_bootstrap.py` and `QH_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
-  targets. `QA_optimization_low_bootstrap.py` keeps the QA current
+  targets. `QI_optimization_bootstrap.py` continues the vacuum design that `QI_optimization.py`
+  writes up a beta ladder (1, 2 and 5 %): each stage recalibrates the pressure,
+  re-solves the equilibrium and holds the vacuum design's aspect ratio, minimum
+  iota and mirror ratio. Four options act independently: `BOOTSTRAP` (`"none"`,
+  `"redl"`, or `"dkx"` for DKX's current in the last stages), `MAGNETIC_WELL_FLOOR`
+  (a lower limit; `None` drops it), `MERCIER` and `GAMMA_C_STAGES`.
+  `QI_optimization_finite_beta_scalar.py` has the well and Mercier options.
+  `QA_optimization_low_bootstrap.py` keeps the QA current
   self-consistent and also drives the Redl `<j.B>` toward zero (a flag swaps in
   DKX's drift-kinetic `<j.B>` row). `optimize_bootstrap_current.py` targets only
   an iota floor, a small self-consistent bootstrap current and the aspect
