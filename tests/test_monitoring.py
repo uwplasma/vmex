@@ -601,3 +601,24 @@ def test_candidate_monitor_rejects_an_export_that_does_not_reproduce_its_residua
             monitor(np.array([0.]))
     assert monitor.best is None and not (tmp_path / "wout_trial.nc").exists()
     assert monitor.report["status"] == "failed"
+
+
+def test_stall_stop_ends_a_stage_that_stops_improving():
+    from types import SimpleNamespace
+
+    from vmex.core.monitoring import StallStop
+
+    seen = []
+    stop = StallStop(seen.append, patience=2, threshold=0.1, min_iterations=0)
+    for cost in (10.0, 5.0, 4.9):  # 10 -> 4.9 over two iterations is far above 10 %
+        stop(SimpleNamespace(cost=cost))
+    with pytest.raises(StopIteration):
+        stop(SimpleNamespace(cost=4.85))  # 5.0 -> 4.85 over two iterations is under 10 %
+    assert len(seen) == 4
+    held = StallStop(patience=1, threshold=0.5, min_iterations=5)
+    for _ in range(4):
+        held(SimpleNamespace(cost=1.0))  # flat, but before min_iterations
+    with pytest.raises(StopIteration):
+        held(SimpleNamespace(cost=1.0))
+    with pytest.raises(ValueError):
+        StallStop(patience=0)
