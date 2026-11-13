@@ -110,7 +110,9 @@ if ci_smoke:
     NEO_CONFIG_ARGS = dict(theta_n=16, phi_n=16, npart=8, multra=1, no_bins=12,
                            nstep_per=4, nstep_min=20, nstep_max=40, acc_req=0.2,
                            max_rational_field_periods=100000)
-    STAGE_MAX_ITERATIONS = 100
+    # The optimizer's first solve holds the m = 1 family and needs about 330
+    # iterations from the converged seed; 100 leaves it uncertified:
+    STAGE_MAX_ITERATIONS = 600
     STAGE_OVERRIDES = dict(ns_array=np.array([13]), ftol_array=np.array([1e-9]),
                            niter_array=np.array([3000]))
 
