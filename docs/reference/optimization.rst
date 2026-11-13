@@ -677,8 +677,8 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(7), hinges on ``|iota|`` (floor 0.42, ceiling 0.9), the mirror ratio (ceiling
-0.16), the axis excursion, the edge-Jacobian ratio and the elongation (ceiling 5). The map parameters
+(7), limits on ``|iota|`` (at least 0.42, at most 0.9), the mirror ratio (at most
+0.16), the axis excursion, the edge-Jacobian ratio and the elongation (at most 5). The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
 The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
@@ -704,14 +704,14 @@ proportional to ``1-s`` to the target. The pwO residual uses 8 x 8 Boozer modes,
 oversampling and a 16 x 16 quadrature in the loop and 16 x 16 modes, oversample 2 and
 32 x 32 for the final design; the final solves reach ns 71 at ftol 1e-13.
 
-The magnetic well and Mercier stability are hinges that act at finite beta only;
+The magnetic well and Mercier stability are limits that act at finite beta only;
 ``MAGNETIC_WELL_FLOOR = None`` or ``MERCIER_MARGIN = None`` removes one.
 ``BOOTSTRAP_TERM = "band"`` and ``DKX_FINAL_STAGES`` control the bootstrap current as
 in the vacuum example, and ``GAMMA_C_FINAL_STAGES`` adds the GammaC proxy to the last
 stages. The pwO rows weigh 1e3 in vacuum and ``BETA_PWO_WEIGHT`` at finite beta, and the
-shape hinges scale with it. The hinges and the transport compete: at NFP 4 and 3 %
-beta, a design with the well and Mercier hinges off has pwO 6e-6 and loses 1.8 % of its
-alphas, one with Mercier stability alone loses 24 % and one with both hinges 37 %, so the
+shape limits scale with it. The limits and the transport compete: at NFP 4 and 3 %
+beta, a design with the well and Mercier limits off has pwO 6e-6 and loses 1.8 % of its
+alphas, one with Mercier stability alone loses 24 % and one with both limits 37 %, so the
 switches expose the trade rather than hide it. Holding the plasma volume
 (``HOLD_VOLUME = True``) stalls the NFP 4 ladder. Each stage writes
 ``input.<name>_stage<k>``; set ``INPUT_FILE`` to one, ``SEED_MODES = None``,
@@ -721,7 +721,7 @@ target pressure.
 
 ``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
 pressure, and runs one finite-beta plasma stage with the pwO map free and
-hinges on the boundary elongation and its smallest poloidal radius of curvature
+limits on the boundary elongation and its smallest poloidal radius of curvature
 (:func:`~vmex.core.optimize.min_boundary_curvature_radius`), which keep out the
 sharp tips that coils cannot hold. The pressure is then rescaled to the target
 beta. The coils (``12 // NFP`` shapes) are fitted to the fixed plasma with a
