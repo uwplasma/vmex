@@ -157,6 +157,88 @@ def total_normal_field(inp, coils, state, runtime, nphi, ntheta, precision, *, d
             interface.pressure_balance_residual(coil_field(coils)) / B2)
 
 
+def coils_around_boundary(inp, n_coils, order, offset, *, n_segments=64, stellsym=True, current=1.0):
+    """Planar-section coils: the boundary's R-Z cross-section pushed ``offset`` outward, one per angle.
+
+    The angles are those of ``CreateEquallySpacedCurves``. Unlike circles, these start outside
+    boundaries with large axis excursions. The curve is the section's outward normal offset,
+    truncated to ``order`` Fourier harmonics.
+    """
+    from essos.coils import Coils, Curves
+    n, m = np.meshgrid(np.arange(-inp.ntor, inp.ntor + 1), np.arange(inp.rbc.shape[1]), indexing="ij")
+    theta = np.linspace(0, 2 * np.pi, 8 * order * 2 + 1)[:-1]
+    t = theta / (2 * np.pi)
+    dofs = np.zeros((n_coils, 3, 2 * order + 1))
+    for i, phi in enumerate((np.arange(n_coils) + .5) * 2 * np.pi / ((1 + int(stellsym)) * inp.nfp * n_coils)):
+        arg = m[None] * theta[:, None, None] - n[None] * inp.nfp * phi
+        dm = m[None] * np.ones_like(arg)
+        R, Z = (inp.rbc[None] * np.cos(arg)).sum((1, 2)), (inp.zbs[None] * np.sin(arg)).sum((1, 2))
+        dR = -(inp.rbc[None] * dm * np.sin(arg)).sum((1, 2))
+        dZ = (inp.zbs[None] * dm * np.cos(arg)).sum((1, 2))
+        normal = np.stack((dZ, -dR), axis=-1) / np.hypot(dR, dZ)[:, None]
+        centre = np.array([R.mean(), Z.mean()])
+        normal *= np.sign(np.sum(normal * (np.stack((R, Z), -1) - centre))) or 1.0
+        Rc, Zc = R + offset * normal[:, 0], Z + offset * normal[:, 1]
+        for axis, values in enumerate((Rc * np.cos(phi), Rc * np.sin(phi), Zc)):
+            dofs[i, axis, 0] = values.mean()
+            for k in range(1, order + 1):
+                dofs[i, axis, 2 * k - 1] = 2 * np.mean(values * np.sin(2 * np.pi * k * t))
+                dofs[i, axis, 2 * k] = 2 * np.mean(values * np.cos(2 * np.pi * k * t))
+    return Coils(Curves(jnp.asarray(dofs), n_segments=n_segments, nfp=inp.nfp, stellsym=stellsym),
+                 np.full(n_coils, current))
+
+
+def fit_vacuum_coils(inp, equilibrium, coils, coil_penalty, *, nphi, ntheta, normal_field_limit,
+                     jump_limit=.04, maxiter=200, scale=.05, bound=3.):
+    """Fit coil shapes and one common current to a frozen vacuum boundary, with no equilibrium solve.
+
+    Minimizes the coil penalty plus ``(rms(B.n/|B|)/normal_field_limit)^2 / 2`` and
+    ``(rms(|B_coil|^2/|B|^2 - 1)/jump_limit)^2 / 2`` on the equilibrium's boundary, where the
+    coil field is scaled by the least-squares common current factor to the VMEX boundary
+    field. The second term keeps the factor from hiding a field that only looks tangent.
+    Returns the coils with fitted shapes and currents multiplied by that factor.
+    """
+    from scipy.optimize import minimize
+    from essos.surfaces import surfacerzfourier_from_boundary
+    data = vc.surface_field_data_from_state(
+        inp, equilibrium.solution, runtime=equilibrium.solver_context, nphi=nphi, ntheta=ntheta)
+    area = jnp.linalg.norm(data.area_vector, axis=0)
+    weights, Bmag = area / jnp.sum(area), jnp.linalg.norm(data.B_total, axis=0)
+    surface = surfacerzfourier_from_boundary(
+        jnp.asarray(inp.rbc), jnp.asarray(inp.zbs), inp.nfp, nphi=nphi, ntheta=ntheta)
+    shape0 = jnp.asarray(coils.dofs_curves).ravel()
+
+    def coils_from(u):
+        return coils.with_dofs(jnp.concatenate((shape0 + scale * u, coils.dofs_currents)))
+
+    def field_factor(trial):
+        field = vc.external_B_cartesian(coil_field(trial), data.gamma, data.phi)
+        factor = common_current_scale(field, data.B_total, weights)
+        normal = factor * jnp.sum(field * data.normal, axis=0) / Bmag
+        jump = factor**2 * jnp.sum(field**2, axis=0) / Bmag**2 - 1
+        return factor, jnp.sqrt(jnp.sum(weights * normal**2)), jnp.sqrt(jnp.sum(weights * jump**2))
+
+    def objective(u):
+        trial = coils_from(u)
+        _, normal, jump = field_factor(trial)
+        return (jnp.sum(coil_penalty(trial, surface))
+                + .5 * (normal / normal_field_limit)**2 + .5 * (jump / jump_limit)**2)
+
+    value_and_grad = jax.jit(jax.value_and_grad(objective))
+    fit = minimize(lambda u: tuple(map(np.asarray, value_and_grad(jnp.asarray(u)))),
+                   np.zeros(shape0.size), jac=True, method="L-BFGS-B",
+                   bounds=[(-bound, bound)] * shape0.size,
+                   options={"maxiter": maxiter, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
+    fitted = coils_from(jnp.asarray(fit.x))
+    factor, normal, jump = field_factor(fitted)
+    if not np.isfinite(float(factor)) or float(factor) == 0:
+        raise ValueError("The boundary field must admit a finite nonzero coil current")
+    print(f"[coil fit] {fit.nit} L-BFGS-B iterations ({fit.message}), no equilibrium solves: B.n/B RMS = "
+          f"{100 * float(normal):.3f}%, |B|^2 jump RMS = {100 * float(jump):.3f}%, "
+          f"common current factor {float(factor):.6g}", flush=True)
+    return fitted.with_dofs(jnp.concatenate((fitted.dofs_curves.ravel(), fitted.dofs_currents * factor)))
+
+
 class SingleStageProblem:
     """Compose any fixed-flux ``VmecProblem`` with coils and field/shape limits.
 
@@ -167,7 +249,7 @@ class SingleStageProblem:
 
     def __init__(self, problem, coils, coil_penalty, *, nphi, ntheta,
                  iota_floor, aspect_limit, normal_field_limit, constraint_weight=1e3,
-                 vc_digits=4, boundary_scale=0.02, coil_scale=0.05, rejected_trial_cost=10):
+                 jump_limit=None, vc_digits=4, boundary_scale=0.02, coil_scale=0.05, rejected_trial_cost=10):
         self.problem, self.coils, self.coil_penalty = problem, coils, coil_penalty
         self.nphi, self.ntheta, self.vc_digits = nphi, ntheta, vc_digits
         self.n_boundary = problem.x0.size
@@ -184,20 +266,30 @@ class SingleStageProblem:
         self.counts, self._cached = {"trials": 0, "rejected": 0}, {}
         self.rejected_trial_cost = rejected_trial_cost
 
-        def plasma_objective(u):
+        self.constraint_names = ["min |iota|", "aspect", "B.n/B RMS"] + (
+            [] if jump_limit is None else ["|B|^2 jump RMS"])
+        self.multipliers = np.zeros(len(self.constraint_names))
+        self.constraint_weight, self._penalty = constraint_weight, None
+
+        def plasma_objective(u, multipliers):
             x = jnp.asarray(self.x0) + jnp.asarray(self.scales) * u
             _, trial_coils = self.objects_from_x(x)
 
             def limits(state, runtime):
-                normal, weights, _ = total_normal_field(
+                normal, weights, jump = total_normal_field(
                     inp, trial_coils, state, runtime, nphi, ntheta, precision, digits=vc_digits)
                 rms = jnp.sqrt(jnp.sum(weights * normal**2))
-                return hinge(jnp.stack((opt.min_abs_iota(state, runtime) / iota_floor - 1,
-                                       1 - opt.aspect_ratio(state, runtime) / aspect_limit,
-                                       1 - rms / normal_field_limit)), constraint_weight)
+                constraints = [opt.min_abs_iota(state, runtime) / iota_floor - 1,
+                               1 - opt.aspect_ratio(state, runtime) / aspect_limit,
+                               1 - rms / normal_field_limit]
+                if jump_limit is not None:
+                    constraints.append(1 - jnp.sqrt(jnp.sum(weights * jump**2)) / jump_limit)
+                slack = jnp.maximum(multipliers / constraint_weight - jnp.stack(constraints), 0)
+                return .5 * constraint_weight * slack**2 - multipliers**2 / (2 * constraint_weight)
 
             return problem.jax_objective_from_state(
-                x[:self.n_boundary], limits, n_extra_terms=1, return_status=True)
+                x[:self.n_boundary], limits, n_extra_terms=len(self.constraint_names),
+                return_status=True)
 
         def coil_objective(u):
             surface, trial_coils = self.objects_from_x(jnp.asarray(self.x0) + self.scales * u)
@@ -226,10 +318,12 @@ class SingleStageProblem:
         if cache.get("key") == u.tobytes():
             return cache["value"], cache["gradient"].copy()
         self.counts["trials"] += 1
-        (plasma_value, (rows, penalty, status)), plasma_gradient = self._plasma_vg(jnp.asarray(u))
+        (plasma_value, (rows, penalty, status)), plasma_gradient = self._plasma_vg(
+            jnp.asarray(u), jnp.asarray(self.multipliers))
         rows = np.asarray(rows)
         if int(np.asarray(status)) != 0:
             self.counts["rejected"] += 1
+            self._penalty = None
             distance, cost = float(np.linalg.norm(u)), self.rejected_trial_cost
             value = cost * (1 + distance)**2
             gradient = 2 * cost * (1 + distance) * u / max(distance, 1e-300)
@@ -241,7 +335,8 @@ class SingleStageProblem:
             scale = cache["scale"]
             terms = {name: 0.5 * float(rows[start:stop] @ rows[start:stop])
                      for name, start, stop in self.problem.metadata["term_slices"]}
-            terms["iota/aspect/B.n penalty"] = float(np.asarray(penalty)[0])
+            self._penalty = np.asarray(penalty)
+            terms["iota/aspect/B.n penalty"] = float(np.sum(self._penalty))
             terms.update(zip(("coil length", "coil curvature", "coil separation",
                               "coil-surface separation"), map(float, np.asarray(costs))))
             value, gradient = self.monitor.cache_evaluation(
@@ -250,18 +345,37 @@ class SingleStageProblem:
         cache.update(key=u.tobytes(), value=value, gradient=gradient)
         return value, gradient.copy()
 
+    def update_multipliers(self, u):
+        """Powell-Hestenes-Rockafellar step for the iota, aspect and field limits at ``u``.
+
+        Returns ``{name: c}`` with ``c >= 0`` meaning satisfied; a limit that is inactive
+        with no multiplier reports None. The step needs a certified equilibrium at ``u``.
+        """
+        self._cached.pop("key", None)
+        self.value_and_grad(u)
+        if self._penalty is None:
+            raise ValueError("The multiplier update needs a certified equilibrium")
+        rho = self.constraint_weight
+        slack = np.sqrt(np.maximum(2 * self._penalty / rho + (self.multipliers / rho)**2, 0))
+        values = {name: (None if gap == 0 else lam / rho - gap)
+                  for name, gap, lam in zip(self.constraint_names, slack, self.multipliers)}
+        self.multipliers = rho * slack
+        self._cached.pop("key", None)
+        return values
+
 
 def _clearance(gamma, points):
     return min(float(cKDTree(points).query(c)[0].min()) for c in gamma)
 
 
-def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
-                  free_ns=(16, 51), free_ftol=1e-12, geometry_segments=384, verbose=True):
+def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12, free_ns=(16, 51), free_ftol=1e-12,
+                  free_mpol=None, geometry_segments=384, verbose=True):
     """Save the design, re-solve finely, then cold-solve the held free boundary.
 
     Returns ``(equilibrium, surface, metrics, free_check)``. Free-boundary
     metrics are provisional unless the final grid converged with vacuum data.
-    Flux, pressure, and current profiles are unchanged in both checks.
+    Flux, pressure, and current profiles are unchanged in both checks. ``free_mpol`` raises the
+    poloidal and toroidal mode numbers of the free-boundary check only.
     Coil engineering metrics use at least 384 points per Fourier curve.
     """
     from essos.fields import BiotSavart
@@ -305,6 +419,10 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12,
     free_inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", ns_array=np.array(free_ns),
                        ntheta=max(inp.ntheta, 32), nzeta=max(inp.nzeta, 32), delt=min(inp.delt, .3),
                        ftol_array=np.full(len(free_ns), free_ftol), niter_array=np.full(len(free_ns), 20000))
+    if free_mpol is not None:  # The coil field excites boundary harmonics the optimized deck truncates.
+        free_inp = free_inp.change_resolution(
+            mpol=free_mpol, ntor=free_mpol, ntheta=max(2 * free_mpol + 6, free_inp.ntheta),
+            nzeta=max(2 * free_mpol + 4, free_inp.nzeta))
     free = {"converged": False, "phiedge": float(inp.phiedge),
             "ns": list(free_ns), "metrics_provisional": True}
     started = time.perf_counter()
@@ -362,10 +480,11 @@ def save_outputs(joint, u, equilibrium, surface, *, prefix, make_movie=False, su
 
 
 def design_target_report(metrics, free, *, iota_floor, aspect_limit, normal_field_limit,
-                         clearance, coil_distance, curvature, beta_bounds,
-                         delbsq_limit, boundary_distance_limit):
+                         clearance, coil_distance, curvature, delbsq_limit, boundary_distance_limit,
+                         beta_bounds=None):
     """Print one verdict and return JSON-ready targets, misses, and success.
 
+    ``beta_bounds`` is ``(low, high)`` for finite beta and None for a vacuum design.
     Nonfinite metrics fail their bounds. A failed independent solve cannot
     pass, and provisional free-boundary metrics are never treated as checks.
     """
@@ -373,14 +492,15 @@ def design_target_report(metrics, free, *, iota_floor, aspect_limit, normal_fiel
               ("B.n/B RMS", normal_field_limit, "max"),
               ("coil-surface distance", clearance, "min"),
               ("coil-coil distance", coil_distance, "min"),
-              ("maximum curvature", curvature, "max"),
-              ("beta", beta_bounds[0], "min"), ("beta", beta_bounds[1], "max")]
+              ("maximum curvature", curvature, "max")]
     held = [("DEL-BSQ", "delbsq", delbsq_limit, "max"),
             ("boundary distance", "sampled_boundary_distance_m", boundary_distance_limit, "max"),
             ("min |iota|", "min_abs_iota", iota_floor, "min"),
             ("aspect", "aspect", aspect_limit, "max"),
-            ("coil-surface distance", "coil_surface_distance_m", clearance, "min"),
-            ("beta", "beta", beta_bounds[0], "min"), ("beta", "beta", beta_bounds[1], "max")]
+            ("coil-surface distance", "coil_surface_distance_m", clearance, "min")]
+    if beta_bounds is not None:
+        limits += [("beta", beta_bounds[0], "min"), ("beta", beta_bounds[1], "max")]
+        held += [("beta", "beta", beta_bounds[0], "min"), ("beta", "beta", beta_bounds[1], "max")]
     rows = [(name, metrics[name], bound, kind) for name, bound, kind in limits]
     if free["converged"]:
         rows += [(f"held {name}", free[key], bound, kind) for name, key, bound, kind in held]
