@@ -677,15 +677,18 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
-excursion, the edge-Jacobian ratio and the elongation. The map parameters
+(7), hinges on ``|iota|`` (floor 0.42, ceiling 0.9), the mirror ratio (ceiling
+0.16), the axis excursion, the edge-Jacobian ratio and the elongation (ceiling 5). The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
 The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
 add it. The verified boundary is re-solved on a finer radial grid and compared
 with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
-boundary.
+boundary. Two limits matter for the alpha losses: an elongation ceiling of 9
+loses 5 % of the alphas born at ``s = 0.3`` and 5 loses under 1 %, and a profile
+that crosses ``iota = 1`` at ``NFP = 3`` loses 2-5 % whatever its pwO residual,
+so ``IOTA_CEILING = 0.9`` keeps it below.
 
 Continue the saved vacuum shape to finite pressure with::
 
