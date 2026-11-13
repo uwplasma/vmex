@@ -341,7 +341,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -363,6 +363,12 @@ jobs:
         run: |
           python -m pip freeze
           pytest -q -m "not full and not weekly" tests/test_polish.py --durations=10
+      - name: Run the QA optimization example
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+          MPLBACKEND: Agg
+        run: pytest -q -o addopts= "tests/test_examples.py::test_qs_optimization_examples[QA]"
 
   changed-coverage:
     name: Changed executable lines (>= 95%)
