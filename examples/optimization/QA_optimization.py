@@ -34,7 +34,8 @@ SEED_PERTURBATION = 0.05
 SURFACES = np.linspace(0.1, 1.0, 10)
 
 # Mode ladder: highest boundary mode number varied in each stage, and the
-# residual evaluations each stage may spend:
+# most residual evaluations each stage may spend. opt.StallStop ends a stage
+# whose cost falls by less than 2 % over three accepted iterations:
 MAX_MODES = [1, 2, 3]
 MAX_NFEV = [10, 15, 20]
 
@@ -43,7 +44,7 @@ ASPECT_TARGET = 6.0
 MAGNETIC_WELL_TARGET = 0.01
 IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 
-# Hinge weights for the iota floor and the well; a hinge costs nothing once met:
+# Hinge weights for the iota floor and the well; a limit costs nothing once met:
 IOTA_WEIGHT = 10.0
 WELL_WEIGHT = 10.0
 
@@ -97,8 +98,8 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_TARGET), 0.0, WELL_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_TARGET), WELL_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
@@ -150,7 +151,7 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
         x_scale=step, max_nfev=max_nfev,
         bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
                 stage.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)
+        ftol=1e-6, xtol=1e-10, verbose=2, callback=opt.StallStop(monitor, min_iterations=max_nfev // 4))
     x = stage.embed(result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)

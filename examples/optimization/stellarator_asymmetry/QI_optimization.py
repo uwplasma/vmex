@@ -11,18 +11,12 @@ stationary subspace with it.
 A stage costs roughly twice its stellarator-symmetric equivalent, and the
 asymmetric boundary norm printed at the end is what shows the optimizer stayed
 off the symmetric subspace.
-
-The effective ripple epsilon_eff^(3/2) of the seed and of the optimized
-boundary is printed last, through NEO_JAX on the asymmetric Boozer spectrum
-(sine partners included). It is a diagnostic, not an objective term; it needs
-the optional ``neoclassical`` extra and is skipped with the reason otherwise.
 """
 
 import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -79,13 +73,6 @@ FINAL_NS = 51
 FINAL_FTOL = 1e-12
 FINAL_NITER = 20000
 
-# Flux surfaces and NEO controls of the closing epsilon_eff diagnostic, the
-# compact set of examples/epsilon_effective.py:
-EPS_EFF_SURFACES = np.array([0.25, 0.5, 0.75])
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
-                       max_rational_field_periods=100000)
-
 # Every output file name contains this; each stage also writes its own
 # boundary as input.<STAGE_NAME>_max_mode_NNN:
 OUTPUT_NAME = "QI_LASYM_optimized"
@@ -119,29 +106,13 @@ inp = replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc, **STAGE_OVERR
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-# Each term is (function, target, weight).
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
-    return jnp.maximum(opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
-
-
+# Each term is (function, target, weight); at_least / at_most are one-sided limits that
+# cost nothing while they hold. A mean target could hide a near-zero iota surface.
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0), (elongation_excess, 0.0, 10.0)]
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0)]
 report = opt.EquilibriumReporter(
     ("constructed QI", qi.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("mean iota", opt.mean_iota, ".4f"), ("mirror", opt.mirror_ratio, ".4f"))
@@ -190,16 +161,6 @@ print(f"asymmetric boundary norm = "
 report("final", final_equilibrium)
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
                    mirror_limit=MIRROR_LIMIT, elongation_limit=ELONGATION_LIMIT)
-
-try:
-    from neo_jax import NeoConfig
-    for label, eq in (("seed", seed_equilibrium), ("optimized", final_equilibrium)):
-        s, eps = vj.epsilon_effective_from_wout(eq.wout, surfaces=EPS_EFF_SURFACES,
-                                                config=NeoConfig(**NEO_CONFIG_ARGS))
-        print(f"{label} epsilon_eff^(3/2) at s = {np.round(np.asarray(s), 3)}: "
-              f"{np.array2string(np.asarray(eps), precision=4)}")
-except ImportError as error:
-    print(f"epsilon_eff skipped: {error}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")
 wout_path = vj.write_wout(f"wout_{OUTPUT_NAME}.nc", final_equilibrium.wout)

@@ -39,7 +39,7 @@ MAX_MODES = [1, 2, 3]
 MAX_NFEV = [10, 15, 20]
 
 # Targets. The iota floor keeps a stage from trading transform for quasisymmetry;
-# a hinge costs nothing once its floor is met:
+# a limit costs nothing once its floor is met:
 ASPECT_TARGET = 6.0
 IOTA_FLOOR = 0.8                  # minimum |iota| over the profile
 IOTA_WEIGHT = 10.0
@@ -116,8 +116,8 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=-1)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_TARGET), 0.0, WELL_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_TARGET), WELL_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(

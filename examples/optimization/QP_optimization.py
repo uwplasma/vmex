@@ -3,13 +3,13 @@
 
 SciPy nonlinear least squares varies the boundary Fourier coefficients of a
 vacuum equilibrium in stages of increasing mode number. The residual vector
-holds the quasisymmetry ratio, the aspect ratio, and one-sided hinges on the
+holds the quasisymmetry ratio, the aspect ratio, and one-sided limits on the
 rotational transform, the mirror ratio and the elongation; VMEX supplies its
 exact Jacobian.
 
 Quasi-poloidal symmetry is the hard member of the family: the first-order
 near-axis field is helical, so the residual is evaluated on s >= 0.5, and the
-shape limits bind (the elongation hinge sits at its limit in the result).
+shape limits bind (the elongation limit sits at its limit in the result).
 Loosening the limits lowers the residual at the price of an extremely shaped
 boundary.
 """
@@ -50,7 +50,7 @@ IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.35
 ELONGATION_LIMIT = 12.0
 
-# Hinge weights. Heavy hinges on the shape limits make the trust region crawl
+# Hinge weights. Heavy limits on the shape limits make the trust region crawl
 # along the active constraints (a perturbed seed stalled at twice the residual):
 IOTA_WEIGHT = 10.0
 SHAPE_WEIGHT = 1.0
@@ -101,9 +101,9 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, IOTA_WEIGHT),
-    (opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_LIMIT), 0.0, SHAPE_WEIGHT),
-    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, SHAPE_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), IOTA_WEIGHT),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), SHAPE_WEIGHT),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), SHAPE_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(
