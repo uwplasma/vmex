@@ -386,7 +386,7 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12, free_ns=(16, 51), fre
     _, coils = joint.objects_from_x(jnp.asarray(x))
     equilibrium = joint.problem.equilibrium_from_x(x[:joint.n_boundary])
     inp = replace(joint.problem.input_from_x(x[:joint.n_boundary]), ns_array=np.array([ns]),
-                  ftol_array=np.array([ftol]), niter_array=np.array([8000]))
+                  ftol_array=np.array([ftol]), niter_array=np.array([20000]))
     inp.to_indata(f"input.{prefix}_optimized")
     coils.to_json(f"coils_{prefix}_optimized.json")
     print("[verify] finer fixed-boundary equilibrium and virtual casing", flush=True)
@@ -418,7 +418,7 @@ def verify_design(joint, u, *, prefix, ns=101, ftol=1e-12, free_ns=(16, 51), fre
     # NESTOR needs a finer angular grid and a smaller step than the fixed-boundary solve.
     free_inp = replace(inp, lfreeb=True, mgrid_file="direct ESSOS field", ns_array=np.array(free_ns),
                        ntheta=max(inp.ntheta, 32), nzeta=max(inp.nzeta, 32), delt=min(inp.delt, .3),
-                       ftol_array=np.full(len(free_ns), free_ftol), niter_array=np.full(len(free_ns), 8000))
+                       ftol_array=np.full(len(free_ns), free_ftol), niter_array=np.full(len(free_ns), 20000))
     if free_mpol is not None:  # The coil field excites boundary harmonics the optimized deck truncates.
         free_inp = free_inp.change_resolution(
             mpol=free_mpol, ntor=free_mpol, ntheta=max(2 * free_mpol + 6, free_inp.ntheta),

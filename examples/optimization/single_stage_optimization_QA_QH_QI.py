@@ -8,7 +8,7 @@ coils are then fitted to the frozen boundary without an equilibrium solve, and t
 boundary and coils are optimized as one vector. VMEX returns the exact derivative
 of the converged equilibrium; ESSOS and JAX differentiate the coils. The
 quasisymmetry residual (the constructed QI residual, with mirror-ratio and
-elongation hinges, for QI) is the objective. The transform floor, the aspect limit,
+elongation limits, for QI) is the objective. The transform floor, the aspect limit,
 the normal field B.n/|B| and the field-strength match |B_coil|^2/|B|^2 = 1 are
 inequality constraints in an augmented Lagrangian, so no weight needs tuning per
 seed; the coil length, curvature and distance limits are one-sided penalties. The
@@ -119,11 +119,11 @@ else:
 inp = replace(inp, delt=0.5, ns_array=np.array([STAGE_NS]), ftol_array=np.array([STAGE_FTOL]),
               niter_array=np.array([STAGE_NITER])).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-iota_hinge = [(opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 10.0)]
+iota_hinge = [(opt.min_abs_iota, opt.at_least(IOTA_CONSTRAINT), 10.0)]
 if FAMILY == "QI":
     qs = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
-    shape_limits = [(opt.Hinge(opt.mirror_ratio, ceiling=0.99 * MIRROR_LIMIT), 0.0, 1000.0),
-                    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0)]
+    shape_limits = [(opt.mirror_ratio, opt.at_most(0.99 * MIRROR_LIMIT), 1000.0),
+                    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0)]
     stage_terms = [(qs, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01), *iota_hinge, *shape_limits]
 else:
     qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=HELICITY_N)
