@@ -29,12 +29,17 @@ def _neo_imports():
 
 
 def diagnostic_neo_config():
-    """Return the bounded NEO resolution used by VMEX summary figures.
+    """Return the bounded NEO resolution used by VMEX summary figures and examples.
 
-    On the bundled NFP=2 QA and NFP=4 QI finite-beta decks this stays within
-    4% of NEO_JAX's default ``NeoConfig``.  A 16 x 16 spline grid aliases the
-    summary Boozer spectrum (``mboz=16``) and fewer than 20 steps per field
-    period or 200 field periods leave 7-30% errors.  Pass a
+    A 32 x 32 spline grid, 24 particles and 20 steps per field period.
+    Against a 96 x 96, 60-particle, 40-steps-per-period reference, the largest
+    error over ``s = 0.25, 0.5, 0.75`` on 39 optimized QI and pwO equilibria is
+    2.5% median and 10% at the 90th percentile, and the Spearman rank
+    correlation with the reference is 0.995; on ten nearby QI candidates it is
+    1.00. A 16 x 16 grid aliases the ``mboz=16`` Boozer spectrum, and fewer
+    than 20 steps per period leave 7-30% errors. Below ``epsilon_eff^(3/2)`` of
+    about 1e-5 (near-perfect quasi-symmetry) 20 steps per period do not
+    resolve the value; use 40 steps with 400-1000 steps. Pass a
     ``neo_jax.NeoConfig`` to :func:`epsilon_effective_from_wout` for
     publication calculations.
     """
@@ -132,7 +137,7 @@ def screen_transport(wout, surfaces, *, mboz=24, nboz=24, config=None):
     if not np.allclose(np.asarray(bx.s_in)[indices], surfaces, rtol=0, atol=1e-12):
         raise ValueError("The NEO screen requires the requested half-mesh radii")
     bx.compute_surfs = indices
-    bx.run(jit=True)
+    bx.run()
     config = config if config is not None else NeoConfig(theta_n=192, phi_n=192, npart=80, multra=2, nstep_per=80,
                        nstep_min=800, nstep_max=2000, acc_req=.005, ref_swi=2,
                        max_rational_field_periods=100000, rational_surface_policy="error")

@@ -26,14 +26,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
       - name: Install
         run: python -m pip install . pytest
-      - uses: actions/cache@v6.1.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/vmex
           key: vmex-v5-${{ runner.os }}-nightly-opt-${{ hashFiles('pyproject.toml') }}-${{ github.run_id }}
@@ -47,13 +49,37 @@ jobs:
             $(python tools/test_manifest.py select full-opt-qh) \
             $(python tools/test_manifest.py select full-opt-qp) \
             --durations=10 --vmex-report=test-report-opt.json
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: test-report-opt
           path: test-report-opt.json
           if-no-files-found: warn
           retention-days: 7
+
+  example-python-matrix:
+    # The oldest and newest supported Pythons run the canonical optimization
+    # example; the PR lanes run Python 3.12 only.
+    name: QA optimization example (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: python -m pip install . pytest
+      - name: Run the QA optimization example
+        env:
+          JAX_PLATFORMS: cpu
+          MPLBACKEND: Agg
+        run: pytest -q -o addopts= "tests/test_examples.py::test_qs_optimization_examples[QA]"
 
   minimum-integrations:
     # floors: every declared floor pinned exactly -- latest-version jobs cannot
@@ -64,7 +90,7 @@ jobs:
     # user's first run.
     name: Integrations (${{ matrix.install }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -74,8 +100,10 @@ jobs:
           - install: stale
             python: "3.12"
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -117,14 +145,23 @@ jobs:
             tests/test_turbulence.py::test_drive_gradients_reach_gkx_as_a_over_l \
             tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences \
             tests/test_examples.py::test_coil_examples_need_only_the_pinned_essos_release
+      - name: Run the QA optimization example at the oldest stack
+        # The shipped optimization scripts, not just the library, must run on
+        # the pinned floors: one short SciPy least-squares ladder end to end.
+        env:
+          JAX_PLATFORMS: cpu
+          MPLBACKEND: Agg
+        run: pytest -q -o addopts= "tests/test_examples.py::test_qs_optimization_examples[QA]"
 
   optional-integrations:
     name: Optional integrations
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -178,7 +215,7 @@ jobs:
         run: |
           pytest -q tests/test_examples.py::test_force_balance_polishing_example \
             --vmex-report=test-report-polish.json
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: test-report-optional
@@ -220,8 +257,10 @@ jobs:
             shard: "4/4"
             jax: "0.11.1"
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
@@ -256,7 +295,7 @@ jobs:
             FILES=""
           fi
           pytest -q ${{ matrix.parallel }} "${NODES[@]}" $FILES --durations=20 --vmex-report=nonlinear-report.json
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: nonlinear-${{ matrix.name }}-${{ matrix.jax }}
