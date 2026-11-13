@@ -141,6 +141,8 @@ UNTESTED_EXAMPLES = {
 #: their symmetric namesakes: none of them had ever run, and
 #: ``QH_optimization.py`` exited non-zero when it finally did.
 EXECUTED_EXAMPLES = {
+    "examples/machine_learning/database_optimization.py",
+    "examples/machine_learning/differentiable_optimization.py",
     "examples/epsilon_effective.py",
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
@@ -1685,3 +1687,21 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000
+
+
+@pytest.mark.parametrize("name", ["database", "differentiable"])
+def test_machine_learning_examples(name, tmp_path):
+    """Both design examples write their database or history and a figure."""
+    _run_example(EXAMPLES / "machine_learning" / f"{name}_optimization.py", tmp_path, timeout=600)
+    output = tmp_path / "results" / "machine_learning"
+    if name == "database":
+        with np.load(output / "database.npz", allow_pickle=False) as data:
+            assert data["X"].shape[1] == 6 and np.abs(data["selected"]).max() <= 1.0
+            assert np.isfinite(data["Y"][0]).all() and data["Y"].shape[1] == 4
+        assert (output / "input.database_selected").is_file()
+        assert (output / "database.png").is_file()
+    else:
+        with np.load(output / "differentiation.npz", allow_pickle=False) as data:
+            assert np.abs(data["x_history"]).max() <= 1.0
+            assert data["loss_history"][-1] < data["loss_history"][0]
+        assert (output / "differentiation.png").is_file()
