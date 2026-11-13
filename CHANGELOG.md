@@ -4,6 +4,7 @@ Full release notes are on GitHub. Numerical results here have committed artifact
 
 ## Unreleased
 
+- **Dependency floors: `solvax>=0.36.2`, `booz_xform_jax>=0.5.2`.** solvax 0.36.2 compiles the block-Thomas solve as scans, which shortens the cold compile of the Jacobian (about 20% on the QA optimization workload); booz_xform_jax 0.5.2 adds `magnetic_only` to `run_jax`.
 - **`Gamma_c` no longer returns NaN on rippled surfaces.** The default well slots per pitch level are 32 per transit (were 16): the bundled QI seed and omnigenity decks overflowed 16 on 5-6 of 6 surfaces and returned NaN rows, which stops an optimizer exactly where the proxy matters; at 32 the values are unchanged where 16 sufficed and cost rises about a fifth.
 - **Callback-free ambipolar roots in the optimizer.** An objective term that exposes `roots(state, runtime)` (DKX's `KineticBootstrapMismatch(ambipolar=True)`, `dkx>=2.14.0`) now has its roots found on the host before the jitted residual and Jacobian and passed in as an argument, so those programs no longer hold the root-finder `io_callback`; the implicit-function gradient through the root is unchanged. Residual and Jacobian agree with the callback form to 1e-7 or better.
 
