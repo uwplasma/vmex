@@ -112,6 +112,8 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.soft_min_abs_iota` is the smooth variant
   (``softmax``-weighted, so it stays within ``[min, max]``) for optimizers
   that stall on the ties of a hard minimum;
+- :func:`~vmex.core.optimize.max_abs_iota` — the largest ``|iota|`` over the
+  same surfaces, for capping the transform with ``opt.Hinge(..., ceiling=...)``;
 - :func:`~vmex.core.optimize.mean_iota` /
   :func:`~vmex.core.optimize.edge_iota` — profile-average and boundary
   transform, for decks that genuinely want a target rather than a floor;
