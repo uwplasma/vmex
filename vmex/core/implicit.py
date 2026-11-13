@@ -3076,8 +3076,10 @@ def _raw_block_system(
             lambda z: residual(z, params), (z_star,), (tangent,)
         )[1]
 
-    _, pullback = jax.vjp(lambda z: residual(z, params), z_star)
-    operator_t = lambda cotangent: pullback(cotangent)[0]  # noqa: E731
+    # Linearized where it is applied: only the transposed solves use it, and building
+    # it for every system traced a full extra residual linearization (seconds).
+    operator_t = lambda cotangent: jax.vjp(  # noqa: E731
+        lambda z: residual(z, params), z_star)[1](cotangent)[0]
     if bands is not None:
         factors, row_scale, column_scale, lower, diagonal, upper = bands
     else:

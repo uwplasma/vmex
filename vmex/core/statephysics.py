@@ -390,8 +390,7 @@ def min_boundary_curvature_radius(state: SpectralState, rt: SolverRuntime) -> Ar
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     """Mean rotational transform over the half-mesh surfaces (axis excluded).
 
-    Matches the legacy optimization ``mean_iota`` convention
-    (``mean(iotas[1:])``, i.e. the mean of the wout ``iotas`` profile).
+    ``mean(iotas[1:])``, i.e. the mean of the wout ``iotas`` profile.
     """
     iotas = _iotas_half(state, rt)
     return jnp.mean(iotas[1:])
