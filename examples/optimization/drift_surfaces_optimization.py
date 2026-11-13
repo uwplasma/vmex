@@ -77,6 +77,9 @@ OUTPUT_NAME = f"drift_surfaces_nfp{NFP}_optimized"
 # VMEX_EXAMPLES_CI=1 is the short smoke pass the test suite runs:
 ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
+    SURFACES, TRAPPING_DEPTHS = np.array([0.3, 0.7]), (0.25, 0.7)
+    DRIFT_OPTIONS = dict(nalpha=16, points_per_period=48, num_periods=8,
+                         max_wells=20, quadrature_order=12, nsteps=128, length=8.0)
     MAX_MODES, MAX_NFEV = [1], [2]
     FINAL_NS, FINAL_FTOL = 31, 1.0e-10
 

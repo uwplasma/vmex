@@ -315,6 +315,41 @@ def test_colored_bands_match_the_per_row_build(monkeypatch, deck, ns, ntor):
         )
 
 
+def _factor_arguments():
+    _, cfg, params = _small_solovev_setup()
+    state, mask = im.solve_implicit_with_aux(params, cfg)
+    return cfg, (im._dof_projector(cfg, mask)(state), params, state, mask)
+
+
+@pytest.mark.parametrize("workers", [2, 3])
+def test_probe_workers_give_the_single_program_bands(workers):
+    """Probes run in pieces on threads assemble the bands one program computes, to round-off."""
+    cfg, arguments = _factor_arguments()
+    whole = im._refine_block_factor_core(*arguments, cfg)
+    im.set_probe_workers(cfg, workers)
+    pieces = im._probe_responses(cfg, arguments)
+    assert len(pieces) == workers and len({piece.shape for piece in pieces}) == 1
+    split = im._refine_block_factor_core(*arguments, cfg, pieces)
+    for expected, found in zip(jax.tree.leaves(whole), jax.tree.leaves(split)):
+        scale = max(np.abs(np.asarray(expected)).max(), 1.0)
+        np.testing.assert_allclose(found, expected, rtol=0, atol=1e-12 * scale)
+
+
+def test_probe_workers_default_to_the_cpus_of_a_cpu_device_and_validate(monkeypatch):
+    cfg, arguments = _factor_arguments()
+    with pytest.raises(ValueError, match="probe_workers"):
+        im.set_probe_workers(cfg, 0)
+    im.set_probe_workers(cfg, 1)
+    assert im._probe_responses(cfg, arguments) is None
+    im.set_probe_workers(cfg, None)
+    monkeypatch.setattr(im, "available_cpus", lambda: 1)
+    assert im._probe_responses(cfg, arguments) is None
+    monkeypatch.setattr(im, "available_cpus", lambda: 64)
+    assert len(im._probe_responses(cfg, arguments)) == im._MAX_PROBE_WORKERS
+    accelerator = dataclasses.replace(cfg, device=types.SimpleNamespace(platform="gpu"))
+    assert im._probe_responses(accelerator, arguments) is None
+
+
 def _jaxpr_array_sizes(jaxpr):
     """Element counts of every array an equation of ``jaxpr`` (nested too) produces."""
     sizes = []

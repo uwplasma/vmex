@@ -121,7 +121,7 @@ device per usable core (on Linux, the cores the process may run on). On Apple
 silicon it uses only the performance cores unless there are at least as many
 efficiency cores. On an M4 (4 + 6) all 10 cores trace 1.7x faster than the 4
 performance cores. A device count in `XLA_FLAGS` or `JAX_NUM_CPU_DEVICES`
-wins. The Boozer transform takes about 2 s.
+wins. The Boozer transform is one jitted pass over all surfaces: about 1.5 s for the default ARIES-CS run (100 surfaces, 32 x 32 modes) on four CPU threads, after the first compilation.
 
 **CPU or GPU.** Since ESSOS 0.19.3 (parallel spline lookup and compaction of
 lost alphas) a GPU is the faster choice for large ensembles: 1,024 alphas over

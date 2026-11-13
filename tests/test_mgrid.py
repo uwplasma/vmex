@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import warnings
 from dataclasses import dataclass, replace
@@ -106,6 +107,26 @@ def test_magnetic_field_interface_and_vacuum_extender_are_exact():
     np.testing.assert_allclose(general.dB_by_dX(points), jnp.swapaxes(expected, -1, -2))
 
 
+def test_parameter_pullback_cache_survives_a_traced_first_call():
+    parameters = jnp.array([1.2, -0.7])
+    points = jnp.array([[0.4, -0.2, 0.3], [0.8, 0.1, -0.5]])
+
+    def parameterized_field(p, xyz):
+        x, y, z = xyz.T
+        return jnp.stack((p[0] * x**3 + p[1] * y, p[0] * z, p[1] * x * y), axis=-1)
+
+    field = MagneticField(
+        lambda xyz: parameterized_field(parameters, xyz), parameters=parameters,
+        parameter_data_fn=lambda p: {"coefficients": p},
+        B_from_data=lambda data, xyz: parameterized_field(data["coefficients"], xyz),
+    ).set_points(points)
+    cotangent = jnp.arange(6.0).reshape(2, 3)
+    traced = jax.jit(field.B_vjp)(cotangent)
+    expected = jax.vjp(lambda p: parameterized_field(p, points), parameters)[1](cotangent)[0]
+    np.testing.assert_allclose(traced, expected, rtol=1e-13)
+    np.testing.assert_allclose(field.B_vjp(cotangent), expected, rtol=1e-13)
+
+
 def test_high_spatial_derivatives_and_parameter_vjps_are_exact():
     parameters = jnp.array([1.2, -0.7])
     points = jnp.array([[0.4, -0.2, 0.3], [0.8, 0.1, -0.5]])
@@ -173,6 +194,13 @@ def test_high_spatial_derivatives_and_parameter_vjps_are_exact():
         field.B_contravariant(jnp.ones(2))
     with pytest.raises(ValueError, match=r"shape \(3,\)"):
         field.to_xyz(jnp.ones(2))
+
+    # a shallow copy shares the pullback cache: its own points must not leak back
+    cotangent = jnp.ones((2, 3, 3))
+    first = factored.gradB_vjp(cotangent)
+    other = copy.copy(factored).set_points(points[:1] + 0.3)
+    other.gradB_vjp(jnp.ones((1, 3, 3)))
+    np.testing.assert_allclose(factored.gradB_vjp(cotangent), first, rtol=0, atol=0)
     new_points = points[:1] + 0.15
     factored.set_points_xyz(new_points)
     new_value = factored.B()
