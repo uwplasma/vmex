@@ -286,3 +286,9 @@ Errors and CLI
 
 .. automodule:: vmex.doctor
    :members:
+
+DeltaRes map reductions
+-----------------------
+
+.. automodule:: vmex.core.deltares
+   :members:
