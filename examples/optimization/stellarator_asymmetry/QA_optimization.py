@@ -17,7 +17,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -99,19 +98,10 @@ inp = replace(inp, lasym=True, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc, **STAGE_OVERR
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 # Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [(qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0), (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0)]
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0), (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0)]
 report = opt.EquilibriumReporter(
     ("QS total", qs.total, ".6e"), ("aspect", opt.aspect_ratio, ".4f"),
     ("min |iota|", opt.min_abs_iota, ".4f"), ("magnetic well", opt.magnetic_well, ".4f"))

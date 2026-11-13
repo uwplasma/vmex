@@ -120,26 +120,14 @@ stability_weights = np.where(
     STABILITY_WEIGHT * (1.0 + (EDGE_WEIGHT_FACTOR - 1.0) * stability_s**4), 0.0)
 
 
-def mirror_excess(state, runtime):
-    return jnp.maximum(opt.mirror_ratio(state, runtime) - MIRROR_LIMIT, 0.0)
-
-
-def iota_floor(state, runtime):
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0.0)
-
-
-def elongation_excess(state, runtime):
-    return jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0.0)
-
-
 ### Set up the objective ######################################################
 
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 objective_terms = [
     (qs, 0.0, 1.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 100.0), (mirror_excess, 0.0, 10.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 100.0), (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0),
     (opt.volume_average_beta, TARGET_BETA, 1.0 / TARGET_BETA**2),
     (opt.mercier_stability_residual, 0.0, stability_weights),
     (opt.glasser_stability_residual, 0.0, stability_weights)]

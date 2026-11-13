@@ -160,23 +160,14 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5).change_resolution(
 
 # A VmecProblem owns the boundary-mode convention, the dof scaling and the
 # equilibrium solve. Quasisymmetry is its objective; the limits are added below.
-def iota_shortfall(state, ctx):
-    """How far the transform floor is missed; zero once it is met."""
-    return jnp.maximum(IOTA_CONSTRAINT - opt.min_abs_iota(state, ctx), 0.0)
-
-
-def aspect_excess(state, ctx):
-    return jnp.maximum(opt.aspect_ratio(state, ctx) - ASPECT_CONSTRAINT, 0.0)
-
-
 # One-sided rows, so a satisfied target contributes nothing rather than being
 # pulled back to the limit the way an equality residual would be.
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 plasma_problem = opt.VmecProblem.from_tuples(
     inp,
     [(qs.residuals_state, 0.0, 1.0),
-     (iota_shortfall, 0.0, CONSTRAINT_WEIGHT),
-     (aspect_excess, 0.0, CONSTRAINT_WEIGHT)],
+     (opt.min_abs_iota, opt.at_least(IOTA_CONSTRAINT), CONSTRAINT_WEIGHT),
+     (opt.aspect_ratio, opt.at_most(ASPECT_CONSTRAINT), CONSTRAINT_WEIGHT)],
     max_mode=MAX_MODE, use_ess=True, progress=not ci_smoke)
 
 ###############################################################################
@@ -235,7 +226,7 @@ def coil_field(coils):
 def safe_sqrt(x):
     """sqrt with a zero derivative at zero instead of an infinite one.
 
-    The two clearance terms are aggregate hinge losses, so a residual row is
+    The two clearance terms are aggregate one-sided penalties, so a residual row is
     their square root -- and that row is exactly zero once the clearance is met,
     which is where the plain derivative of sqrt is infinite and the very first
     Jacobian comes back NaN. The doubled where keeps the bad branch out of both

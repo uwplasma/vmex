@@ -223,11 +223,6 @@ def saturate(equilibrium, seeds, label):
 
 ### Set up the objective ######################################################
 
-def iota_floor(state, runtime):
-    """Hinge on the profile minimum of |iota|."""
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0.0)
-
-
 def heat_flux(state, runtime):
     """Post-saturation window heat flux, reduced over the flux tubes."""
     fluxes = jnp.stack([
@@ -255,7 +250,7 @@ flux_scale = max(abs(seed_flux), 1.0e-6)
 objective_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (heat_flux, 0.0, FLUX_WEIGHT / flux_scale**2),
 ]
 

@@ -72,26 +72,14 @@ inp = replace(vj.VmecInput.from_file(INPUT_FILE), ns_array=np.array([31]),
               ftol_array=np.array([1e-12]), niter_array=np.array([5500]))
 
 
-def iota_floor(state, runtime):
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0.0)
-
-
-def mirror_excess(state, runtime):
-    return jnp.maximum(opt.mirror_ratio(state, runtime) - 0.99 * MIRROR_LIMIT, 0.0)
-
-
-def elongation_excess(state, runtime):
-    return jnp.maximum(opt.max_elongation(state, runtime) - ELONGATION_LIMIT, 0.0)
-
-
 ### Set up the objective ######################################################
 
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_terms = [
     (qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 0.01),
-    (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 1000.0),
-    (elongation_excess, 0.0, 10.0)]
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0), (opt.mirror_ratio, opt.at_most(0.99 * MIRROR_LIMIT), 1000.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0)]
 
 
 report = opt.EquilibriumReporter(

@@ -147,18 +147,6 @@ inp, equilibrium = picard.input, picard.equilibrium
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-
 def redl_j_dot_B(equilibrium_state, solver_context):
     """Redl <j.B> on SURFACES in MA T/m^2, the units of DKX's mismatch=False row."""
     geometry = redl_geometry_from_state(equilibrium_state, solver_context,
@@ -192,8 +180,8 @@ qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
     (qi, 0.0, 10.0), (kinetic, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 0.005),
-    (iota_floor, 0.0, 10.0),
-    (mirror_excess, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
 ]
 
