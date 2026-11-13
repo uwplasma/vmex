@@ -90,6 +90,16 @@ Options
        order first), optional ``helicity_n``. Adds the Redl ``<j.B>`` curve.
    * - ``--nc-er X``
      - ``E_r`` [kV/m] for ``--neoclassical`` (default: the ambipolar root).
+   * - ``--alfven``
+     - Shear-Alfven continuum with FAX on a ``wout_*.nc`` input or after
+       solving an input file: gaps (TAE, EAE, MAE, HAE) and the global mode
+       of the widest one. Writes ``*_alfven.png`` and ``*_alfven.json``
+       (requires ``pip install "vmex[alfven]"``). Defaults pick the harmonics
+       from ``nfp`` and the rotational transform; frequencies scale as the
+       inverse square root of the density.
+   * - ``--alfven-config TOML`` / ``--alfven-density M3`` / ``--alfven-ion-mass AMU``
+     - A ``fax run`` case file (unknown keys are rejected), the ion number
+       density (default ``1e19`` m^-3) and the ion mass (default 2 amu).
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
    * - ``--trace-no-resolution-check``

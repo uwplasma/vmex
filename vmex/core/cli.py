@@ -164,6 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmex --trace wout_*.nc — trace alpha particles (ESSOS), plot losses\n"
             "  vmex --turbulence input.X — solve, then GKX linear + nonlinear turbulence\n"
             "  vmex --neoclassical wout_*.nc — DKX neoclassical transport, plot panels\n"
+            "  vmex --alfven wout_*.nc — FAX Alfven continuum gaps and the widest-gap mode\n"
             "  vmex --scale input.X [B R] — scale an input or WOUT\n"
             "  vmex --to-input wout_*.nc — reconstruct input.* from a WOUT\n"
             "  vmex --doctor          — installation and JAX backend diagnostics\n"
@@ -486,6 +487,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--nc-er", type=float, default=None, metavar="KV_PER_M",
         help="--neoclassical radial electric field [kV/m] (default: the ambipolar root).",
     )
+    p.add_argument(
+        "--alfven", action="store_true",
+        help=(
+            "Shear-Alfven continuum with FAX (pip install 'vmex[alfven]') after solving an input "
+            "file, or from a wout_*.nc: gaps (TAE, EAE, MAE, HAE) and the global mode of the widest "
+            "one. Writes *_alfven.png and *_alfven.json. Frequencies scale as the density^(-1/2)."
+        ),
+    )
+    p.add_argument("--alfven-config", metavar="TOML", default=None,
+                   help="--alfven harmonics, grid and plasma from a `fax run` case file (unknown keys are rejected).")
+    p.add_argument("--alfven-density", type=float, default=None, metavar="M3",
+                   help="--alfven ion number density [m^-3] (default: 1e19).")
+    p.add_argument("--alfven-ion-mass", type=float, default=None, metavar="AMU",
+                   help="--alfven ion mass [amu] (default: 2).")
     p.add_argument(
         "--doctor",
         action="store_true",
@@ -1013,6 +1028,8 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         _run_turbulence(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if bool(args.neoclassical):
         _run_neoclassical(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
+    if bool(args.alfven):
+        _run_alfven(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if not bool(result.converged):  # NITER exhaustion: wout kept, distinct code
         return int(result.ier_flag) or 1
     return 0
@@ -1293,6 +1310,19 @@ def _run_turbulence(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -
         run_turbulence(wout_path, outdir, cfg, emit=(lambda *a, **k: None) if quiet else emit)
     except ImportError as exc:
         raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
+
+
+def _run_alfven(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
+    """``--alfven`` driver (requires FAX)."""
+    from .alfven_run import run_alfven
+
+    try:
+        run_alfven(wout_path, outdir, config=args.alfven_config, density=args.alfven_density,
+                   ion_mass=args.alfven_ion_mass, emit=(lambda *a, **k: None) if quiet else emit)
+    except ImportError as exc:
+        raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
+    except ValueError as exc:  # a case file with unknown keys
+        raise VmecInputError(WERROR_MESSAGES[INPUT_ERROR_FLAG], hint=f"--alfven-config: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1583,9 +1613,10 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
         return 0
 
     if _is_wout_path(input_path):
-        if not (plot_requested or args.booz or args.trace or args.turbulence or args.neoclassical):
+        if not (plot_requested or args.booz or args.trace or args.turbulence or args.neoclassical
+                or args.alfven):
             parser.error("wout_*.nc inputs require --plot, --booz, --trace, --turbulence, "
-                         "and/or --neoclassical")
+                         "--neoclassical, and/or --alfven")
         if plot_requested:
             _plot_wout_file(input_path, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.booz):
@@ -1596,6 +1627,8 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_turbulence(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.neoclassical):
             _run_neoclassical(input_path, args, plot_outdir, emit=emit, quiet=quiet)
+        if bool(args.alfven):
+            _run_alfven(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
     from vmex.mirror.free_boundary import is_mirror_input
