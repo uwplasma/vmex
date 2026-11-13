@@ -278,14 +278,14 @@ elongation limits met in 612 s, where the previous circular-seed example ran
 (``benchmarks/qi_optimization_profile_cpu.json``);
 :doc:`/howto/optimize-a-boundary` describes the workflow.  The
 earlier Goodman-style *wout-lane* residual
-(:func:`~vmex.core.optimize.quasi_isodynamic_residual`, host NumPy,
+(:func:`~vmex.core.qi.quasi_isodynamic_residual`, host NumPy,
 ``jac=None``) remains available for diagnostics and cross-checks.
 
 The sampled value is part of the objective definition: always report the
 surface set and discretization with a QI total.  For example, an outer-surface
 diagnostic is not numerically interchangeable with a six-surface core-to-edge
 objective.  The independent wout/Boozer implementation
-(:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`) remains the
+(:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout`) remains the
 cross-check for a finished configuration.
 
 The branch matching, running extrema, and interpolation in the constructed
@@ -781,7 +781,7 @@ Which objectives differentiate how
      - no
      - host-NumPy wout engine (``l_grad_b``: use
        :func:`~vmex.core.optimize.l_grad_b_state` instead)
-   * - :func:`~vmex.core.optimize.quasi_isodynamic_residual` (wout lane)
+   * - :func:`~vmex.core.qi.quasi_isodynamic_residual` (wout lane)
      - yes
      - no
      - host-NumPy Boozer tables (use
