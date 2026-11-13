@@ -716,6 +716,19 @@ def test_qa_finite_beta_least_squares_example_sets_beta_through_phiedge():
     assert "least_squares(" in text
 
 
+def test_finite_beta_least_squares_example_exposes_the_row_toggles():
+    """One script serves QA, QH and QP; the well and stability rows are switches."""
+    text = (EXAMPLES / "optimization" / "QA_optimization_finite_beta.py").read_text()
+    _assert_beta_from_toroidal_flux(text)
+    for family in ("QA", "QH", "QP"):
+        assert f'FAMILY == "{family}"' in text
+    assert "USE_WELL = " in text and "USE_MERCIER = " in text
+    assert "opt.magnetic_well, opt.at_" in text and "opt.min_abs_iota, opt.at_" in text
+    assert "opt.mercier_stability_residual" in text and "opt.glasser_stability_residual" in text
+    scales = [float(v) for v in re.search(r"STABILITY_SCALE = \[([^\]]*)\]", text).group(1).split(",")]
+    assert scales[0] == 0.0 and scales[-1] == 1.0
+
+
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
 @pytest.mark.parametrize("suffix", ["", "_finite_beta"])
 def test_stellarator_asymmetry_examples_expose_all_boundary_families(case, suffix):
