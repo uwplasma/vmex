@@ -42,6 +42,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "optimization" / "single_stage_optimization.py",
     EXAMPLES / "optimization" / "single_stage_optimization_augmented_lagrangian.py",
     EXAMPLES / "optimization" / "single_stage_optimization_least_squares.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py",
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
@@ -197,6 +198,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_augmented_lagrangian.py",
     "examples/optimization/single_stage_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization_least_squares.py",
+    "examples/optimization/single_stage_optimization_QA_QH_QI.py",
     "examples/optimization/stellarator_asymmetry/QA_optimization.py",
     "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py",
     "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py",
@@ -805,6 +807,24 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
     for name in ("wout_single_stage_free_boundary_optimized.nc",
                  "single_stage_free_boundary_optimization.png",
                  "single_stage_free_boundary_objectives.png"):
+        assert (tmp_path / name).stat().st_size > 0
+
+
+@pytest.mark.full  # plasma ladder, coil fit, joint solve and both verification solves
+@pytest.mark.parametrize("case", ["QA", "QH", "QI"])
+def test_single_stage_symmetry_examples(case, tmp_path):
+    pytest.importorskip("essos")
+    script = EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py"
+    source = script.read_text().replace('FAMILY = "QA"', f'FAMILY = "{case}"').replace("__file__", repr(str(script)))
+    (tmp_path / "family.py").write_text(source)
+    out = _run_example(tmp_path / "family.py", tmp_path, timeout=1800)
+    assert "[coil fit]" in out and "[augmented Lagrangian 1]" in out
+    final = re.search(rf"\[final\] {case} total = ([0-9.eE+-]+)", out)
+    assert final is not None and np.isfinite(float(final.group(1)))
+    assert re.search(r"B.n/B RMS = [0-9.eE+-]+", out)
+    assert "All stated targets met." in out or "did NOT meet its stated targets" in out
+    for name in (f"wout_single_stage_{case}_optimized.nc", f"coils_single_stage_{case}_optimized.json",
+                 f"single_stage_{case}_optimization.png"):
         assert (tmp_path / name).stat().st_size > 0
 
 

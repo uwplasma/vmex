@@ -409,7 +409,14 @@ field target::
        bounds=[(-3, 3)] * joint.x0.size)
 
 The optimizer varies ``u`` with ``x = joint.x0 + joint.scales*u``. Currents
-stay fixed while coil shapes and boundary modes vary. Virtual-casing precision
+stay fixed while coil shapes and boundary modes vary. The limits are penalties
+with multipliers: after each bounded solve, ``joint.update_multipliers(u)``
+takes one Powell-Hestenes-Rockafellar step, so the weights need no tuning per
+seed. ``jump_limit`` adds the field-strength match ``|B_coil|^2/|B|^2 = 1`` on
+the boundary, which stops a weak coil field from lowering ``B.n/|B|``. For a
+vacuum boundary, ``coils_around_boundary`` places planar coils around the
+boundary cross-sections and ``fit_vacuum_coils`` fits their shapes and a common
+current to the frozen boundary without an equilibrium solve. Virtual-casing precision
 is planned once on the seed and frozen throughout the search; uncertified
 equilibrium trials receive a finite rejection cost above the normalized seed.
 ``toroidal_flux(inp, coils)`` measures the physical positive-phi flux for seed
@@ -417,7 +424,9 @@ calibration, independently of the poloidal traversal direction.
 
 ``verify_design(joint, result.x, prefix=...)`` saves the design, re-solves on a
 finer fixed-boundary grid, and cold-solves NESTOR with unchanged flux, pressure,
-and current profiles. It returns the equilibrium, surface, fixed-boundary
+and current profiles; ``free_mpol`` raises the mode numbers of that check
+alone, because the coil field excites harmonics the optimized deck truncates.
+It returns the equilibrium, surface, fixed-boundary
 metrics, and free-boundary report. ``design_target_report`` checks those metrics
 against explicit limits; failed solves and nonfinite values cannot pass.
 ``save_outputs`` writes the equilibrium, geometry, objective history, and plots.

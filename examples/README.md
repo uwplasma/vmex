@@ -163,6 +163,14 @@ that research budget as one commented set of constants next to the default.
   All three vary a prescribed boundary and coil Fourier coefficients and none
   calls a free-boundary solve. Each is self-contained, so one file can be read
   and modified without opening another.
+  `single_stage_optimization_QA_QH_QI.py` *(preview)* runs the full pipeline from a seed
+  deck for the family set in `FAMILY`: a plasma-only mode ladder, a coil fit to the
+  frozen boundary, then one joint solve in which the quasisymmetry (or constructed QI)
+  residual is the objective and the transform floor, aspect limit, B.n/|B| and
+  |B_coil|^2/|B|^2 limits sit in an augmented Lagrangian, so no weight is tuned per
+  seed. It ends with a finer fixed-boundary solve and a cold free-boundary solve in
+  the coil field, and reports every limit. It shares `vmex.core.single_stage`; set
+  `STAGE_ONE_INPUT` to start from an `input.*_optimized` file instead.
   `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
   `QI_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
