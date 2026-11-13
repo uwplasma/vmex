@@ -723,7 +723,7 @@ def test_finite_beta_least_squares_example_exposes_the_row_toggles():
     for family in ("QA", "QH", "QP"):
         assert f'FAMILY == "{family}"' in text
     assert "USE_WELL = " in text and "USE_MERCIER = " in text
-    assert "opt.Hinge(opt.magnetic_well" in text and "opt.Hinge(opt.min_abs_iota" in text
+    assert "opt.magnetic_well, opt.at_" in text and "opt.min_abs_iota, opt.at_" in text
     assert "opt.mercier_stability_residual" in text and "opt.glasser_stability_residual" in text
     scales = [float(v) for v in re.search(r"STABILITY_SCALE = \[([^\]]*)\]", text).group(1).split(",")]
     assert scales[0] == 0.0 and scales[-1] == 1.0

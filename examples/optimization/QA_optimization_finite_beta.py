@@ -25,7 +25,7 @@ PRES_SCALE on the seed instead makes the two rows disagree: at fixed flux beta
 scales as ASPECT**-4, so the targets are consistent only at the seed's aspect
 ratio.
 
-The rows are optional hinges, so each costs nothing once met: ``USE_WELL`` puts
+The rows are optional limits, so each costs nothing once met: ``USE_WELL`` puts
 a floor under the magnetic well and ``USE_MERCIER`` asks for Mercier and
 resistive-interchange stability on the dimensionless PHIEDGE**2 DMerc and
 PHIEDGE**2 D_R (VMEC's criteria scale as PHIEDGE**-2) over s >= STABILITY_MIN_S.
@@ -35,7 +35,7 @@ swamp the quasisymmetry residual.
 
 QP is a symmetry demonstration: a quasi-poloidally symmetric field does not
 confine alphas, so judge it by the QS residual alone, with the mirror and
-elongation hinges keeping the shape in range.
+elongation limits keeping the shape in range.
 """
 
 import os
@@ -74,7 +74,7 @@ elif FAMILY == "QP":
 else:
     raise ValueError(f"FAMILY must be QA, QH or QP, not {FAMILY!r}")
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
-# QP only: the mirror ratio and elongation hinges (heavy limits stall the trust region):
+# QP only: the mirror ratio and elongation limits (heavy limits stall the trust region):
 MIRROR_LIMIT, ELONGATION_LIMIT, SHAPE_WEIGHT = (0.35, 12.0, 1.0) if FAMILY == "QP" else (None, None, 0.0)
 
 # Volume-averaged beta that the toroidal flux is chosen to give at ASPECT_TARGET:
@@ -92,7 +92,7 @@ MAX_NFEV = [10, 15, 15, 20]
 # Stability enters after a quasisymmetric basin exists, at 0.3 of its weight first:
 STABILITY_SCALE = [0.0, 0.0, 0.3, 1.0]
 
-# The optional rows. Each is a hinge, so it costs nothing once met:
+# The optional rows. Each is a limit, so it costs nothing once met:
 WELL_WEIGHT = 10.0
 USE_MERCIER = True                # Mercier and resistive-interchange stability
 
@@ -166,7 +166,7 @@ print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
 ### Set up the objective ######################################################
 
 # VMEC's DMerc and D_R scale as PHIEDGE**-2, so PHIEDGE**2 DMerc is the criterion
-# in s; the rows are hinges on that dimensionless form:
+# in s; the rows are limits on that dimensionless form:
 PHIEDGE = float(inp.phiedge)
 stability_s = np.linspace(0.0, 1.0, int(inp.ns_array[-1]))[2:-1]
 stability_weights = PHIEDGE**4 * np.where(
@@ -175,12 +175,12 @@ stability_weights = PHIEDGE**4 * np.where(
 
 
 def mercier_rows(state, runtime):
-    """Mercier hinge on PHIEDGE**2 DMerc below STABILITY_MARGIN (DMerc > 0 is stable)."""
+    """Mercier limit on PHIEDGE**2 DMerc below STABILITY_MARGIN (DMerc > 0 is stable)."""
     return opt.mercier_stability_residual(state, runtime, margin=STABILITY_MARGIN / PHIEDGE**2)
 
 
 def resistive_rows(state, runtime):
-    """Resistive-interchange hinge on PHIEDGE**2 D_R above minus STABILITY_MARGIN."""
+    """Resistive-interchange limit on PHIEDGE**2 D_R above minus STABILITY_MARGIN."""
     return opt.glasser_stability_residual(state, runtime, margin=STABILITY_MARGIN / PHIEDGE**2)
 
 
@@ -189,15 +189,15 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=HELICITY_M, helicity_n=
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (opt.Hinge(opt.min_abs_iota, floor=IOTA_FLOOR), 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
 ]
 if FAMILY == "QP":
-    objective_function_terms += [(opt.Hinge(opt.mirror_ratio, ceiling=MIRROR_LIMIT), 0.0, SHAPE_WEIGHT),
-                                 (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, SHAPE_WEIGHT)]
+    objective_function_terms += [(opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), SHAPE_WEIGHT),
+                                 (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), SHAPE_WEIGHT)]
 if USE_WELL:
     objective_function_terms.append(
-        (opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_TARGET), 0.0, WELL_WEIGHT))
+        (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_TARGET), WELL_WEIGHT))
 
 
 def stage_terms(scale):
