@@ -2,9 +2,15 @@
 """Optimize a finite-beta pwO plasma and ESSOS coils together.
 
 Run ``pwO_optimization.py`` first. A finite-beta plasma stage frees the pwO
-map as in that example; the joint plasma and coil stage holds the map fixed.
+map as in that example, with hinges on the boundary elongation and smallest
+radius of curvature that keep the shape coil-friendly; the pressure is then
+rescaled to the target beta. The coils are fitted to that plasma with a normal
+field tolerance that tightens in two steps (a tight one from the start
+switches the coils off); coil length, curvature and distances are smooth
+worst-case measures. The joint plasma and coil stage holds the map fixed.
 COILS_INPUT accepts an ESSOS stage-2 fit; COIL_FIT_MAXITER=0 keeps its shapes.
-A cold free-boundary solve and NEO check the design. Requires vmex[neoclassical].
+A cold free-boundary solve and NEO check the design, including the transport of
+the equilibrium the coils hold. Requires vmex[neoclassical].
 """
 
 import gc
@@ -31,7 +37,7 @@ from essos.coils import Coils, CreateEquallySpacedCurves
 from essos.surfaces import surfacerzfourier_from_boundary
 
 # Input parameters.
-NFP = 4
+NFP = 3
 INPUT_FILE = Path(f"input.pwO_optimized_nfp{NFP}")
 WOUT_FILE = Path(f"wout_pwO_optimized_nfp{NFP}.nc")
 COILS_INPUT = None  # Optional Path to an ESSOS stage-2 coil JSON for this input.
@@ -39,32 +45,35 @@ MAX_MODES = [1, 2, 3]  # boundary mode ladder of the plasma stage; the joint sta
 SURFACES = np.linspace(.25, .75, 3)
 TARGET_BETA = 0.005
 PRESSURE_PROFILE = [1.0, -1.0]
-BETA_TOLERANCE = 0.1
+BETA_TOLERANCE, BETA_WEIGHT = 0.1, 1.0e3
 
 # Initial pwO map (a, b, c, eta_min) and the names the plasma stage may change:
 MAP_PARAMETERS = dict(a=0.3, b=0.0, c=-2.0, eta_min=2.8)
 FREE_MAP = ("a", "b", "c", "eta_min")
 PWO_WEIGHT, EDGE_JACOBIAN_FLOOR = 1.0e3, 0.25
-PLASMA_MAX_NFEV, PLASMA_STEP, PLASMA_MAX_CHANGE = 15, 0.02, 1.0
+# Coils reproduce a boundary only as sharply as their distance: bound its elongation
+# and its smallest poloidal radius of curvature (in minor radii) in every stage.
+ELONGATION_LIMIT, CURVATURE_RADIUS_A, SHAPE_WEIGHT = 6.0, 0.05, 1.0e5
+PLASMA_MAX_NFEV, PLASMA_STEP, PLASMA_MAX_CHANGE = 15, 0.05, 5.0
 
 # Final limits; optimization constraints are tighter to allow for finer checks.
 # At NFP 2 the iota floor keeps iota above the m=4 resonance NFP/4 = 0.5; the free
 # boundary stalled with iota near 0.5. Run pwO_optimization.py with IOTA_FLOOR = 0.56 too.
-IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.54 if NFP == 2 else 0.41, 6.1, 0.02
+IOTA_FLOOR, ASPECT_LIMIT, NORMAL_FIELD_LIMIT = 0.54 if NFP == 2 else 0.41, 6.1, 0.01
 COIL_SURFACE_DISTANCE_A, COIL_DISTANCE_A, CURVATURE_A = .5, .5, .7
-DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.02
-IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.56 if NFP == 2 else 0.43, 6.0, 0.016
-CURVATURE_OBJECTIVE_A = .69
-COIL_DISTANCE_OBJECTIVE_A, COIL_SURFACE_DISTANCE_OBJECTIVE_A = .7, .6
+DELBSQ_LIMIT, FREE_BOUNDARY_DISTANCE_LIMIT = 0.02, 0.03  # DEL-BSQ; boundary shift in metres
+IOTA_CONSTRAINT, ASPECT_CONSTRAINT, NORMAL_FIELD_CONSTRAINT = 0.56 if NFP == 2 else 0.43, 6.0, 0.004
+CURVATURE_OBJECTIVE_A = .65
+COIL_DISTANCE_OBJECTIVE_A, COIL_SURFACE_DISTANCE_OBJECTIVE_A = .75, .6
 
-N_COILS, COIL_ORDER, N_SEGMENTS, STELLSYM = 3, 4, 64, True
+N_COILS, COIL_ORDER, N_SEGMENTS, STELLSYM = 12 // NFP, 6, 64, True
 COIL_MAJOR_RADIUS, COIL_CURRENT = 1.0, 2.7e5
 COIL_RADIUS_A, LENGTH_OVER_2PI_A = 2.7, 7.0
-LENGTH_WEIGHT, CURVATURE_WEIGHT = 10., 100.
-COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 100., 100.
+LENGTH_WEIGHT, CURVATURE_WEIGHT = 10., 1000.
+COIL_DISTANCE_WEIGHT, COIL_SURFACE_DISTANCE_WEIGHT = 1000., 1000.
 COIL_FIT_PARAMETER_BOUND = 4.0
-CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e3, 10.0, 3.0
-MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 3, 12, 1500
+CONSTRAINT_WEIGHT, REJECTED_TRIAL_COST, PARAMETER_BOUND = 1.0e2, 10.0, 3.0
+MAXITER, MAX_TRIALS, COIL_FIT_MAXITER = 10, 20, 600
 OPTIMIZER_FTOL = 1e-8
 NPHI, NTHETA, VC_DIGITS = 17, 24, 4  # Odd toroidal count avoids aliasing the two-coil field.
 MAKE_MOVIE, MOVIE_SURFACE_COLOR = False, "absB"
@@ -113,7 +122,11 @@ def boozer_spectrum(state, runtime):
 
 seed = opt.solve_equilibrium(inp, initial_state=initial_state, raise_on_max_iterations=True)
 mapped = MappedPwOResidual(SURFACES, mboz=8, nboz=8, oversample=2, limit_map=True, **MAP_PARAMETERS)
-edge_jacobian = (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0)
+a = float(seed.wout.Aminor_p)
+shape_terms = [
+    (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
+    (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 1.0e3),
+    (opt.Hinge(opt.min_boundary_curvature_radius, floor=CURVATURE_RADIUS_A * a), 0.0, SHAPE_WEIGHT)]
 beta_term = [(relative_beta, 1.0, 1.0)] if TARGET_BETA else []
 
 # Plasma stage: boundary and pwO map together, as in pwO_optimization.py.
@@ -121,7 +134,7 @@ start_inp, start = inp, seed
 stage = opt.VmecProblem.from_tuples(inp, [
     (boozer_spectrum, 0.0, 1.0),  # must stay first: FreeMapProblem reads these rows
     (opt.Hinge(opt.min_abs_iota, floor=IOTA_CONSTRAINT), 0.0, 100.0),
-    (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0), edge_jacobian] + beta_term,
+    (opt.Hinge(opt.aspect_ratio, ceiling=ASPECT_CONSTRAINT), 0.0, 100.0)] + shape_terms + beta_term,
     max_mode=MAX_MODES[-1], use_ess=True, restart_from=seed, progress=not ci_smoke)
 x = stage.x0
 for max_mode in MAX_MODES:
@@ -138,13 +151,17 @@ for max_mode in MAX_MODES:
     x = sub.embed(fit.x[:free_map.nx])
     seed = stage.equilibrium_from_x(x)
 inp = stage.input_from_x(x)
+if TARGET_BETA:  # the stage changed the volume at fixed flux and pressure: restore the target beta
+    inp = replace(inp, pres_scale=inp.pres_scale * TARGET_BETA / float(seed.wout.betatotal))
+    seed = opt.solve_equilibrium(inp, initial_state=seed.state, raise_on_max_iterations=True)
+inp.to_indata("input.single_stage_pwO_plasma")
 del stage, sub, free_map
 jax.clear_caches()
 gc.collect()
 
 # The joint stage holds the map fixed at the plasma-stage values.
 initial_scale = float(mapped.total_state(seed.state, seed.runtime)) or 1.
-plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale), edge_jacobian] + beta_term
+plasma_terms = [(mapped.residuals_state, 0.0, 2 / initial_scale)] + shape_terms + [(relative_beta, 1.0, BETA_WEIGHT)] * bool(TARGET_BETA)
 plasma_problem = opt.VmecProblem.from_tuples(
     inp, plasma_terms, max_mode=MAX_MODES[-1],
     use_ess=True, restart_from=seed, progress=not ci_smoke, forward_ftol=1e-12,
@@ -168,7 +185,6 @@ external_target_B = seed_data.B_total - seed_interface.B_plasma
 seed_Bmag = jnp.linalg.norm(seed_data.B_total, axis=0)
 
 # Stage-2 choices are physical ratios, not inherited absolute A10 dimensions.
-a = float(seed_equilibrium.wout.Aminor_p)
 COIL_MINOR_RADIUS, LENGTH_TARGET = COIL_RADIUS_A * a, LENGTH_OVER_2PI_A * 2 * np.pi * a
 COIL_SURFACE_DISTANCE_LIMIT, COIL_DISTANCE_LIMIT = COIL_SURFACE_DISTANCE_A * a, COIL_DISTANCE_A * a
 CURVATURE_LIMIT, CURVATURE_OBJECTIVE_LIMIT = CURVATURE_A / a, CURVATURE_OBJECTIVE_A / a
@@ -177,6 +193,10 @@ COIL_SURFACE_DISTANCE_CONSTRAINT = COIL_SURFACE_DISTANCE_OBJECTIVE_A * a
 
 surface_seed = surfacerzfourier_from_boundary(
     jnp.asarray(inp.rbc), jnp.asarray(inp.zbs), NFP, nphi=NPHI, ntheta=NTHETA)
+# The starting circles clear the whole boundary, whatever its axis excursion and elongation.
+points = np.asarray(surface_seed.gamma).reshape(-1, 3)
+reach = np.max(np.hypot(np.hypot(points[:, 0], points[:, 1]) - COIL_MAJOR_RADIUS, points[:, 2]))
+COIL_MINOR_RADIUS = max(COIL_MINOR_RADIUS, reach + COIL_SURFACE_DISTANCE_CONSTRAINT)
 curves = CreateEquallySpacedCurves(
     N_COILS, COIL_ORDER, COIL_MAJOR_RADIUS, COIL_MINOR_RADIUS,
     n_segments=N_SEGMENTS, nfp=NFP, stellsym=STELLSYM)
@@ -219,21 +239,23 @@ def coil_fit_field(coils):
             jnp.sqrt(jnp.sum(seed_interface.weights * pressure**2)))
 
 
-def coil_fit_objective(u):
+def coil_fit_objective(u, tolerance):
     coils = coils_from_u(u)
     _, rms, pressure = coil_fit_field(coils)
     return jnp.sum(coil_penalty(coils, surface_seed)) + .5 * (
-        (rms/NORMAL_FIELD_CONSTRAINT)**2 + (pressure/(.9*DELBSQ_LIMIT))**2)
+        (rms/tolerance)**2 + (pressure/(.9*DELBSQ_LIMIT))**2)
 
 
 coil_fit_vg = jax.jit(jax.value_and_grad(coil_fit_objective))
 print(f"[coil fit] {N_COILS} unique coils, at most {COIL_FIT_MAXITER} iterations", flush=True)
-coil_fit = (OptimizeResult(x=np.zeros(n_coil_shape + N_COILS), nit=0) if COIL_FIT_MAXITER == 0 else minimize(
-    lambda u, value_and_grad=coil_fit_vg: tuple(map(np.asarray, value_and_grad(jnp.asarray(u)))),
-    np.zeros(n_coil_shape + N_COILS), jac=True, method="L-BFGS-B",
-    callback=opt.OptimizationMonitor(print_every=25),
-    bounds=[(-COIL_FIT_PARAMETER_BOUND, COIL_FIT_PARAMETER_BOUND)] * (n_coil_shape + N_COILS),
-    options={"maxiter": COIL_FIT_MAXITER, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10}))
+# A loose normal-field tolerance first: with a tight one the cheapest start is to switch the coils off.
+coil_fit = OptimizeResult(x=np.zeros(n_coil_shape + N_COILS), nit=0)
+for tolerance in ((4 * NORMAL_FIELD_CONSTRAINT, NORMAL_FIELD_CONSTRAINT) if COIL_FIT_MAXITER else ()):
+    coil_fit = minimize(
+        lambda u, t=tolerance, vg=coil_fit_vg: tuple(map(np.asarray, vg(jnp.asarray(u), t))), coil_fit.x,
+        jac=True, method="L-BFGS-B", callback=opt.OptimizationMonitor(print_every=25),
+        bounds=[(-COIL_FIT_PARAMETER_BOUND, COIL_FIT_PARAMETER_BOUND)] * (n_coil_shape + N_COILS),
+        options={"maxiter": COIL_FIT_MAXITER // 2, "maxcor": 20, "ftol": 1e-15, "gtol": 1e-10})
 coils0 = coils_from_u(jnp.asarray(coil_fit.x))
 current_factor, fitted_rms, fitted_pressure = coil_fit_field(coils0)
 current_factor = float(current_factor)
@@ -288,8 +310,8 @@ print(f"[solve] {result.nit} L-BFGS-B iterations, {joint.counts['trials']} trial
 prefix = "single_stage_pwO"
 equilibrium, surface, metrics, free = verify_design(
     joint, u, prefix=prefix, ns=31 if ci_smoke else 101,
-    ftol=1e-10 if ci_smoke else 1e-12, free_ns=[16] if ci_smoke else [16, 51],
-    free_ftol=1e-10 if ci_smoke else 1e-12, verbose=not ci_smoke)
+    ftol=1e-10 if ci_smoke else 1e-13, free_ns=[16] if ci_smoke else [16, 71],
+    free_ftol=1e-10 if ci_smoke else 1e-13, verbose=not ci_smoke)  # final stages: ns >= 71, ftol 1e-13
 final_values = report("final", equilibrium)
 print(f"Objective: {initial_value:.6e} -> {result.fun:.6e}")
 print(f"Coil lengths = {np.asarray(joint.objects_from_x(joint.x0 + joint.scales * u)[1].length[:N_COILS])}")
@@ -307,13 +329,18 @@ verdict = design_target_report(
 half_mesh = (np.arange(100) + 0.5) / 100
 neo_surfaces = half_mesh[np.abs(half_mesh[:, None] - SURFACES).argmin(axis=0)]
 seed_fine = opt.solve_equilibrium(
-    replace(start_inp, ns_array=np.array([101]), ftol_array=np.array([1e-12]),
+    replace(start_inp, ns_array=np.array([101]), ftol_array=np.array([1e-13]),
             niter_array=np.array([20000])),
     initial_state=start.solution, verbose=False, raise_on_max_iterations=True)
 if not ci_smoke:
     print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: "
           f"seed {screen_transport(seed_fine.wout, neo_surfaces)}, "
           f"final {screen_transport(equilibrium.wout, neo_surfaces)}")
+if free["converged"] and not ci_smoke:  # transport of the equilibrium the coils actually hold
+    free_wout = vj.read_wout(f"wout_{prefix}_free_check.nc")
+    half = (np.arange(free_wout.ns - 1) + 0.5) / (free_wout.ns - 1)
+    print(f"free-boundary epsilon_eff^(3/2) at s = {SURFACES}: "
+          f"{screen_transport(free_wout, half[np.abs(half[:, None] - SURFACES).argmin(axis=0)])}")
 save_outputs(joint, u, equilibrium, surface, prefix=prefix,
              make_movie=MAKE_MOVIE, surface_color=MOVIE_SURFACE_COLOR)
 if verdict["unmet"] and not ci_smoke:
