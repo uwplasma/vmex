@@ -511,7 +511,10 @@ equilibrium's current profile self-consistent with it (reproducing the workflow 
 
 The complete runnable workflows are
 ``examples/optimization/QA_optimization_bootstrap.py``,
-``QH_optimization_bootstrap.py`` and ``QI_optimization_bootstrap.py``;
+``QH_optimization_bootstrap.py`` and ``QI_optimization_bootstrap.py``
+(the last continues the vacuum design of ``QI_optimization.py`` up a beta ladder,
+with ``BOOTSTRAP``, ``MAGNETIC_WELL_FLOOR``, ``MERCIER`` and ``GAMMA_C_STAGES``
+switching the current, magnetic-well, Mercier and Gamma_c rows independently);
 ``QA_optimization_low_bootstrap.py`` and ``optimize_bootstrap_current.py`` add a
 row on the Redl ``<J.B>`` itself (target 0), and
 ``QI_optimization_bootstrap_dkx.py`` replaces the Redl mismatch row with DKX's
