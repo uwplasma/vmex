@@ -63,7 +63,6 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .fields import surface_currents
 from .input import VmecInput
 from .omnigenity import _ResidualTerm
 from .profiles import MU0
@@ -71,9 +70,10 @@ from .solver import SolverRuntime, SpectralState
 from .statephysics import (
     _as_1d,
     _field_chain,
+    _full_surface_values,
     _half_grid,
+    _half_mesh_profiles,
     _interp_half_grid,
-    _iotas_half,
     _mode_matrix,
 )
 from .wout import read_wout
@@ -257,6 +257,16 @@ jax.tree_util.register_dataclass(
 )
 
 
+def _redl_geometry(surfaces, iota, G, I, modB, sqrtg, psi_edge, nfp, n_lambda) -> RedlGeometry:  # noqa: E741
+    """:class:`RedlGeometry` of per-surface profiles and ``|B|``/``sqrt(g)`` grids."""
+    Bmin, Bmax, epsilon, fsa_B2, fsa_1overB, f_t = compute_trapped_fraction(
+        modB, sqrtg, n_lambda=n_lambda)
+    return RedlGeometry(
+        surfaces=surfaces, iota=iota, G=G, I=I, R=(G + iota * I) * fsa_1overB,
+        epsilon=epsilon, f_t=f_t, fsa_B2=fsa_B2, fsa_1overB=fsa_1overB,
+        Bmin=Bmin, Bmax=Bmax, psi_edge=psi_edge, nfp=nfp)
+
+
 def redl_geometry_from_wout(
     wout,
     surfaces,
@@ -321,14 +331,8 @@ def redl_geometry_from_wout(
         modB += jnp.einsum("sm,tpm->stp", bmns, sinangle)
         sqrtg += jnp.einsum("sm,tpm->stp", gmns, sinangle)
 
-    Bmin, Bmax, epsilon, fsa_B2, fsa_1overB, f_t = compute_trapped_fraction(
-        modB, sqrtg, n_lambda=n_lambda)
-    R = (G + iota * I) * fsa_1overB
     psi_edge = -_as_1d(np.asarray(wout.phi, dtype=float))[-1] / (2.0 * jnp.pi)
-    return RedlGeometry(
-        surfaces=surfaces, iota=iota, G=G, I=I, R=R, epsilon=epsilon, f_t=f_t,
-        fsa_B2=fsa_B2, fsa_1overB=fsa_1overB, Bmin=Bmin, Bmax=Bmax,
-        psi_edge=psi_edge, nfp=nfp)
+    return _redl_geometry(surfaces, iota, G, I, modB, sqrtg, psi_edge, nfp, n_lambda)
 
 
 class _HalfMeshFields(NamedTuple):
@@ -353,21 +357,11 @@ class _HalfMeshFields(NamedTuple):
     nfp: int
 
 
-def _full_surface_values(values: Array, *, lasym: bool) -> Array:
-    """Drop the axis slot and restore the full poloidal surface."""
-    values = jnp.asarray(values)[1:]
-    if lasym:
-        return values
-    ntheta2, nzeta = int(values.shape[1]), int(values.shape[2])
-    ntheta1 = max(2 * (ntheta2 - 1), 1)
-    i_full = np.arange(ntheta1)
-    i_src = np.where(i_full < ntheta2, i_full, ntheta1 - i_full)
-    k = np.arange(nzeta)
-    k_src = np.where(
-        i_full[:, None] < ntheta2, k[None, :],
-        (nzeta - k[None, :]) % nzeta,
-    )
-    return values[:, np.broadcast_to(i_src[:, None], k_src.shape), k_src]
+def _half_mesh_modb(total_pressure, pressure, *, lasym: bool) -> Array:
+    """Half-mesh ``|B|`` on the full poloidal circle (``|B|^2 = 2 (p_tot - p)``, bcovar.f)."""
+    b2 = 2.0 * (jnp.asarray(total_pressure) - jnp.asarray(pressure)[:, None, None])
+    tiny = jnp.asarray(jnp.finfo(b2.dtype).tiny, dtype=b2.dtype)
+    return _full_surface_values(jnp.sqrt(jnp.maximum(b2, tiny)), lasym=lasym)
 
 
 def _trapped_fraction_from_fields(
@@ -382,10 +376,7 @@ def _trapped_fraction_from_fields(
     serial_surfaces: bool = False,
 ):
     """Evaluate trapped-fraction quantities from an existing field pass."""
-    b2 = 2.0 * (
-        jnp.asarray(total_pressure) - jnp.asarray(pressure)[:, None, None])
-    tiny = jnp.asarray(jnp.finfo(b2.dtype).tiny, dtype=b2.dtype)
-    modB = _full_surface_values(jnp.sqrt(jnp.maximum(b2, tiny)), lasym=lasym)
+    modB = _half_mesh_modb(total_pressure, pressure, lasym=lasym)
     sqrtg = jnp.abs(_full_surface_values(sqrt_g, lasym=lasym))
     s_full = jnp.asarray(s_full)
     s_half = 0.5 * (s_full[:-1] + s_full[1:])
@@ -446,23 +437,14 @@ def _half_mesh_fields(state: SpectralState, rt: SolverRuntime) -> _HalfMeshField
     nfp = int(rt.resolution.nfp)
     _, jacobian, _, fields, _ = _field_chain(state, rt)
 
-    bsq2 = 2.0 * (jnp.asarray(fields.total_pressure)
-                  - jnp.asarray(fields.pressure)[:, None, None])
-    tiny = jnp.asarray(jnp.finfo(bsq2.dtype).tiny, dtype=bsq2.dtype)
-    bmag = _full_surface_values(
-        jnp.sqrt(jnp.maximum(bsq2, tiny)), lasym=bool(setup.lasym))
+    bmag = _half_mesh_modb(fields.total_pressure, fields.pressure,
+                           lasym=bool(setup.lasym))
     w = jnp.abs(_full_surface_values(
         jacobian.sqrt_g, lasym=bool(setup.lasym)))
 
-    iota_h = _iotas_half(state, rt)[1:]
-    cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
-                           trig=rt.trig, s=s, signgs=setup.signgs)
-    G_h = jnp.asarray(cur.bvco)[1:]
-    I_h = jnp.asarray(cur.buco)[1:]
+    iota_h, G_h, I_h, phi_edge = _half_mesh_profiles(rt, fields)
     p_int = jnp.asarray(fields.pressure)[1:]           # mu0*Pa, half mesh
 
-    hs = s[1] - s[0]
-    phi_edge = float(setup.signgs) * hs * jnp.sum(jnp.asarray(setup.phipf)[1:])
     return _HalfMeshFields(
         s_half=0.5 * (s[:-1] + s[1:]), bmag=bmag, w=w, iota=iota_h, G=G_h,
         I=I_h, p_int=p_int, phi_edge=phi_edge, signgs=float(setup.signgs),
@@ -476,14 +458,7 @@ def _geometry_from_half(hm: _HalfMeshFields, surfaces, *, n_lambda: int) -> Redl
     I = _interp_half_grid(hm.I, surfaces, hm.s_half)  # noqa: E741 - Boozer I
     modB = _interp_half_grid(hm.bmag, surfaces, hm.s_half)
     sqrtg = _interp_half_grid(hm.w, surfaces, hm.s_half)
-
-    Bmin, Bmax, epsilon, fsa_B2, fsa_1overB, f_t = compute_trapped_fraction(
-        modB, sqrtg, n_lambda=n_lambda)
-    R = (G + iota * I) * fsa_1overB
-    return RedlGeometry(
-        surfaces=surfaces, iota=iota, G=G, I=I, R=R, epsilon=epsilon, f_t=f_t,
-        fsa_B2=fsa_B2, fsa_1overB=fsa_1overB, Bmin=Bmin, Bmax=Bmax,
-        psi_edge=-hm.phi_edge, nfp=hm.nfp)
+    return _redl_geometry(surfaces, iota, G, I, modB, sqrtg, -hm.phi_edge, hm.nfp, n_lambda)
 
 
 def redl_geometry_from_state(
