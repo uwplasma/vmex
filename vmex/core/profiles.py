@@ -411,10 +411,11 @@ def _sum_atan(coefficients, x):
     ``f(x) = c0 + (2/pi) sum_k c[1+4k] atan(c[2+4k] x**c[3+4k] /
     (1-x)**c[4+4k])`` over ``k = 0..4``, using ``c[0:21]``.
 
-    VMEC hardcodes the edge rather than taking the limit: at ``x >= 1`` it
-    returns ``c0 + c1 + c5 + c9 + c13 + c17``, which is that limit only when
-    every ``c[2+4k]`` and ``c[4+4k]`` is positive.  Reproduced as written,
-    because parity with ``pcurr``/``piota`` is the contract.
+    At ``x >= 1`` each term takes its limit as ``x -> 1``: ``sign(c[2+4k])
+    pi/2`` for a positive exponent ``c[4+4k]`` of ``1 - x``, ``atan(c[2+4k])``
+    for a zero one and ``0`` for a negative one.  PARVMEC evaluates the terms
+    with ``ATAN2`` for this; VMEC2000 returns ``c0 + c1 + c5 + c9 + c13 +
+    c17``, the limit only when every ``c[2+4k]`` and ``c[4+4k]`` is positive.
 
     Only the denominator is guarded.  An untaken ``jnp.where`` branch is still
     evaluated, so ``1 - x`` is floored away from zero to keep the ``x >= 1``
@@ -434,7 +435,12 @@ def _sum_atan(coefficients, x):
         total = total + c[1 + 4 * k] * jnp.arctan(
             c[2 + 4 * k] * _pow_at_zero(x, c[3 + 4 * k])
             / one_minus ** c[4 + 4 * k])
-    edge = c[0] + c[1] + c[5] + c[9] + c[13] + c[17]
+    edge = c[0]
+    for k in range(5):
+        amplitude, scale, exponent = c[1 + 4 * k], c[2 + 4 * k], c[4 + 4 * k]
+        limit = jnp.where(exponent > 0, jnp.sign(scale) * (jnp.pi / 2),
+                          jnp.where(exponent == 0, jnp.arctan(scale), 0.0))
+        edge = edge + (2.0 / jnp.pi) * amplitude * limit
     return jnp.where(interior, c[0] + (2.0 / jnp.pi) * total, edge)
 
 
