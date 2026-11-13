@@ -41,6 +41,22 @@ def test_input_validation():
         trace_boozer_field_lines(bmnc_b=[[1.0]], bmns_b=[[0.0, 0.1]], **common)
 
 
+def test_field_line_synthesis_matches_direct_double_sum():
+    rng = np.random.default_rng(3)
+    xm, xn = np.array([0, 1, 1, 2, 3]), np.array([0, 0, 3, -3, 6])
+    cos, sin = rng.normal(size=(2, 5)), rng.normal(size=(2, 5))
+    iota, alpha = np.array([0.4, 0.7]), np.array([0.3, 2.0, 5.5])
+    out = trace_boozer_field_lines(
+        bmnc_b=cos, bmns_b=sin, xm_b=xm, xn_b=xn, iota_b=iota,
+        G_b=[1.0, 1.0], I_b=[0.0, 0.0], nfp=3, alpha=alpha,
+        points_per_period=16, num_periods=2)
+    phi = np.asarray(out["phi"])
+    theta = alpha[None, :, None] + iota[:, None, None] * phi
+    phase = theta[..., None] * xm - phi[None, None, :, None] * xn
+    direct = (np.cos(phase) * cos[:, None, None]).sum(-1) + (np.sin(phase) * sin[:, None, None]).sum(-1)
+    np.testing.assert_allclose(out["bmag"], direct, atol=1e-12)
+
+
 def test_sinusoidal_well_matches_adaptive_quadrature():
     amplitude = 0.2
     result = bounce_action(

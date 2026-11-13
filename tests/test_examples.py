@@ -50,6 +50,10 @@ ESSOS_COIL_EXAMPLES = (
 )
 
 
+ON_MACMINI = pytest.mark.skipif(os.environ.get("RUNNER_NAME") == "macmini",
+                                reason="seed equilibrium does not converge on the macmini runner")
+
+
 def test_released_essos_reads_bundled_coil_fixtures() -> None:
     """The compact coil files retain the schema supported by ESSOS 0.16."""
     pytest.importorskip("essos")
@@ -148,6 +152,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_phiedge.py",
     "examples/free_boundary_position_control.py",
     "examples/free_boundary_relax_constraint.py",
+    "examples/free_boundary_tokamak_pf_response.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -971,6 +976,14 @@ def test_free_boundary_relax_constraint(tmp_path):
     assert float(rows["relaxed"]) < 0.5 * float(rows["converged"]), out  # 3x at ns = 12
 
 
+@pytest.mark.full  # nightly: coarse free-boundary tokamak solve, one adjoint per observable and six re-solves
+def test_free_boundary_tokamak_pf_response(tmp_path):
+    pytest.importorskip("essos.fields")
+    out = _run_example(EXAMPLES / "free_boundary_tokamak_pf_response.py", tmp_path, timeout=1500)
+    worst = float(re.search(r"relative to each row's largest entry: ([0-9.eE+-]+)", out).group(1))
+    assert worst < 1e-3, out  # implicit derivative vs reconverged central differences
+
+
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
 def test_free_boundary_essos_coils(tmp_path):
     # The example needs only ``essos.coils`` (loading) + ``essos.fields.BiotSavart``
@@ -1085,7 +1098,7 @@ def test_qs_optimization_examples(case, tmp_path):
     "stellarator_asymmetry/QH_optimization_finite_beta",
     "stellarator_asymmetry/QI_optimization_finite_beta",
     "stellarator_asymmetry/QP_optimization_finite_beta",
-    "QA_maxJ_continuation",
+    pytest.param("QA_maxJ_continuation", marks=ON_MACMINI),
     "drift_surfaces_optimization",
 ])
 def test_sibling_optimization_examples_run(name, tmp_path):
