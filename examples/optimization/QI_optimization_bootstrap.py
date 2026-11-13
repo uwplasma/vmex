@@ -19,8 +19,11 @@ Four options shape the physics, and any of them works alone:
   less current when DKX's is near zero, as it is for a QI field.
 - MAGNETIC_WELL_FLOOR: a hinge holding the well proxy (V'(0) - V'(1)) / V'(0)
   at or above the floor, zero while it holds; None drops it.
-- MERCIER: radially graded Mercier and resistive-interchange rows; False drops
-  them.
+- MERCIER: radially graded Mercier and resistive-interchange rows; False (the
+  default) drops them. With them on, NFP 3 approaches marginal Mercier
+  stability (DMerc between -3 and 0 on s >= 0.2 at 5 % beta) at 1.5 to 14 times
+  the effective ripple and 0.3e-3 to 1.8e-3 more constructed QI; NFP 2 never
+  becomes stable.
 - GAMMA_C_STAGES: the last stages add the smooth Gamma_c fast-ion proxy,
   normalized to its value at the stage start; 0 drops it.
 
@@ -32,13 +35,12 @@ iota -> iota - nfp * helicity_n is the identity. The formula was fitted on
 quasisymmetric fields, so on a QI boundary it is an analytic estimate and not
 a kinetic answer.
 
-From three cold-started vacuum designs per field-period count, with the well
-and Mercier options on and no current, constructed QI at 5 % beta is 2.8-3.8e-3
-(NFP 2) and 2.8-3.0e-3 (NFP 3) against 1.4-1.6e-3 and 1.6-2.2e-3 in vacuum;
-eps_eff^(3/2) is 1.7-2.3e-3 and 1.9-2.6e-3, and no alpha is lost in 5 ms. The
-Mercier rows raise eps_eff by a factor of 1.5 to 14 over the same ladder without
-them. DMerc stays negative at NFP 2 (-510 to -650, against -1150 without the
-rows) and reaches -3 to 0 at NFP 3.
+From three cold-started vacuum designs per field-period count and no current,
+at 5 % beta, constructed QI is 1.7-2.0e-3 (NFP 2) and 1.9-2.7e-3 (NFP 3) with
+the Mercier rows off, against 1.4-1.6e-3 and 1.6-2.2e-3 in vacuum; eps_eff^(3/2)
+is 1.4e-4-5.7e-4 and 4.9e-4-1.4e-3, and no alpha is lost in 5 ms. With the
+well and Mercier rows on, QI is 2.8-3.8e-3 and 2.8-3.0e-3 and eps_eff^(3/2)
+1.7-2.3e-3 and 1.9-2.6e-3.
 
 The kinetic profiles are the Landreman-Buller-Drevlak forms, ne = n0 (1 - s^5)
 and Te = Ti = T0 (1 - s); the amplitude is recalibrated at each stage to the
@@ -65,7 +67,7 @@ INPUT_FILE = Path("input.QI_optimized")
 # Physics toggles:
 BOOTSTRAP = "none"                # "none", "redl" or "dkx"
 MAGNETIC_WELL_FLOOR = 0.01        # None drops the well hinge
-MERCIER = True
+MERCIER = False
 GAMMA_C_STAGES = 0                # last stages that add the Gamma_c row
 GAMMA_C_WEIGHT = 1.0              # cost it carries at the stage start
 
