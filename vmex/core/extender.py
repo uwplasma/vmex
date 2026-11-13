@@ -236,8 +236,6 @@ class MagneticField:
         """Store Cartesian points with shape ``(n, 3)``."""
         self._points_cart = _check_points(points)
         self._points_cyl = None
-        # Spatial-derivative pullbacks close over the evaluation points.
-        self._data_pullbacks.clear()
         return self
 
     def set_points_xyz(self, points: Array) -> "MagneticField":
@@ -373,7 +371,8 @@ class MagneticField:
         """
         if self._parameter_data_vjp is None:
             data_fn = cast(Callable[[Array], Any], self._parameter_data_fn)
-            data, pullback = jax.jit(lambda p: jax.vjp(data_fn, p))(self._parameters)
+            with jax.ensure_compile_time_eval():  # a first call under jit must not cache tracers
+                data, pullback = jax.jit(lambda p: jax.vjp(data_fn, p))(self._parameters)
             self._parameter_data_vjp = (data, jax.jit(pullback))
         return cast(tuple[Any, Callable[[Any], Any]], self._parameter_data_vjp)
 
@@ -383,7 +382,7 @@ class MagneticField:
                 "this field was not constructed with optimizable parameters")
         points = self._require_points()
 
-        def spatial_quantity(field_function):
+        def spatial_quantity(field_function, points):
             point_field = lambda point: field_function(point[None, :])[0]  # noqa: E731
             function = point_field
             for _ in range(order):
@@ -394,29 +393,29 @@ class MagneticField:
             data, pullback = self._data_and_pullback()
             B_from_data = cast(Callable[[Any, Array], Array], self._B_from_data)
 
-            def quantity_from_data(field_data):
-                return spatial_quantity(lambda xyz: B_from_data(field_data, xyz))
+            def quantity_from_data(field_data, points):
+                return spatial_quantity(lambda xyz: B_from_data(field_data, xyz), points)
 
             # The pullback below evaluates this graph anyway; take the shape
             # from an abstract trace rather than a second eager evaluation.
-            expected = jax.eval_shape(quantity_from_data, data).shape
+            expected = jax.eval_shape(quantity_from_data, data, points).shape
             vector = jnp.asarray(cotangent)
             if vector.shape != expected:
                 raise ValueError(
                     f"cotangent has shape {vector.shape}, expected {expected}")
             if order not in self._data_pullbacks:
                 self._data_pullbacks[order] = jax.jit(jax.grad(
-                    lambda field_data, weight: jnp.vdot(
-                        quantity_from_data(field_data), weight),
+                    lambda field_data, weight, xyz: jnp.vdot(
+                        quantity_from_data(field_data, xyz), weight),
                     argnums=0, allow_int=True))
-            data_bar = self._data_pullbacks[order](data, vector)
+            data_bar = self._data_pullbacks[order](data, vector, points)
             return pullback(data_bar)[0]
 
         parameterized_B_fn = cast(Callable[[Array, Array], Array],
                                   self._parameterized_B_fn)
 
         def quantity(parameters):
-            return spatial_quantity(lambda xyz: parameterized_B_fn(parameters, xyz))
+            return spatial_quantity(lambda xyz: parameterized_B_fn(parameters, xyz), points)
 
         value, pullback = jax.vjp(quantity, self._parameters)
         vector = jnp.asarray(cotangent)
@@ -1493,6 +1492,17 @@ class VmecExtender(MagneticField):
         self._near_surface = mode
         # parameter pullbacks trace the plasma field in the current mode
         self._data_pullbacks = {}
+        if hasattr(self, "_B_from_data_factory"):
+            self._B_from_data = self._B_from_data_factory(self)
+
+    def __copy__(self) -> "VmecExtender":
+        """A shallow copy that owns its caches and its parameter-pullback binding."""
+        other = object.__new__(type(self))
+        other.__dict__.update(self.__dict__)
+        other._kernels, other._spatial_fns, other._data_pullbacks = {}, {}, {}
+        if hasattr(other, "_B_from_data_factory"):
+            other._B_from_data = other._B_from_data_factory(other)
+        return other
 
     @property
     def graded_nodes(self) -> tuple[int, int] | None:
@@ -1514,14 +1524,9 @@ class VmecExtender(MagneticField):
         if self.plasma_field is None:
             raise RuntimeError("graded quadrature requires a virtual-casing plasma field")
         other = copy.copy(self)
-        other._kernels = {}
-        other._spatial_fns = {}
-        other._data_pullbacks = {}
         if nodes is not None:
             other._graded_nodes = (int(nodes[0]), int(nodes[1]))
         other.near_surface = "graded"
-        if hasattr(other, "_B_from_data_factory"):
-            other._B_from_data = other._B_from_data_factory(other)
         return other
 
     # -- evaluation ----------------------------------------------------------

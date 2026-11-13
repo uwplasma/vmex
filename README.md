@@ -73,8 +73,8 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.36.1 | `pip install vmex` | `pip install "solvax>=0.36.1"` |
-| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
+| `solvax` | 0.36.2 | `pip install vmex` | `pip install "solvax>=0.36.2"` |
+| `booz_xform_jax` | 0.5.2 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.2"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.15 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.15"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
@@ -693,5 +693,5 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
-and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
+and `vmex --doctor` output. See [citation](CITATION.cff),
 [license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).

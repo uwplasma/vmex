@@ -4,9 +4,15 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  # The manifest parity lanes and the combined coverage gate are too heavy to
+  # repeat on every pull-request push. They run on main, nightly and on demand.
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
 
 concurrency:
-  group: CI-${{ github.ref }}
+  group: CI-${{ github.ref }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 env:
@@ -19,18 +25,27 @@ env:
   # tools/ci_compile_cache.py): keyed on CPU, Python and jaxlib, one private
   # lock-free copy per pytest process, saved only by main.
   VMEX_COMPILATION_CACHE: disabled
-  # Dependencies install with uv (no Actions cache: downloading is faster
-  # than restoring pip's, and the 10 GB repository cache budget is kept for
-  # compiled programs, which are what the lanes spend their time on).
-  UV_SYSTEM_PYTHON: "1"
+  # A fresh Matplotlib cache in the workspace (cleaned by checkout): a shared
+  # per-user cache on a persistent runner can go stale or be written by two
+  # jobs at once, which surfaces as "Failed to find font DejaVu Sans".
+  MPLCONFIGDIR: ${{ github.workspace }}/.mplconfig
+  # Dependencies install with uv into a per-job virtual environment (no
+  # Actions cache: downloading is faster than restoring pip's, and the 10 GB
+  # repository cache budget is kept for compiled programs, which are what the
+  # lanes spend their time on).
 
 permissions:
   contents: read
 
+# Every job except `install` (an OS matrix that includes Windows) takes its
+# `runs-on` from the repository variable CI_RUNS_ON (a JSON runner label or
+# label list); unset, they run on ubuntu-latest. Fork pull requests always use
+# hosted runners.
 jobs:
   changes:
     name: Select required CI scope
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: &runner ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNS_ON || '"ubuntu-latest"') || 'ubuntu-latest' }}
     timeout-minutes: 3
     outputs:
       run_tests: ${{ steps.scope.outputs.run_tests }}
@@ -38,9 +53,16 @@ jobs:
       packaging: ${{ steps.packaging.outputs.changed }}
       parity: ${{ steps.parity.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - id: scope
         name: Classify changed paths
         shell: bash
@@ -82,32 +104,38 @@ jobs:
   quality:
     name: Quality, package, and docs
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: *runner
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install
         run: |
           uv pip install ".[dev]"
       - name: Check source, package, and docs
+        # The Mac runners have no C.UTF-8 locale and Sphinx sets the locale at start.
+        env:
+          LC_ALL: ${{ runner.os == 'macOS' && 'en_US.UTF-8' || 'C.UTF-8' }}
+          LANG: ${{ runner.os == 'macOS' && 'en_US.UTF-8' || 'C.UTF-8' }}
         run: |
           ruff check vmex tests examples tools
           mypy vmex
           python -m build
           python tools/check_docs_prose.py
-          python -m sphinx -W -j auto -b html docs docs/_build/html
+          python -m sphinx -W -j 2 -b html docs docs/_build/html
 
   fast:
     name: Fast API tests (py${{ matrix.python-version }})
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: *runner
     timeout-minutes: 8
     strategy:
       fail-fast: false
@@ -116,19 +144,21 @@ jobs:
     env:
       XLA_LANE: fast
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install
         run: |
           uv pip install . pytest pytest-cov pytest-xdist
       - name: Check repository size
         run: |
-          size_kb=$(du -sk --exclude=.git . | cut -f1)
+          size_kb=$(( $(du -sk . | cut -f1) - $(du -sk .git | cut -f1) ))
           echo "working tree: ${size_kb} KiB"
           test "$size_kb" -lt 40960
       - name: Load the docs configuration
@@ -142,11 +172,14 @@ jobs:
         run: |
           python tools/ci_compile_cache.py key >> "$GITHUB_OUTPUT"
           echo "VMEX_CI_COMPILATION_CACHE=$RUNNER_TEMP/xla-cache" >> "$GITHUB_ENV"
+          # Temporary files land in the runner's temp directory, which the
+          # runner empties after the job (a persistent runner keeps nothing).
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - &xla-restore
         id: xla-restore
         # A lane restores the newest cache main saved for this CPU, Python and
         # jaxlib; entries are content-addressed, so a stale one is a miss.
-        uses: actions/cache/restore@v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/xla-cache
           key: xla-v1-${{ env.XLA_LANE }}-${{ steps.xla.outputs.fingerprint }}-${{ hashFiles('vmex/**', 'tests/**') }}
@@ -177,11 +210,11 @@ jobs:
         run: python tools/ci_compile_cache.py collect "$VMEX_CI_COMPILATION_CACHE" >> "$GITHUB_OUTPUT"
       - &xla-save
         if: success() && steps.xla-collect.outputs.entries > 0
-        uses: actions/cache/save@v6.1.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/xla-cache
           key: ${{ steps.xla-restore.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.python-version == '3.12'
         with:
           name: coverage-fast
@@ -191,10 +224,12 @@ jobs:
   parity:
     name: Manifest parity lane (${{ matrix.lane }})
     needs: changes
+    # Not on pull requests: the lanes run on push to main, nightly and dispatch.
     if: >-
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_tests == 'true' &&
       needs.changes.outputs.parity != '[]'
-    runs-on: ubuntu-latest
+    runs-on: *runner
     # Real polish and free-boundary adjoint solves run in Nightly. Keep the
     # PR partition bounded; a timeout is a failure, never a passing benchmark.
     # Seven lanes of 10-12 warm minutes each (2026-10-15); a cold compilation
@@ -207,19 +242,21 @@ jobs:
     env:
       XLA_LANE: parity-${{ matrix.lane }}
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install
         run: |
           uv pip install ".[coils,turbulence,freeb]" pytest pytest-cov pytest-xdist
       - name: Add XLA compile headroom
+        if: runner.os == 'Linux'
         run: |
           sudo fallocate -l 12G /mnt/vmex-swap
           sudo chmod 600 /mnt/vmex-swap
@@ -250,7 +287,7 @@ jobs:
       - *xla-save
       - name: Stash coverage
         run: mv .coverage coverage.parity-${{ matrix.lane }}
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-parity-${{ matrix.lane }}
           path: coverage.parity-${{ matrix.lane }}
@@ -260,7 +297,7 @@ jobs:
     name: Two-device placement and AD
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: *runner
     # The lane ran 6:39-7:06 before the cross-device multigrid guard joined it
     # and hit the 10-minute cap at 10:17 with a heavier first draft of that
     # test.  The guard is now a two-iteration ladder, but a two-core runner has
@@ -269,15 +306,16 @@ jobs:
     env:
       XLA_LANE: device
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install
         run: |
           uv pip install . pytest pytest-cov
@@ -295,7 +333,7 @@ jobs:
       - *xla-save
       - name: Stash coverage
         run: mv .coverage coverage.device
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-device
           path: coverage.device
@@ -307,18 +345,20 @@ jobs:
     name: DESC interoperability
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: *runner
     timeout-minutes: 15
     env:
       XLA_LANE: desc
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install
         run: uv pip install . 'desc-opt>=0.17' pytest pytest-cov pytest-xdist
       - *xla-key
@@ -332,7 +372,7 @@ jobs:
           mv .coverage coverage.desc
       - *xla-collect
       - *xla-save
-      - uses: actions/upload-artifact@v7.0.1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-desc
           path: coverage.desc
@@ -342,20 +382,22 @@ jobs:
     name: Stationarity contract (JAX ${{ matrix.jax }})
     needs: changes
     if: needs.changes.outputs.run_tests == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: *runner
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         jax: ["0.9.2", "0.11.1"]
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - name: Install tested numerical versions
         run: uv pip install . pytest "jax==${{ matrix.jax }}" "jaxlib==${{ matrix.jax }}"
       - name: Bind and smoke the examples
@@ -368,12 +410,18 @@ jobs:
           JAX_ENABLE_X64: "1"
           JAX_PLATFORMS: cpu
         run: |
-          python -m pip freeze
+          uv pip freeze
           pytest -q -m "not full and not weekly" tests/test_polish.py --durations=10
+      - name: Run the QA optimization example
+        env:
+          JAX_ENABLE_X64: "1"
+          JAX_PLATFORMS: cpu
+          MPLBACKEND: Agg
+        run: pytest -q -o addopts= "tests/test_examples.py::test_qs_optimization_examples[QA]"
 
   changed-coverage:
     name: Changed executable lines (>= 95%)
-    runs-on: ubuntu-latest
+    runs-on: *runner
     timeout-minutes: 5
     needs: [changes, fast, parity, device, desc]
     permissions:
@@ -381,23 +429,25 @@ jobs:
       id-token: write
     if: >-
       always() &&
+      github.event_name != 'pull_request' &&
       needs.changes.outputs.run_coverage == 'true' &&
       needs.fast.result == 'success' &&
       needs.parity.result == 'success' &&
       needs.device.result == 'success' &&
       needs.desc.result == 'success'
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-python@v7.0.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
           enable-cache: false
+          activate-environment: true
+          venv-path: ${{ runner.temp }}/venv
       - run: uv pip install coverage diff-cover
-      - uses: actions/download-artifact@v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: coverage-*
           merge-multiple: true
@@ -407,7 +457,7 @@ jobs:
           coverage report --include='*/vmex/mirror/*' --fail-under=90
           coverage xml
       - name: Publish combined coverage
-        uses: codecov/codecov-action@v5.5.5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           # OIDC upload 404s ("Repository not found") because the Codecov
           # project still carries the pre-rename vmec_jax identity, so the
@@ -424,6 +474,38 @@ jobs:
         if: github.event_name == 'pull_request'
         run: diff-cover coverage.xml --compare-branch="origin/${GITHUB_BASE_REF}" --fail-under=95
 
+  gpu:
+    # Short accelerator check on the org's self-hosted GPU runners. Advisory:
+    # not part of PR gate, so a GPU-box outage cannot block merges.
+    name: GPU smoke (CUDA)
+    needs: changes
+    if: >-
+      needs.changes.outputs.run_tests == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, uwplasma-gpu]
+    timeout-minutes: 5
+    env:
+      UV_SYSTEM_PYTHON: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install with CUDA 12 JAX
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv venv --python 3.10 .venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          uv pip install . pytest 'jax[cuda12]'
+      - name: Require the GPU backend
+        run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
+      - name: GPU tests
+        timeout-minutes: 1
+        run: pytest -q -x -m gpu $(python tools/test_manifest.py select pr-gpu-ci) --durations=10
+      - name: Remove the virtual environment
+        if: always()
+        run: rm -rf .venv
+
   install:
     # One cheap Linux cell plus the two platforms CI never otherwise touches.
     name: pip install (${{ matrix.os }}, Python ${{ matrix.python }}${{ matrix.extra }})
@@ -439,8 +521,10 @@ jobs:
           - {os: macos-latest, python: "3.13", extra: "[all]"}
           - {os: windows-latest, python: "3.13", extra: "[all]"}
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-python@v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install, import and run the CLI
@@ -452,8 +536,10 @@ jobs:
 
   pr-gate:
     name: PR gate
-    if: always()
-    runs-on: ubuntu-latest
+    # A draft pull request skips every job, the gate included. Skipped jobs
+    # (the parity lanes and changed-coverage on a pull request) count as passed.
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: *runner
     timeout-minutes: 2
     needs: [changes, quality, fast, parity, desc, device, jax-compatibility, install, changed-coverage]
     steps:
