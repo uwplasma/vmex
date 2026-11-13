@@ -9,6 +9,16 @@ and the residual vector holds the mapped pwO variance, aspect ratio,
 rotational transform floor, mirror ratio and shaping limits. The magnetic well,
 Mercier stability (both hinges), GammaC and bootstrap-current control are
 independent switches below. NEO compares the vacuum seed with the result.
+
+The hinges and the transport compete. Good pwO and a low alpha loss at finite
+beta come only with a Mercier-unstable magnetic hill: at NFP 4 and 3 % beta
+a design with both hinges off loses 1.8 % of its alphas, one with Mercier
+stability alone 24 % and one with both hinges 37 %. With both hinges on, the
+defaults (NFP 3) meet every target at 3 to 5 % beta with 25 to 27 % of the
+alphas lost (2000 alphas, 10 ms, ARIES-CS size; 15 % at 1 % beta, where the
+well floor is missed by 0.002); NFP 4 and NFP 2 do worse.
+Set MAGNETIC_WELL_FLOOR or MERCIER_MARGIN to None to trade stability for
+confinement.
 Requires vmex[neoclassical].
 """
 
