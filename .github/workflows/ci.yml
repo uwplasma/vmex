@@ -19,6 +19,10 @@ env:
   # tools/ci_compile_cache.py): keyed on CPU, Python and jaxlib, one private
   # lock-free copy per pytest process, saved only by main.
   VMEX_COMPILATION_CACHE: disabled
+  # A fresh Matplotlib cache in the workspace (cleaned by checkout): a shared
+  # per-user cache on a persistent runner can go stale or be written by two
+  # jobs at once, which surfaces as "Failed to find font DejaVu Sans".
+  MPLCONFIGDIR: ${{ github.workspace }}/.mplconfig
   # Dependencies install with uv into a per-job virtual environment (no
   # Actions cache: downloading is faster than restoring pip's, and the 10 GB
   # repository cache budget is kept for compiled programs, which are what the
