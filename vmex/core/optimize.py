@@ -4,8 +4,7 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
 
 - :class:`QuasisymmetryRatioResidual` — the two-term quasisymmetry ratio
   residual of Landreman & Paul (simsopt convention), evaluated from the
-  wout-engine field tables of a converged core state (parity port of the
-  legacy ``quasisymmetry_ratio_residual_from_wout``).
+  wout-engine field tables of a converged core state.
 - practical scalar targets — :func:`aspect_ratio`, :func:`mean_iota`,
   :func:`edge_iota`, :func:`mirror_ratio`, :func:`volume`,
   :func:`magnetic_well`, :func:`max_elongation` — each a pure function of
@@ -19,14 +18,14 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
   ``0.5 * sum(residual**2)`` and minimized with L-BFGS-B, so one reverse
   implicit adjoint supplies the gradient without a dense residual Jacobian.
 
-Helicity conventions (match legacy/simsopt exactly)
----------------------------------------------------
+Helicity conventions (as in simsopt)
+------------------------------------
 The QS residual keeps the ``|B|`` spectrum aligned with the single helicity
 ``chi = helicity_m * theta - helicity_n * nfp * phi`` — ``helicity_n`` is in
 units of ``nfp`` (the internal target mode number is ``nn = helicity_n * nfp``):
 
 - QA: ``(helicity_m, helicity_n) = (1, 0)``
-- QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``; legacy/simsopt sign — the
+- QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``, the simsopt sign — the
   usual "``n = -nfp``" written in physical toroidal mode numbers)
 - QP: ``(0, 1)``
 
@@ -500,7 +499,7 @@ def solve_equilibrium(
 
 
 # ===========================================================================
-# Quasisymmetry ratio residual (simsopt convention; legacy parity port)
+# Quasisymmetry ratio residual (simsopt convention)
 # ===========================================================================
 
 
@@ -522,8 +521,7 @@ class QuasisymmetryRatioResidual:
     The evaluation consumes the parity-proven wout-engine tables
     (``bmnc/gmnc/bsub*/bsup*``, :mod:`vmex.core.nyquist`) of a
     :class:`~vmex.core.wout.WoutData` — from
-    :func:`~vmex.core.wout.wout_from_state` or any ``wout_*.nc`` — ported
-    from legacy ``quasisymmetry_ratio_residual_from_wout`` (A/B bit-exact).
+    :func:`~vmex.core.wout.wout_from_state` or any ``wout_*.nc``.
     """
 
     name = "qs"
@@ -870,8 +868,7 @@ def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) 
     ``|B|`` is evaluated on the solver's internal angular grid from the
     half-mesh field state (``|B|^2 = 2 (bsq - p)``, ``bcovar.f``); ``s_index``
     selects the half-mesh surface (default: outermost).  Hard max/min — smooth
-    almost everywhere, adequate for finite-difference least squares (the
-    legacy ``VMECMirrorRatio`` softmax knobs were an optimizer nicety only).
+    almost everywhere, adequate for finite-difference least squares.
     """
     _, _, _, fields, _ = _field_chain(state, rt)
     bsq = jnp.asarray(fields.total_pressure) - jnp.asarray(fields.pressure)[:, None, None]
@@ -886,7 +883,7 @@ def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
 
     ``V' = dV/ds`` endpoints are linear extrapolations of the half-mesh
     differential volume ``vp`` (``bcovar.f``); positive values mean a
-    favorable well.  Ported from legacy ``vmex.finite_beta.magnetic_well_from_vp``.
+    favorable well.
     """
     _, _, _, _, energies = _field_chain(state, rt)
     dvol = jnp.abs(jnp.asarray(energies.vp))[1:]
@@ -1328,9 +1325,7 @@ def _ess_scale(
     ``x_scale[i] = exp(-alpha * max(|m_i|, |n_i|)) / exp(-alpha)`` — higher
     (m, n) boundary harmonics get proportionally smaller trust-region steps,
     which stabilizes staged ``max_mode`` continuation from crude seeds.
-    Ported from legacy ``optimizers.fixed_boundary.parameterization.
-    create_x_scale`` (the ``use_ess``/``ess_alpha`` option of the legacy
-    ``least_squares_solve``); passed to scipy as ``x_scale``.
+    Passed to scipy as ``x_scale`` (the ``use_ess``/``ess_alpha`` options).
     """
     modes = _dof_modes(inp, max_mode)
     levels = np.asarray([max(abs(m), abs(n)) for (m, n) in modes]
@@ -1694,7 +1689,7 @@ def make_problem(
 
     ``refine_tol`` is the frozen fixed-point residual required before
     implicit differentiation. The default preserves strict gradients;
-    ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+    ``numpy.inf`` explicitly disables refinement.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
