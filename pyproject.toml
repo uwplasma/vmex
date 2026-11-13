@@ -65,7 +65,7 @@ Homepage = "https://github.com/uwplasma/vmex"
 Documentation = "https://vmex.readthedocs.io/en/latest/"
 Repository = "https://github.com/uwplasma/vmex"
 Issues = "https://github.com/uwplasma/vmex/issues"
-Changelog = "https://github.com/uwplasma/vmex/releases"
+"Release notes" = "https://github.com/uwplasma/vmex/releases"
 
 [project.optional-dependencies]
 optimizers = [
@@ -155,6 +155,9 @@ markers = [
 ]
 
 [tool.coverage.run]
+# Coverage files from different runners (Linux and macOS paths) combine only
+# when the recorded paths are relative to the repository root.
+relative_files = true
 # virtual_casing.py requires the optional virtual-casing-jax >= 0.0.15
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,

@@ -99,7 +99,9 @@ if ci_smoke:
     # the matched wells on the outer surfaces and returns NaN slopes.
     ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
                   max_wells=20, quadrature_order=16)
-    STAGE_MAX_ITERATIONS = 100
+    # The optimizer's first solve holds the m = 1 family and needs about 330
+    # iterations from the converged seed; 100 leaves it uncertified:
+    STAGE_MAX_ITERATIONS = 600
     STAGE_OVERRIDES = dict(ns_array=np.array([13]), ftol_array=np.array([1e-9]),
                            niter_array=np.array([3000]))
 
