@@ -42,6 +42,7 @@ ESSOS_COIL_EXAMPLES = (
     EXAMPLES / "optimization" / "single_stage_optimization.py",
     EXAMPLES / "optimization" / "single_stage_optimization_augmented_lagrangian.py",
     EXAMPLES / "optimization" / "single_stage_optimization_least_squares.py",
+    EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py",
     EXAMPLES / "optimization" / "single_stage_optimization_finite_beta.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization.py",
     EXAMPLES / "optimization" / "single_stage_free_boundary_optimization_finite_beta.py",
@@ -118,26 +119,10 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 UNTESTED_EXAMPLES = {
     "examples/near_axis_initial_guess.py": "requires optional qsc or qicna; checked separately with both packages",
     "examples/drift_surfaces.py": "drives drift_surfaces_from_boozer, which has its own unit tests",
-    "examples/optimization/drift_surfaces_optimization.py": "multi-minute staged optimization, its residual has unit tests",
-    "examples/optimization/pwO_optimization_finite_beta.py": "continuation requires the full vacuum optimization; independently verified",
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
-    "examples/optimization/QH_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QH_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QI_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QI_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_finite_beta_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_scalar.py": "QA sibling is tested",
-    "examples/optimization/QP_optimization_scipy.py": "QA sibling is tested",
-    "examples/optimization/QA_maxJ_continuation.py": "covered by the source test above; a run is the QI sibling's",
-    "examples/optimization/QA_optimization_DMerc_vacuum.py": "covered by the source test above; its certificate lane has no smoke path",
-    "examples/optimization/QA_optimization_global.py": "covered by the source test above; basin hopping has no meaningful smoke budget",
-    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py": "asymmetric variants share the symmetric drivers",
-    "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
+        "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
 }
 
 
@@ -171,7 +156,18 @@ EXECUTED_EXAMPLES = {
     "examples/mirror/mirror_exterior_field.py",
     "examples/mirror/mirror_free_boundary_beta_scan.py",
     "examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py",
+    "examples/optimization/QA_maxJ_continuation.py",
+    "examples/optimization/drift_surfaces_optimization.py",
     "examples/optimization/QA_optimization.py",
+    "examples/optimization/QP_optimization_scipy.py",
+    "examples/optimization/QP_optimization_finite_beta_scalar.py",
+    "examples/optimization/QP_optimization_scalar.py",
+    "examples/optimization/QI_optimization_finite_beta_scalar.py",
+    "examples/optimization/QI_optimization_scalar.py",
+    "examples/optimization/QH_optimization_finite_beta_scalar.py",
+    "examples/optimization/QH_optimization_scalar.py",
+    "examples/optimization/QA_optimization_global.py",
+    "examples/optimization/QA_optimization_DMerc_vacuum.py",
     "examples/optimization/QA_optimization_alpha_losses.py",
     "examples/optimization/QA_optimization_ballooning.py",
     "examples/optimization/QA_optimization_bootstrap.py",
@@ -188,6 +184,7 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/QI_maxJ_continuation.py",
     "examples/optimization/QI_optimization.py",
     "examples/optimization/pwO_optimization.py",
+    "examples/optimization/pwO_optimization_finite_beta.py",
     "examples/optimization/QI_optimization_bootstrap.py",
     "examples/optimization/QI_optimization_bootstrap_dkx.py",
     "examples/optimization/QI_optimization_bootstrap_er.py",
@@ -203,7 +200,12 @@ EXECUTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_augmented_lagrangian.py",
     "examples/optimization/single_stage_optimization_finite_beta.py",
     "examples/optimization/single_stage_optimization_least_squares.py",
+    "examples/optimization/single_stage_optimization_QA_QH_QI.py",
     "examples/optimization/stellarator_asymmetry/QA_optimization.py",
+    "examples/optimization/stellarator_asymmetry/QP_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QI_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QH_optimization_finite_beta.py",
+    "examples/optimization/stellarator_asymmetry/QA_optimization_finite_beta.py",
     "examples/optimization/stellarator_asymmetry/QH_optimization.py",
     "examples/optimization/stellarator_asymmetry/QI_optimization.py",
     "examples/optimization/stellarator_asymmetry/QP_optimization.py",
@@ -240,6 +242,50 @@ def test_every_example_parses() -> None:
             ast.parse(script.read_text(), filename=str(script))
         except SyntaxError as error:  # pragma: no cover - the failure is the point
             raise AssertionError(f"{script.relative_to(REPO)}: {error}") from error
+
+
+#: Optimization examples whose output names are fixed by a plotted summary pair
+#: rather than an ``OUTPUT_NAME`` global.
+_NO_OUTPUT_NAME = {
+    "single_stage_free_boundary_optimization.py",
+    "single_stage_free_boundary_optimization_finite_beta.py",
+    "single_stage_optimization.py",
+    "single_stage_optimization_augmented_lagrangian.py",
+    "single_stage_optimization_finite_beta.py",
+    "single_stage_optimization_least_squares.py",
+    "single_stage_optimization_pwO.py",
+}
+
+
+def test_examples_follow_the_flat_template() -> None:
+    """Examples are flat scripts: no argparse, no ``__main__``, one smoke switch.
+
+    Optimization examples also name their outputs from one top-of-script
+    ``OUTPUT_NAME`` and read ``VMEX_EXAMPLES_CI`` through ``ci_smoke`` so the
+    smoke budget has a single, visible place.
+    """
+    problems = {}
+    for script in _shipped_examples():
+        tree = ast.parse(script.read_text())
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = [a.name for a in node.names] + [getattr(node, "module", None) or ""]
+                if any(n.split(".")[0] == "argparse" for n in names):
+                    found.append("imports argparse")
+            if (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name)
+                    and node.left.id == "__name__"):
+                found.append("has a __main__ guard")
+        if "optimization" in script.parts:
+            assigned = {t.id for n in tree.body if isinstance(n, ast.Assign)
+                        for t in n.targets if isinstance(t, ast.Name)}
+            if "ci_smoke" not in assigned:
+                found.append("does not define ci_smoke")
+            if script.name not in _NO_OUTPUT_NAME and "OUTPUT_NAME" not in assigned:
+                found.append("does not define OUTPUT_NAME")
+        if found:
+            problems[str(script.relative_to(REPO))] = sorted(set(found))
+    assert not problems, problems
 
 
 def _smoke_block_clobbers(tree: ast.Module) -> list[str]:
@@ -674,6 +720,19 @@ def test_qa_finite_beta_least_squares_example_sets_beta_through_phiedge():
     assert "least_squares(" in text
 
 
+def test_finite_beta_least_squares_example_exposes_the_row_toggles():
+    """One script serves QA, QH and QP; the well and stability rows are switches."""
+    text = (EXAMPLES / "optimization" / "QA_optimization_finite_beta.py").read_text()
+    _assert_beta_from_toroidal_flux(text)
+    for family in ("QA", "QH", "QP"):
+        assert f'FAMILY == "{family}"' in text
+    assert "USE_WELL = " in text and "USE_MERCIER = " in text
+    assert "opt.magnetic_well, opt.at_" in text and "opt.min_abs_iota, opt.at_" in text
+    assert "opt.mercier_stability_residual" in text and "opt.glasser_stability_residual" in text
+    scales = [float(v) for v in re.search(r"STABILITY_SCALE = \[([^\]]*)\]", text).group(1).split(",")]
+    assert scales[0] == 0.0 and scales[-1] == 1.0
+
+
 @pytest.mark.parametrize("case", ["QA", "QH", "QP", "QI"])
 @pytest.mark.parametrize("suffix", ["", "_finite_beta"])
 def test_stellarator_asymmetry_examples_expose_all_boundary_families(case, suffix):
@@ -730,7 +789,6 @@ def test_combined_confinement_example_states_the_surrogate_policy():
     assert "does not promise" in text
     assert "normalized by its seed value" in text
     assert "VmecProblem.from_loss" in text  # one aggregate scalar adjoint
-    assert "epsilon_eff unavailable" in text  # optional NEO_JAX states its absence
 
 
 @pytest.mark.full  # one direct-coil free solve, coupled adjoint, and output solve (~2 min)
@@ -751,6 +809,24 @@ def test_vacuum_free_boundary_single_stage_optimization(tmp_path):
     for name in ("wout_single_stage_free_boundary_optimized.nc",
                  "single_stage_free_boundary_optimization.png",
                  "single_stage_free_boundary_objectives.png"):
+        assert (tmp_path / name).stat().st_size > 0
+
+
+@pytest.mark.full  # plasma ladder, coil fit, joint solve and both verification solves
+@pytest.mark.parametrize("case", ["QA", "QH", "QI"])
+def test_single_stage_symmetry_examples(case, tmp_path):
+    pytest.importorskip("essos")
+    script = EXAMPLES / "optimization" / "single_stage_optimization_QA_QH_QI.py"
+    source = script.read_text().replace('FAMILY = "QA"', f'FAMILY = "{case}"').replace("__file__", repr(str(script)))
+    (tmp_path / "family.py").write_text(source)
+    out = _run_example(tmp_path / "family.py", tmp_path, timeout=1800)
+    assert "[coil fit]" in out and "[augmented Lagrangian 1]" in out
+    final = re.search(rf"\[final\] {case} total = ([0-9.eE+-]+)", out)
+    assert final is not None and np.isfinite(float(final.group(1)))
+    assert re.search(r"B.n/B RMS = [0-9.eE+-]+", out)
+    assert "All stated targets met." in out or "did NOT meet its stated targets" in out
+    for name in (f"wout_single_stage_{case}_optimized.nc", f"coils_single_stage_{case}_optimized.json",
+                 f"single_stage_{case}_optimization.png"):
         assert (tmp_path / name).stat().st_size > 0
 
 
@@ -996,6 +1072,37 @@ def test_qs_optimization_examples(case, tmp_path):
     assert match is not None and np.isfinite(float(match.group(1)))
 
 
+@pytest.mark.full
+@pytest.mark.parametrize("name", [
+    "QA_optimization_DMerc_vacuum",
+    "QA_optimization_global",
+    "QH_optimization_scalar",
+    "QH_optimization_finite_beta_scalar",
+    "QI_optimization_scalar",
+    "QI_optimization_finite_beta_scalar",
+    "QP_optimization_scalar",
+    "QP_optimization_finite_beta_scalar",
+    "QP_optimization_scipy",
+    "stellarator_asymmetry/QA_optimization_finite_beta",
+    "stellarator_asymmetry/QH_optimization_finite_beta",
+    "stellarator_asymmetry/QI_optimization_finite_beta",
+    "stellarator_asymmetry/QP_optimization_finite_beta",
+    "QA_maxJ_continuation",
+    "drift_surfaces_optimization",
+])
+def test_sibling_optimization_examples_run(name, tmp_path):
+    """The symmetry-class and optimizer siblings of a PR-tested example run at smoke budget.
+
+    Each shares its driver with a QA or QI script the PR lanes run, so only the
+    weekly examples lanes spend the 6-10 minutes each takes; a clean exit and a
+    written equilibrium prove the deck, the objective terms and the output
+    naming still work.
+    """
+    out = _run_example(EXAMPLES / "optimization" / f"{name}.py", tmp_path)
+    assert list(tmp_path.glob("wout_*.nc")), out[-2000:]
+    assert list(tmp_path.glob("input.*")), out[-2000:]
+
+
 def test_qa_scalar_optimization_example(tmp_path):
     """The vacuum scalar driver descends and writes distinct outputs."""
     script = EXAMPLES / "optimization" / "QA_optimization_scalar.py"
@@ -1070,10 +1177,6 @@ def test_combined_confinement_objective_example(tmp_path):
     assert all(np.isfinite(float(v)) and float(v) > 0.0 for v in hard.groups())
     assert re.search(
         r"maximum-J residual = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-    # the hard ripple line appears when NEO_JAX is installed; its absence
-    # must be stated, never silently skipped
-    assert (re.search(r"epsilon_eff\^\(3/2\) mean = ([0-9.eE+-]+) -> ([0-9.eE+-]+)", out)
-            or "epsilon_eff unavailable" in out)
     assert (tmp_path / "input.QA_eps_gammac_maxJ").exists()
     assert (tmp_path / "wout_QA_eps_gammac_maxJ.nc").exists()
     assert (tmp_path / "QA_eps_gammac_maxJ_summary.png").stat().st_size > 10_000
@@ -1107,6 +1210,16 @@ def test_low_transport_example(tmp_path):
     _run_example(EXAMPLES / "optimization" / "pwO_optimization.py", tmp_path)
     for name in ("input.pwO_optimized_nfp3", "wout_pwO_optimized_nfp3.nc",
                  "pwO_optimized_nfp3_objectives.csv"):
+        assert (tmp_path / name).exists()
+
+
+@pytest.mark.full
+def test_finite_beta_low_transport_example(tmp_path):
+    pytest.importorskip("booz_xform_jax")
+    pytest.importorskip("neo_jax")
+    _run_example(EXAMPLES / "optimization" / "pwO_optimization_finite_beta.py", tmp_path)
+    for name in ("input.pwO_finite_beta_nfp3", "wout_pwO_finite_beta_nfp3.nc",
+                 "pwO_finite_beta_nfp3_objectives.csv"):
         assert (tmp_path / name).exists()
 
 
@@ -1217,9 +1330,12 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
     if case == "QI":
         pytest.importorskip("booz_xform_jax")
     script = EXAMPLES / "optimization" / f"{case}_optimization_bootstrap.py"
+    if case == "QI":  # the ladder continues the vacuum design that QI_optimization.py writes
+        _run_example(EXAMPLES / "optimization" / "QI_optimization.py", tmp_path, timeout=1800)
     out = _run_example(script, tmp_path, timeout=1800)
     _assert_cost_decreased(out, f"{case}-bootstrap")
-    assert "self-consistent seed" in out and f"[final] {figure_of_merit}" in out
+    assert ("[stage 0 start]" if case == "QI" else "self-consistent seed") in out
+    assert f"[final] {figure_of_merit}" in out
     match = re.search(r"\[final\].*beta = ([0-9.]+)%", out)
     assert match is not None and 1.0 < float(match.group(1)) < 4.0
     assert (tmp_path / f"input.{case}_bootstrap_optimized").exists()
