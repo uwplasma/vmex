@@ -563,6 +563,66 @@ def test_free_map_problem_joint_jacobian_matches_finite_differences(monkeypatch)
         assert low < values[name] < high
 
 
+def _free_map(monkeypatch, values, *, break_field=False, **options):
+    """A FreeMapProblem on a synthetic two-surface Boozer spectrum; optionally break it for x[1] > .5."""
+    spec = _spectrum(2)
+    booz = {k: jnp.asarray(spec[k]) for k in ("bmnc_b", "xm_b", "xn_b", "iota_b")} | {"nfp": 3}
+    monkeypatch.setattr(pwo, "boozer_spectrum_state", lambda *a, **k: booz)
+    flat = np.concatenate((spec["bmnc_b"].ravel(), spec["iota_b"]))
+
+    class Stage:
+        x0 = np.zeros(2)
+
+        def residual(self, x):
+            spectrum = -flat if break_field and x[1] > .5 else flat
+            return np.append(spectrum, x[1] - 1.)
+
+        def residual_jac(self, x):
+            return np.column_stack((np.zeros(flat.size + 1), np.append(np.zeros(flat.size), 1.)))
+
+    class Equilibrium:
+        state = runtime = None
+
+    mapped = MappedPwOResidual((.3, .6), **options)
+    return FreeMapProblem(Stage(), mapped, Equilibrium(), values, tuple(values), weight=1., area_floor=0.)
+
+
+def test_free_map_problem_forwards_mapped_options_in_bounds_order(monkeypatch):
+    values = dict(a=.3, b=.1, c=-2., eta_min=2.8)
+    problem = _free_map(monkeypatch, values, ngamma=64, neta=24, b_ref=1.7)
+    shuffled = _free_map(monkeypatch, dict(reversed(values.items())), ngamma=64, neta=24, b_ref=1.7)
+    z = problem.x0 + .05
+    np.testing.assert_array_equal(problem.x0, shuffled.x0)
+    np.testing.assert_array_equal(problem.residual(z), shuffled.residual(z))
+    assert problem.values(z) == shuffled.values(z)
+    assert tuple(problem.values(z)) == tuple(FreeMapProblem.MAP_BOUNDS)
+
+    spec = _spectrum(2)
+    plain = mapped_pwo_residual_from_boozer(
+        **{k: spec[k] for k in ("bmnc_b", "xm_b", "xn_b", "iota_b", "nfp")}, limit_map=True,
+        ngamma=64, neta=24, b_ref=1.7, **problem.values(z))
+    rows = problem.residual(z)[:plain["residuals1d"].size]
+    assert rows.size == 2 * 64 * 24
+    np.testing.assert_allclose(rows @ rows, plain["total"], rtol=1e-12)
+    default = _free_map(monkeypatch, values)
+    assert default.residual(default.x0 + .05).size != problem.residual(z).size
+
+
+def test_free_map_problem_rejects_invalid_trials_with_a_finite_residual(monkeypatch):
+    from scipy.optimize import least_squares
+
+    problem = _free_map(monkeypatch, dict(a=.3, b=.1, c=-2., eta_min=2.8), break_field=True)
+    bad = problem.x0.copy()
+    bad[1] = .8  # the stage returns a field with a negative mean here
+    rows, jacobian = problem.residual(bad), problem.residual_jac(bad)
+    assert np.all(rows == FreeMapProblem.REJECTED)
+    assert np.isfinite(jacobian).all() and not jacobian.any()
+    start = .5 * problem.residual(problem.x0) @ problem.residual(problem.x0)
+    result = least_squares(problem.residual, problem.x0, jac=problem.residual_jac)
+    assert np.isfinite(result.fun).all() and result.cost < start
+    assert result.x[1] <= .5 and result.cost < FreeMapProblem.REJECTED
+
+
 # Independent collisionless toy checks; finite-collisionality current remains separate.
 def _bootstrap_ratio(B, iota, nfp, n_lambda=32):
     """-iota Delta_G/f_t: u, h solved per Fourier mode and zeroed at B_max."""

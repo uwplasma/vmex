@@ -4,15 +4,13 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
 
 - :class:`QuasisymmetryRatioResidual` — the two-term quasisymmetry ratio
   residual of Landreman & Paul (simsopt convention), evaluated from the
-  wout-engine field tables of a converged core state (parity port of the
-  legacy ``quasisymmetry_ratio_residual_from_wout``).
+  wout-engine field tables of a converged core state.
 - practical scalar targets — :func:`aspect_ratio`, :func:`mean_iota`,
   :func:`edge_iota`, :func:`mirror_ratio`, :func:`volume`,
   :func:`magnetic_well`, :func:`max_elongation` — each a pure function of
   ``(SpectralState, SolverRuntime)``.
-- :func:`quasi_isodynamic_residual` — a distilled Goodman-style QI residual
-  keeping exactly the four terms the legacy minimal-seed QI examples
-  exercised (see its docstring).
+- :func:`quasi_isodynamic_residual` — the Goodman-style QI residual of
+  :mod:`vmex.core.qi`, re-exported here.
 - :func:`least_squares` — a thin :func:`scipy.optimize.least_squares` driver
   over boundary Fourier dofs (:func:`pack_boundary`/:func:`unpack_boundary`),
   taking weighted ``(callable, target, weight)`` terms.
@@ -20,14 +18,14 @@ Simsopt-style vocabulary for the QA/QH/QP/QI examples on the pure new core:
   ``0.5 * sum(residual**2)`` and minimized with L-BFGS-B, so one reverse
   implicit adjoint supplies the gradient without a dense residual Jacobian.
 
-Helicity conventions (match legacy/simsopt exactly)
----------------------------------------------------
+Helicity conventions (as in simsopt)
+------------------------------------
 The QS residual keeps the ``|B|`` spectrum aligned with the single helicity
 ``chi = helicity_m * theta - helicity_n * nfp * phi`` — ``helicity_n`` is in
 units of ``nfp`` (the internal target mode number is ``nn = helicity_n * nfp``):
 
 - QA: ``(helicity_m, helicity_n) = (1, 0)``
-- QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``; legacy/simsopt sign — the
+- QH: ``(1, -1)`` (i.e. ``chi = theta + nfp*phi``, the simsopt sign — the
   usual "``n = -nfp``" written in physical toroidal mode numbers)
 - QP: ``(0, 1)``
 
@@ -59,6 +57,7 @@ reduced ``[0, pi]`` grid.
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import dataclasses
 import functools
 import inspect
@@ -90,7 +89,6 @@ from .solver import (
     prepare_runtime,
     resolution_from_input,
 )
-from .fields import surface_currents
 from .stability import (
     d_merc_state,
     glasser_d_r_state,
@@ -111,10 +109,10 @@ from .stability import (
 from .statephysics import (
     _as_1d,
     _field_chain,
+    _full_surface_values,
     _half_grid,
     _interp_half_grid,
-    _iotas_half as _iotas_half,  # unused here; kept importable for back compat
-    _iotas_half_from_fields,
+    _half_mesh_profiles,
     _lgradb_grid,
     _lgradb_state_tables,
     _mode_matrix,
@@ -126,6 +124,7 @@ from .statephysics import (
     min_boundary_curvature_radius,
     mean_iota,
     min_abs_iota,
+    max_abs_iota,
     edge_jacobian_ratio,
     axis_excursion,
     soft_min_abs_iota,
@@ -134,7 +133,7 @@ from .statephysics import (
 )
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
-from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord
+from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop
 
 __all__ = [
     "report_targets",
@@ -144,6 +143,7 @@ __all__ = [
     "EquilibriumReporter",
     "OptimizationMonitor",
     "OptimizationRecord",
+    "StallStop",
     "make_problem",
     "Equilibrium",
     "solve_equilibrium",
@@ -151,6 +151,7 @@ __all__ = [
     "aspect_ratio",
     "mean_iota",
     "min_abs_iota",
+    "max_abs_iota",
     "edge_jacobian_ratio",
     "axis_excursion",
     "Band",
@@ -184,9 +185,6 @@ __all__ = [
     "l_grad_b",
     "l_grad_b_state",
     "l_grad_b_excess_state",
-    "quasi_isodynamic_residual",
-    "boozer_modes_from_wout",
-    "quasi_isodynamic_residual_from_wout",
     "boundary_dof_names",
     "boundary_arrays_from_x",
     "pack_boundary",
@@ -197,6 +195,9 @@ __all__ = [
     "minimize",
     "RedlBootstrapMismatch",  # noqa: F822 - provided lazily by __getattr__ below
     "BootstrapFiniteNuResidual",  # noqa: F822 - provided lazily by __getattr__ below
+    "quasi_isodynamic_residual",  # noqa: F822 - provided lazily by __getattr__ below
+    "boozer_modes_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
+    "quasi_isodynamic_residual_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
@@ -217,6 +218,10 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
     if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
         from . import gammac
         return getattr(gammac, name)
+    if name in ("quasi_isodynamic_residual", "boozer_modes_from_wout",
+                "quasi_isodynamic_residual_from_wout"):
+        from . import qi
+        return getattr(qi, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -501,7 +506,7 @@ def solve_equilibrium(
 
 
 # ===========================================================================
-# Quasisymmetry ratio residual (simsopt convention; legacy parity port)
+# Quasisymmetry ratio residual (simsopt convention)
 # ===========================================================================
 
 
@@ -523,8 +528,7 @@ class QuasisymmetryRatioResidual:
     The evaluation consumes the parity-proven wout-engine tables
     (``bmnc/gmnc/bsub*/bsup*``, :mod:`vmex.core.nyquist`) of a
     :class:`~vmex.core.wout.WoutData` — from
-    :func:`~vmex.core.wout.wout_from_state` or any ``wout_*.nc`` — ported
-    from legacy ``quasisymmetry_ratio_residual_from_wout`` (A/B bit-exact).
+    :func:`~vmex.core.wout.wout_from_state` or any ``wout_*.nc``.
     """
 
     name = "qs"
@@ -576,10 +580,10 @@ class QuasisymmetryRatioResidual:
         tables = {}
         for name in ("gmnc", "bmnc", "bsubumnc", "bsubvmnc", "bsupumnc", "bsupvmnc"):
             tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn))
+        lasym = bool(getattr(wout, "lasym", False))
         for name in ("gmns", "bmns", "bsubumns", "bsubvmns", "bsupumns", "bsupvmns"):
-            optional = not bool(getattr(wout, "lasym", False))
             tables[name] = half(_mode_matrix(wout, name, ns=ns, mn=mn, optional=True)
-                                if not optional else jnp.zeros((ns, mn)))
+                                if lasym else jnp.zeros((ns, mn)))
 
         theta1d = jnp.linspace(0.0, 2.0 * jnp.pi, self.ntheta, endpoint=False)
         phi1d = jnp.linspace(0.0, 2.0 * jnp.pi / nfp, self.nphi, endpoint=False)
@@ -675,33 +679,18 @@ class QuasisymmetryRatioResidual:
         nfp = int(rt.resolution.nfp)
         _, jacobian, _, fields, _ = _field_chain(state, rt)
 
-        # Mirror the reduced [0, pi] grid to the full theta circle.
-        ntheta2 = int(np.shape(fields.total_pressure)[1])
-        nzeta = int(np.shape(fields.total_pressure)[2])
-        if bool(setup.lasym):
-            ntheta1 = ntheta2
+        # Half-mesh fields on the full theta circle, axis row dropped.
+        lasym = bool(setup.lasym)
 
-            def full(a):
-                return jnp.asarray(a)[1:]
-        else:
-            ntheta1 = max(2 * (ntheta2 - 1), 1)
-            i_full = np.arange(ntheta1)
-            i_src = np.where(i_full < ntheta2, i_full, ntheta1 - i_full)
-            k = np.arange(nzeta)
-            k_src = np.where(i_full[:, None] < ntheta2, k[None, :],
-                             (nzeta - k[None, :]) % nzeta)
-            i_src = np.broadcast_to(i_src[:, None], (ntheta1, nzeta))
-
-            def full(a):
-                # Drop the zeroed axis row before singular divisions: keeping
-                # it poisons reverse AD with 0 * inf although it is unused.
-                return jnp.asarray(a)[1:, i_src, k_src]
+        def full(a):
+            return _full_surface_values(a, lasym=lasym)
 
         # ``|B|`` on the half-mesh internal grid (bcovar.f: bsq = ``|B|``^2/2 + p).
         bsq2 = 2.0 * (jnp.asarray(fields.total_pressure)
                       - jnp.asarray(fields.pressure)[:, None, None])
         tiny = jnp.asarray(jnp.finfo(bsq2.dtype).tiny, dtype=bsq2.dtype)
         bmag = jnp.sqrt(jnp.maximum(full(bsq2), tiny))
+        ntheta1, nzeta = int(bmag.shape[1]), int(bmag.shape[2])
 
         # FFT spectral differentiation on the full periodic (theta, zeta) grid;
         # zeta spans one field period, so d/dphi carries the nfp factor.
@@ -711,15 +700,8 @@ class QuasisymmetryRatioResidual:
         dB_dtheta = jnp.real(jnp.fft.ifft2(1j * kt[None, :, None] * bhat, axes=(1, 2)))
         dB_dphi = jnp.real(jnp.fft.ifft2(1j * kz[None, None, :] * bhat, axes=(1, 2)))
 
-        # Profiles: iota (add_fluxes.f), Boozer covariant averages G/I (fbal.f).
-        iota = _iotas_half_from_fields(setup, fields)
-        cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
-                               trig=rt.trig, s=s, signgs=setup.signgs)
-        G, I = jnp.asarray(cur.bvco), jnp.asarray(cur.buco)  # noqa: E741
-
-        # d(psi)/ds = -phi_edge / (2 pi), wout sign convention.
-        hs = s[1] - s[0]
-        d_psi_d_s = -float(setup.signgs) * hs * jnp.sum(jnp.asarray(setup.phipf)[1:])
+        iota_h, G_h, I_h, phi_edge = _half_mesh_profiles(rt, fields)
+        d_psi_d_s = -phi_edge
 
         gsqrt = full(jacobian.sqrt_g)
         gsqrt_safe = jnp.where(gsqrt != 0.0, gsqrt, jnp.ones_like(gsqrt))
@@ -728,7 +710,6 @@ class QuasisymmetryRatioResidual:
             d_psi_d_s * (full(fields.bsubu) * dB_dphi - full(fields.bsubv) * dB_dtheta)
             / gsqrt_safe)
         nn = self.helicity_n * nfp
-        iota_h, G_h, I_h = iota[1:], G[1:], I[1:]      # match the sliced grid
         f = (B_cross_grad_B_dot_grad_psi * (nn - iota_h[:, None, None] * self.helicity_m)
              - B_dot_grad_B * (self.helicity_m * G_h + nn * I_h)[:, None, None]) / bmag ** 3
 
@@ -938,8 +919,7 @@ def mirror_ratio(state: SpectralState, rt: SolverRuntime, *, s_index: int = -1) 
     ``|B|`` is evaluated on the solver's internal angular grid from the
     half-mesh field state (``|B|^2 = 2 (bsq - p)``, ``bcovar.f``); ``s_index``
     selects the half-mesh surface (default: outermost).  Hard max/min — smooth
-    almost everywhere, adequate for finite-difference least squares (the
-    legacy ``VMECMirrorRatio`` softmax knobs were an optimizer nicety only).
+    almost everywhere, adequate for finite-difference least squares.
     """
     _, _, _, fields, _ = _field_chain(state, rt)
     bsq = jnp.asarray(fields.total_pressure) - jnp.asarray(fields.pressure)[:, None, None]
@@ -954,7 +934,7 @@ def magnetic_well(state: SpectralState, rt: SolverRuntime) -> Array:
 
     ``V' = dV/ds`` endpoints are linear extrapolations of the half-mesh
     differential volume ``vp`` (``bcovar.f``); positive values mean a
-    favorable well.  Ported from legacy ``vmex.finite_beta.magnetic_well_from_vp``.
+    favorable well.
     """
     _, _, _, _, energies = _field_chain(state, rt)
     dvol = jnp.abs(jnp.asarray(energies.vp))[1:]
@@ -1085,381 +1065,6 @@ def l_grad_b_excess_state(
 
 
 # ===========================================================================
-# Quasi-isodynamic residual (Goodman-style; distilled legacy port)
-# ===========================================================================
-
-
-def _qi_grid(bmnc_b, xm_b, xn_b, iota_b, *, bmns_b=None, nfp: int, weights, nphi: int,
-             nalpha: int, n_bounce: int, include_bounce_endpoints: bool,
-             softness: float, phimin: float):
-    """Normalized ``|B|`` along field lines + bounce levels (legacy `_qi_boozer_surface_grid`).
-
-    ``theta = alpha + iota * phi`` samples ``nalpha`` field-line labels over
-    one field period; ``bnorm`` rescales ``|B|`` to [0, 1] per surface.
-    """
-    bmnc_b = jnp.asarray(bmnc_b, dtype=jnp.float64)
-    bmns_b = (jnp.zeros_like(bmnc_b) if bmns_b is None
-              else jnp.asarray(bmns_b, dtype=bmnc_b.dtype))
-    xm_b = jnp.asarray(xm_b, dtype=jnp.float64)
-    xn_b = jnp.asarray(xn_b, dtype=jnp.float64)
-    iota_b = jnp.asarray(iota_b, dtype=jnp.float64)
-    if bmnc_b.ndim != 2:
-        raise ValueError(f"bmnc_b must have shape (nsurf, nmodes), got {bmnc_b.shape}")
-    if bmns_b.shape != bmnc_b.shape:
-        raise ValueError("bmns_b must have the same shape as bmnc_b")
-    if nphi < 4 or nalpha < 2 or n_bounce < 2:
-        raise ValueError("QI residual requires nphi >= 4, nalpha >= 2, n_bounce >= 2")
-    nsurf = int(bmnc_b.shape[0])
-    dtype = bmnc_b.dtype
-    weights_arr = jnp.ones((nsurf,), dtype=dtype) if weights is None else _as_1d(weights)
-
-    phi0 = jnp.asarray(float(phimin), dtype=dtype)
-    phi1 = phi0 + jnp.asarray(2.0 * np.pi / nfp, dtype=dtype)
-    phi = jnp.linspace(phi0, phi1, nphi, endpoint=True, dtype=dtype)
-    alpha = jnp.linspace(0.0, 2.0 * jnp.pi, nalpha, endpoint=False, dtype=dtype)
-    theta = alpha[None, None, :] + iota_b[:, None, None] * phi[None, :, None]
-    angle = (theta[:, :, :, None] * xm_b[None, None, None, :]
-             - phi[None, :, None, None] * xn_b[None, None, None, :])
-    bmag = jnp.sum(
-        bmnc_b[:, None, None, :] * jnp.cos(angle)
-        + bmns_b[:, None, None, :] * jnp.sin(angle), axis=-1)
-
-    bmin = jnp.min(bmag, axis=(1, 2), keepdims=True)
-    bmax = jnp.max(bmag, axis=(1, 2), keepdims=True)
-    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
-    bnorm = (bmag - bmin) / jnp.maximum(bmax - bmin, tiny)
-
-    if include_bounce_endpoints:
-        levels = jnp.linspace(0.0, 1.0, n_bounce, endpoint=True, dtype=dtype)
-    else:
-        levels = jnp.linspace(0.0, 1.0, n_bounce + 2, endpoint=True, dtype=dtype)[1:-1]
-    eps = jnp.maximum(jnp.asarray(float(softness), dtype=dtype),
-                      jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
-    return weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps
-
-
-def _minimum_position(b, softness: float, *, periodic: bool):
-    """Index-space position of the minimum of ``b`` along its last axis.
-
-    ``softness = 0`` is the grid argmin.  A positive value is the softmin
-    centroid with weights ``exp(-(b - min b)/softness)`` (circular for a
-    periodic line), which moves continuously as ``b`` changes and tends to
-    the argmin as ``softness -> 0``.
-    """
-    n = b.shape[-1]
-    if softness <= 0.0:
-        return jnp.argmin(b, axis=-1).astype(b.dtype)
-    weights = jax.nn.softmax(-(b - jnp.min(b, axis=-1, keepdims=True)) / softness, axis=-1)
-    index = jnp.arange(n, dtype=b.dtype)
-    if not periodic:
-        return jnp.sum(weights * index, axis=-1)
-    angle = 2.0 * jnp.pi * index / n
-    centre = jnp.arctan2(jnp.sum(weights * jnp.sin(angle), axis=-1),
-                         jnp.sum(weights * jnp.cos(angle), axis=-1))
-    return jnp.mod(centre * n / (2.0 * jnp.pi), n)
-
-
-def _sample(b, position, *, periodic: bool):
-    """Linear interpolation of ``b`` at fractional index ``position``.
-
-    Integer positions return the samples exactly.  A non-periodic line reads
-    the normalized maximum 1 one step beyond either end and is clamped there,
-    so a branch that leaves the field period ends on the well's wall.
-    """
-    n = b.shape[-1]
-    if not periodic:
-        one = jnp.ones(b.shape[:-1] + (1,), dtype=b.dtype)
-        b = jnp.concatenate([one, b, one], axis=-1)
-        position = jnp.clip(position + 1.0, 0.0, float(n + 1))
-    lower = jnp.floor(position)
-    frac = position - lower
-    lower = lower.astype(jnp.int32)
-    upper = lower + 1
-    if periodic:
-        lower, upper = jnp.mod(lower, n), jnp.mod(upper, n)
-    else:
-        upper = jnp.minimum(upper, n + 1)
-    return ((1.0 - frac) * jnp.take_along_axis(b, lower, axis=-1)
-            + frac * jnp.take_along_axis(b, upper, axis=-1))
-
-
-def quasi_isodynamic_residual(
-    *,
-    bmnc_b,
-    bmns_b=None,
-    xm_b,
-    xn_b,
-    iota_b,
-    nfp: int,
-    weights: Iterable[float] | None = None,
-    nphi: int = 151,
-    nalpha: int = 31,
-    n_bounce: int = 51,
-    include_bounce_endpoints: bool = False,
-    softness: float = 2.0e-2,
-    width_weight: float = 1.0,
-    branch_width_weight: float = 0.5,
-    branch_width_softness: float = 1.0e-2,
-    profile_weight: float = 0.1,
-    shuffle_profile_weight: float = 1.0,
-    shuffle_profile_softness: float = 2.0e-2,
-    argmin_softness: float = 0.0,
-    phimin: float = 0.0,
-) -> dict[str, Array]:
-    """Smooth Goodman-style quasi-isodynamic residual from Boozer ``|B|`` modes.
-
-    A configuration is quasi-isodynamic when the ``|B|`` contours are
-    poloidally closed and the trapped-particle bounce distance between the
-    two branches of each magnetic well is independent of the field-line label
-    ``alpha`` (omnigenity).  This residual samples the normalized ``|B|``
-    along field lines ``theta = alpha + iota*phi`` over one field period and
-    penalizes, per surface (the default weights reproduce exactly the terms
-    used by the established minimal-seed QI formulation):
-
-    - **level-set width variance** (``width_weight``): for each bounce level
-      ``B*`` the smooth occupancy ``sigmoid((B* - bnorm)/softness)`` gives the
-      fraction of the field line below ``B*``; its variance over ``alpha``
-      measures misalignment of the ``|B|`` contours.
-    - **branch width variance** (``branch_width_weight``): each field line is
-      split at its ``|B|`` minimum, both branches are made monotone with a
-      running maximum, and the (smooth) level-crossing distances of the two
-      branches are summed — the trapped-well bounce width, whose variance
-      over ``alpha`` is the classic omnigenity error.
-    - **profile consistency** (``profile_weight``): small penalty on the
-      variance of ``bnorm`` itself over ``alpha`` at fixed ``phi``, which
-      keeps degenerate QH-like candidates from gaming the width terms.
-    - **branch-shuffle profile** (``shuffle_profile_weight``): the "squash and
-      shuffle" comparison — each well's branch crossings are shifted so every
-      field line has the *mean* bounce width, the shuffled well is
-      reinterpolated onto the original grid and compared pointwise to the
-      original ``bnorm`` (the closest smooth analogue of Goodman et al.'s
-      construction of the nearest omnigenous field).
-
-    Both branch terms start each well at its ``|B|`` minimum.  With the
-    default ``argmin_softness = 0`` that is the grid argmin, which jumps a
-    whole grid cell as the field moves, so the residual is discontinuous
-    there.  A positive ``argmin_softness`` (in units of the normalized
-    ``|B|``) uses the softmin centroid and reads the branches by linear
-    interpolation, and drops the two period-end samples of the shuffle
-    comparison, which sit on the constructed well's wall; the residual is
-    then continuous in the field.
-
-    Legacy port (``quasi_isodynamic_residual_from_boozer_modes``) with the
-    unused ``aligned_profile_*`` / ``weighted_shuffle_*`` /
-    ``shuffle_profile_nphi_out`` machinery removed.  ``xn_b`` uses physical
-    toroidal mode numbers (booz_xform convention).  Returns ``residuals1d``
-    (least-squares vector) and ``total`` (its squared norm).
-    """
-    (weights_arr, phi0, phi1, phi, alpha, bmag, bnorm, levels, eps) = _qi_grid(
-        bmnc_b, xm_b, xn_b, iota_b, bmns_b=bmns_b,
-        nfp=int(nfp), weights=weights, nphi=int(nphi),
-        nalpha=int(nalpha), n_bounce=int(n_bounce),
-        include_bounce_endpoints=bool(include_bounce_endpoints),
-        softness=float(softness), phimin=float(phimin))
-    dtype = bnorm.dtype
-    nsurf, nphi_, nalpha_ = int(bnorm.shape[0]), int(bnorm.shape[1]), int(bnorm.shape[2])
-    nlev = int(levels.shape[0])
-    sqrt_w = jnp.sqrt(weights_arr)[:, None, None]
-    tiny = jnp.asarray(jnp.finfo(dtype).tiny, dtype=dtype)
-    pieces: list[jnp.ndarray] = []
-    constructed_bnorm = jnp.swapaxes(bnorm, 1, 2)
-
-    # -- level-set occupancy width variance + profile consistency ----------
-    occupancy = jax.nn.sigmoid((levels[None, None, None, :] - bnorm[:, :, :, None]) / eps)
-    widths = jnp.mean(occupancy, axis=1)                      # (nsurf, nalpha, nlev)
-    width_res = (widths - jnp.mean(widths, axis=1, keepdims=True)) * sqrt_w * width_weight
-    pieces.append(jnp.ravel(width_res) / jnp.sqrt(jnp.asarray(nalpha_ * nlev, dtype=dtype)))
-
-    profile_res = (bnorm - jnp.mean(bnorm, axis=2, keepdims=True)) * sqrt_w * profile_weight
-    pieces.append(jnp.ravel(profile_res) / jnp.sqrt(jnp.asarray(nalpha_ * nphi_, dtype=dtype)))
-
-    # -- branch-based trapped-well width variance --------------------------
-    if float(branch_width_weight) != 0.0:
-        bper = jnp.swapaxes(bnorm[:, :-1, :], 1, 2)           # periodic, (nsurf, nalpha, nper)
-        nper = nphi_ - 1
-        offs = jnp.arange(max(1, nper // 2) + 1, dtype=jnp.int32)
-        pmin = _minimum_position(bper, float(argmin_softness), periodic=True)[:, :, None]
-        offs_p = jnp.asarray(offs, dtype=dtype)[None, None, :]
-        left = jnp.maximum.accumulate(_sample(bper, pmin - offs_p, periodic=True), axis=-1)
-        right = jnp.maximum.accumulate(_sample(bper, pmin + offs_p, periodic=True), axis=-1)
-        left = (left - left[..., :1]) / jnp.maximum(left[..., -1:] - left[..., :1], tiny)
-        right = (right - right[..., :1]) / jnp.maximum(right[..., -1:] - right[..., :1], tiny)
-        distance = jnp.asarray(offs, dtype=dtype) / jnp.asarray(nper, dtype=dtype)
-        beps = jnp.maximum(jnp.asarray(float(branch_width_softness), dtype=dtype),
-                           jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
-
-        def crossing(branch):
-            logits = -((branch[:, :, :, None] - levels[None, None, None, :]) / beps) ** 2
-            logits = logits - jnp.max(logits, axis=2, keepdims=True)
-            w = jnp.exp(logits)
-            w = w / jnp.sum(w, axis=2, keepdims=True)
-            return jnp.sum(w * distance[None, None, :, None], axis=2)
-
-        bw = crossing(left) + crossing(right)                 # (nsurf, nalpha, nlev)
-        bw_res = (bw - jnp.mean(bw, axis=1, keepdims=True)) * sqrt_w * branch_width_weight
-        pieces.insert(1, jnp.ravel(bw_res) / jnp.sqrt(jnp.asarray(nalpha_ * nlev, dtype=dtype)))
-
-    # -- branch-shuffle profile comparison ----------------------------------
-    if float(shuffle_profile_weight) != 0.0:
-        b_alpha = jnp.swapaxes(bnorm, 1, 2)                   # (nsurf, nalpha, nphi)
-        offs = jnp.arange(nphi_, dtype=jnp.int32)
-        offs_f = jnp.asarray(offs, dtype=dtype)
-        dphi = (phi1 - phi0) / jnp.asarray(nphi_ - 1, dtype=dtype)
-        period = phi1 - phi0
-        imin = _minimum_position(b_alpha, float(argmin_softness), periodic=False)
-        left = jnp.maximum.accumulate(
-            _sample(b_alpha, imin[:, :, None] - offs_f[None, None, :], periodic=False), axis=-1)
-        right = jnp.maximum.accumulate(
-            _sample(b_alpha, imin[:, :, None] + offs_f[None, None, :], periodic=False), axis=-1)
-
-        seps = jnp.maximum(jnp.asarray(float(shuffle_profile_softness), dtype=dtype),
-                           jnp.asarray(jnp.finfo(dtype).eps, dtype=dtype))
-        trapz_w = jnp.ones((nphi_,), dtype=dtype).at[0].set(0.5).at[-1].set(0.5)
-
-        def branch_crossing(branch):
-            occ = jax.nn.sigmoid((levels[None, None, None, :] - branch[:, :, :, None]) / seps)
-            return jnp.sum(occ * trapz_w[None, None, :, None], axis=2) * dphi
-
-        lcross, rcross = branch_crossing(left), branch_crossing(right)
-        bw = lcross + rcross
-        bw_mean = jnp.mean(bw, axis=1, keepdims=True)
-
-        min_phi = phi0 + imin * dphi
-        lend = jnp.maximum(min_phi - phi0, 0.0)
-        rend = jnp.maximum(phi1 - min_phi, 0.0)
-        signed_phi = (offs_f[None, None, :] - imin[:, :, None]) * dphi
-
-        level_full = jnp.concatenate([jnp.zeros((1,), dtype=dtype), levels,
-                                      jnp.ones((1,), dtype=dtype)])
-        y_target = jnp.concatenate([jnp.flip(level_full, axis=0), level_full[1:]], axis=0)
-
-        delta = 0.5 * (bw - bw_mean)
-        ltarget = jnp.clip(lcross - delta, 0.0, lend[:, :, None])
-        rtarget = jnp.clip(rcross - delta, 0.0, rend[:, :, None])
-        zeros = jnp.zeros((nsurf, nalpha_, 1), dtype=dtype)
-        lfull = jnp.maximum.accumulate(
-            jnp.concatenate([zeros, ltarget, lend[:, :, None]], axis=-1), axis=-1)
-        rfull = jnp.maximum.accumulate(
-            jnp.concatenate([zeros, rtarget, rend[:, :, None]], axis=-1), axis=-1)
-        x_target = jnp.concatenate([-jnp.flip(lfull, axis=-1), rfull[:, :, 1:]], axis=-1)
-        ramp = (jnp.arange(x_target.shape[-1], dtype=dtype)
-                * jnp.asarray(1.0e-14, dtype=dtype) * period)
-        x_target = x_target + ramp[None, None, :]
-
-        def interp_one(xp, x):
-            return jnp.interp(x, xp, y_target)
-
-        shuffled = jax.vmap(jax.vmap(interp_one, in_axes=(0, 0)), in_axes=(0, 0))(
-            x_target, signed_phi)
-        # The first coordinate is exactly -lend (the wall); roundoff in phi - phimin
-        # must not slide it into the artificial node ramp.
-        shuffled = shuffled.at[..., 0].set(1.0)
-        constructed_bnorm = shuffled
-        shuffle_res = (shuffled - b_alpha) * sqrt_w * shuffle_profile_weight
-        if float(argmin_softness) > 0.0:
-            # The period ends sit on the constructed wall, where the target
-            # jumps to 1 as a branch crossing reaches the end: drop them.
-            shuffle_res = shuffle_res[..., 1:-1]
-        pieces.append(jnp.ravel(shuffle_res)
-                      / jnp.sqrt(jnp.asarray(nalpha_ * nphi_, dtype=dtype)))
-
-    residuals1d = jnp.concatenate(pieces)
-    bmin_physical = jnp.min(bmag, axis=(1, 2), keepdims=True)
-    bmax_physical = jnp.max(bmag, axis=(1, 2), keepdims=True)
-    return {
-        "residuals1d": residuals1d,
-        "total": jnp.sum(residuals1d * residuals1d),
-        "bnorm": bnorm,
-        "bmag": bmag,
-        "constructed_bmag": (
-            bmin_physical + jnp.swapaxes(constructed_bnorm, 1, 2)
-            * (bmax_physical - bmin_physical)),
-        "levels": levels,
-        "phi": phi,
-        "alpha": alpha,
-    }
-
-
-def boozer_modes_from_wout(
-    wout,
-    *,
-    surfaces,
-    mboz: int = 18,
-    nboz: int = 18,
-    jit: bool = False,
-) -> dict[str, Any]:
-    """Boozer ``|B|`` spectrum of selected surfaces via ``booz_xform_jax``.
-
-    ``wout`` is a :class:`~vmex.core.wout.WoutData` (or any wout-like
-    object accepted by ``Booz_xform.read_wout_data``); ``surfaces`` are
-    normalized-flux values matched to the nearest half-mesh surfaces.
-    Returns ``{bmnc_b, bmns_b, xm_b, xn_b, iota_b, nfp, s_b}`` with the
-    spectra shaped ``(nsurf, nmodes)``. ``bmns_b`` is zero for symmetric
-    equilibria and contains the independent sine spectrum for ``lasym``.
-
-    ``booz_xform_jax`` is an optional dependency (soft import).
-    """
-    try:
-        from booz_xform_jax import Booz_xform
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise ImportError(
-            "Boozer-based objectives require booz_xform_jax; "
-            "run `pip install booz_xform_jax`.") from exc
-    if isinstance(wout, Equilibrium):
-        wout = wout.wout
-    bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
-    bx.read_wout_data(wout)
-    s_in = np.asarray(bx.s_in, dtype=float)
-    values = np.atleast_1d(np.asarray(list(np.ravel(surfaces)), dtype=float))
-    indices = sorted({int(np.argmin(np.abs(s_in - v))) for v in values})
-    bx.compute_surfs = indices
-    bx.run(jit=bool(jit))
-    bmnc_b = np.asarray(bx.bmnc_b, dtype=float)
-    bmns_raw = getattr(bx, "bmns_b", None)
-    bmns_b = (np.zeros_like(bmnc_b) if bmns_raw is None
-              else np.asarray(bmns_raw, dtype=float))
-    xm_b = np.asarray(bx.xm_b, dtype=float)
-    if bmnc_b.shape[0] == xm_b.shape[0]:      # (nmodes, nsurf) -> (nsurf, nmodes)
-        bmnc_b = bmnc_b.T
-    if bmns_b.shape[0] == xm_b.shape[0]:
-        bmns_b = bmns_b.T
-    return {
-        "bmnc_b": bmnc_b,
-        "bmns_b": bmns_b,
-        "xm_b": xm_b,
-        "xn_b": np.asarray(bx.xn_b, dtype=float),
-        "iota_b": np.asarray(bx.iota, dtype=float)[indices],
-        "nfp": int(bx.nfp),
-        "s_b": s_in[indices],
-    }
-
-
-def quasi_isodynamic_residual_from_wout(
-    wout,
-    *,
-    surfaces,
-    mboz: int = 18,
-    nboz: int = 18,
-    jit_booz: bool = False,
-    **qi_kwargs,
-) -> dict[str, Array]:
-    """QI residual of a converged equilibrium: wout -> Boozer -> residual.
-
-    Convenience composition of :func:`boozer_modes_from_wout` and
-    :func:`quasi_isodynamic_residual`; ``qi_kwargs`` are the residual's
-    sampling/weight knobs.  Accepts a :class:`Equilibrium` too, so it can be
-    used directly as a :func:`least_squares` objective term via
-    ``lambda eq: quasi_isodynamic_residual_from_wout(eq, surfaces=...)["residuals1d"]``.
-    """
-    booz = boozer_modes_from_wout(wout, surfaces=surfaces, mboz=mboz, nboz=nboz,
-                                  jit=jit_booz)
-    return quasi_isodynamic_residual(
-        bmnc_b=booz["bmnc_b"], bmns_b=booz["bmns_b"],
-        xm_b=booz["xm_b"], xn_b=booz["xn_b"],
-        iota_b=booz["iota_b"], nfp=booz["nfp"], **qi_kwargs)
-
-
-# ===========================================================================
 # Boundary degrees of freedom + scipy least-squares driver
 # ===========================================================================
 
@@ -1483,6 +1088,11 @@ def _dof_modes(inp: VmecInput, max_mode: int) -> list[tuple[int, int]]:
     return out
 
 
+#: Boundary Fourier families in packing order; the first two for a
+#: stellarator-symmetric boundary, all four when ``inp.lasym``.
+_BOUNDARY_FAMILIES = ("rbc", "zbs", "rbs", "zbc")
+
+
 def _n_boundary_families(inp: VmecInput) -> int:
     """Packed boundary Fourier families: 2 (``rbc``/``zbs``) for a
     stellarator-symmetric boundary, 4 (``rbc``/``zbs``/``rbs``/``zbc``) when
@@ -1501,11 +1111,9 @@ def boundary_dof_names(
     families are appended (same ``(m, n)`` order as the symmetric block).
     """
     modes = _dof_modes(inp, max_mode)
-    names = ([f"RBC({n},{m})" for (m, n) in modes]
-             + [f"ZBS({n},{m})" for (m, n) in modes])
-    if bool(inp.lasym):
-        names += ([f"RBS({n},{m})" for (m, n) in modes]
-                  + [f"ZBC({n},{m})" for (m, n) in modes])
+    names = [f"{family.upper()}({n},{m})"
+             for family in _BOUNDARY_FAMILIES[:_n_boundary_families(inp)]
+             for (m, n) in modes]
     if vary_major_radius:
         names.append("RBC(0,0)")
     return names
@@ -1527,17 +1135,11 @@ def pack_boundary(
     """
     modes = _dof_modes(inp, max_mode)
     ntor = int(inp.ntor)
-    rbc = np.asarray(inp.rbc, dtype=float)
-    zbs = np.asarray(inp.zbs, dtype=float)
-    vals = ([rbc[n + ntor, m] for (m, n) in modes]
-            + [zbs[n + ntor, m] for (m, n) in modes])
-    if bool(inp.lasym):
-        rbs = np.asarray(inp.rbs, dtype=float)
-        zbc = np.asarray(inp.zbc, dtype=float)
-        vals += ([rbs[n + ntor, m] for (m, n) in modes]
-                 + [zbc[n + ntor, m] for (m, n) in modes])
+    vals = [np.asarray(getattr(inp, family), dtype=float)[n + ntor, m]
+            for family in _BOUNDARY_FAMILIES[:_n_boundary_families(inp)]
+            for (m, n) in modes]
     if vary_major_radius:
-        vals.append(rbc[ntor, 0])
+        vals.append(np.asarray(inp.rbc, dtype=float)[ntor, 0])
     return np.asarray(vals, dtype=float)
 
 
@@ -1560,15 +1162,11 @@ def boundary_arrays_from_x(
         raise ValueError(f"expected {expected} boundary dofs, got {x.shape[0]}")
     rows = jnp.asarray([n + ntor for m, n in modes])
     columns = jnp.asarray([m for m, n in modes])
-    rbc = jnp.asarray(inp.rbc).at[rows, columns].set(x[:nm])
-    zbs = jnp.asarray(inp.zbs).at[rows, columns].set(x[nm:2 * nm])
+    arrays = [jnp.asarray(getattr(inp, family)).at[rows, columns].set(x[i * nm:(i + 1) * nm])
+              for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam])]
     if vary_major_radius:
-        rbc = rbc.at[ntor, 0].set(x[nfam * nm])
-    if not bool(inp.lasym):
-        return rbc, zbs
-    rbs = jnp.asarray(inp.rbs).at[rows, columns].set(x[2 * nm:3 * nm])
-    zbc = jnp.asarray(inp.zbc).at[rows, columns].set(x[3 * nm:4 * nm])
-    return rbc, zbs, rbs, zbc
+        arrays[0] = arrays[0].at[ntor, 0].set(x[nfam * nm])
+    return tuple(arrays)
 
 
 def unpack_boundary(
@@ -1587,21 +1185,14 @@ def unpack_boundary(
     if x.size != expected:
         raise ValueError(f"expected {expected} dofs, got {x.size}")
     ntor = int(inp.ntor)
-    rbc = np.array(inp.rbc, dtype=float, copy=True)
-    zbs = np.array(inp.zbs, dtype=float, copy=True)
-    for k, (m, n) in enumerate(modes):
-        rbc[n + ntor, m] = x[k]
-        zbs[n + ntor, m] = x[nm + k]
+    arrays = {}
+    for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam]):
+        arrays[family] = np.array(getattr(inp, family), dtype=float, copy=True)
+        for k, (m, n) in enumerate(modes):
+            arrays[family][n + ntor, m] = x[i * nm + k]
     if vary_major_radius:
-        rbc[ntor, 0] = x[nfam * nm]
-    if not bool(inp.lasym):
-        return dataclasses.replace(inp, rbc=rbc, zbs=zbs)
-    rbs = np.array(inp.rbs, dtype=float, copy=True)
-    zbc = np.array(inp.zbc, dtype=float, copy=True)
-    for k, (m, n) in enumerate(modes):
-        rbs[n + ntor, m] = x[2 * nm + k]
-        zbc[n + ntor, m] = x[3 * nm + k]
-    return dataclasses.replace(inp, rbc=rbc, zbs=zbs, rbs=rbs, zbc=zbc)
+        arrays["rbc"][ntor, 0] = x[nfam * nm]
+    return dataclasses.replace(inp, **arrays)
 
 
 #: curtor dof storage scale (dof = CURTOR/1e6, i.e. MA) — keeps the trust
@@ -1771,9 +1362,7 @@ def _ess_scale(
     ``x_scale[i] = exp(-alpha * max(|m_i|, |n_i|)) / exp(-alpha)`` — higher
     (m, n) boundary harmonics get proportionally smaller trust-region steps,
     which stabilizes staged ``max_mode`` continuation from crude seeds.
-    Ported from legacy ``optimizers.fixed_boundary.parameterization.
-    create_x_scale`` (the ``use_ess``/``ess_alpha`` option of the legacy
-    ``least_squares_solve``); passed to scipy as ``x_scale``.
+    Passed to scipy as ``x_scale`` (the ``use_ess``/``ess_alpha`` options).
     """
     modes = _dof_modes(inp, max_mode)
     levels = np.asarray([max(abs(m), abs(n)) for (m, n) in modes]
@@ -1783,6 +1372,63 @@ def _ess_scale(
     if alpha <= 0.0:
         return np.ones_like(levels)
     return np.exp(-alpha * levels) / np.exp(-alpha)
+
+
+class _Dofs:
+    """Decision-vector layout of one optimization stage.
+
+    The boundary Fourier block (:func:`pack_boundary`), the optional
+    ``RBC(0,0)`` entry, and the optional trailing ``AC``/``CURTOR`` block
+    (:func:`_current_dof_setup`); every driver packs, unpacks, names and
+    scales its vector through this one object.
+    """
+
+    def __init__(self, inp: VmecInput, max_mode: int, vary_major_radius: bool,
+                 current_dofs: int | None):
+        self.inp, self.max_mode = inp, int(max_mode)
+        self.vary_major_radius = bool(vary_major_radius)
+        self.k, self.ac_scale = _current_dof_setup(inp, current_dofs)
+        self.nboundary = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
+                          + int(vary_major_radius))
+        self.ndof = self.nboundary + (self.k + 1 if self.k else 0)
+
+    def pack(self, source: VmecInput | None = None) -> np.ndarray:
+        """Decision vector of ``source`` (default: the stage input)."""
+        source = self.inp if source is None else source
+        x = pack_boundary(source, self.max_mode, vary_major_radius=self.vary_major_radius)
+        if self.k:
+            x = np.concatenate([x, _pack_current(source, self.k, self.ac_scale)])
+        return x
+
+    def unpack(self, x) -> VmecInput:
+        """Stage input with the decision vector ``x`` applied."""
+        x = np.asarray(x)
+        result = unpack_boundary(self.inp, x[:self.nboundary], self.max_mode,
+                                 vary_major_radius=self.vary_major_radius)
+        if self.k:
+            result = _apply_current(result, x[self.nboundary:], self.k, self.ac_scale)
+        return result
+
+    def boundary_arrays(self, x) -> tuple[Array, ...]:
+        """Traceable boundary arrays of the leading boundary block of ``x``."""
+        return boundary_arrays_from_x(self.inp, x[:self.nboundary], self.max_mode,
+                                      vary_major_radius=self.vary_major_radius)
+
+    def names(self) -> list[str]:
+        """Labels in packing order."""
+        names = boundary_dof_names(self.inp, self.max_mode,
+                                   vary_major_radius=self.vary_major_radius)
+        if self.k:
+            label = "AC_AUX_F" if _current_uses_spline(self.inp) else "AC"
+            names += [f"{label}({j})/{self.ac_scale:.6g}" for j in range(self.k)]
+            names.append("CURTOR/1e6")
+        return names
+
+    def ess_scales(self, alpha: float) -> np.ndarray:
+        """ESS trust-region scales; current dofs are O(1) by construction."""
+        scales = _ess_scale(self.inp, self.max_mode, float(alpha),
+                            vary_major_radius=self.vary_major_radius)
+        return np.concatenate([scales, np.ones(self.k + 1)]) if self.k else scales
 
 
 _IMPLICIT_JACOBIAN_METHODS = {
@@ -1826,31 +1472,10 @@ def _make_finite_difference_problem(
 
     if weight_semantics not in ("cost", "residual"):
         raise ValueError("weight_semantics must be 'cost' or 'residual'")
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-    nboundary = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
-                 + int(vary_major_radius))
-    if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    x0 = np.asarray(x0, dtype=float)
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    x0 = np.asarray(dofs.pack() if x0 is None else x0, dtype=float)
     solve_kwargs.setdefault("device", device)
-
-    def input_from_x(x: np.ndarray) -> VmecInput:
-        result = unpack_boundary(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            result = _apply_current(
-                result, np.asarray(x)[nboundary:], k_cur, ac_scale
-            )
-        return result
-
-    def x_from_input(source: VmecInput) -> np.ndarray:
-        x = pack_boundary(source, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x = np.concatenate([x, _pack_current(source, k_cur, ac_scale)])
-        return x
+    input_from_x, x_from_input = dofs.unpack, dofs.pack
 
     holder: dict[str, Any] = {
         "cache": None,
@@ -1935,32 +1560,20 @@ def _make_finite_difference_problem(
         "rel_step": fd_rel_step,
         "workers": workers,
     }
-    names = list(boundary_dof_names(
-        inp, max_mode, vary_major_radius=vary_major_radius))
-    if k_cur:
-        label = "AC_AUX_F" if _current_uses_spline(inp) else "AC"
-        names.extend([f"{label}({j})/{ac_scale:.6g}" for j in range(k_cur)])
-        names.append("CURTOR/1e6")
-    scales = _ess_scale(
-        inp, max_mode, float(ess_alpha),
-        vary_major_radius=vary_major_radius) if use_ess else None
-    if scales is not None and k_cur:
-        scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    scales = dofs.ess_scales(ess_alpha) if use_ess else None
     starts = np.cumsum([0] + ([] if initial_parts is None else [p.size for p in initial_parts]))
     term_slices = tuple(
         (_term_name(function), int(starts[j]), int(starts[j + 1]))
         for j, (function, _target, _weight) in enumerate(objective_terms)
     )
     common = dict(
-        names=names,
+        names=dofs.names(),
         bounds=bounds,
         scales=scales,
         input_from_x=input_from_x,
         x_from_input=x_from_input,
         equilibrium_from_x=equilibrium,
-        boundary_from_x=lambda x: boundary_arrays_from_x(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius),
+        boundary_from_x=lambda x: dofs.boundary_arrays(np.asarray(x)),
         metadata={
             "derivative_method": "finite_difference",
             "derivative_description": (
@@ -2052,6 +1665,7 @@ def make_problem(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2137,7 +1751,13 @@ def make_problem(
 
     ``refine_tol`` is the frozen fixed-point residual required before
     implicit differentiation. The default preserves strict gradients;
-    ``numpy.inf`` explicitly disables refinement for legacy comparisons.
+    ``numpy.inf`` explicitly disables refinement.
+
+    ``probe_workers`` is the number of threads that split the colored forward-mode probes
+    of each block factorization, the dominant cost of a residual evaluation on a CPU (one
+    XLA:CPU program does not use more than a few cores).  ``None`` takes the CPU count,
+    at most 8, on a CPU device and one program on an accelerator; ``1`` keeps one
+    program.  The factors are the same to round-off.
 
     ``restart_from`` seeds the first equilibrium from a previous WOUT,
     :class:`Equilibrium`, or solver result.  This is useful when a continuation
@@ -2204,12 +1824,8 @@ def make_problem(
             f"got {implicit_jacobian_method!r}"
         ) from exc
     max_mode = int(max_mode)
-    scales = _ess_scale(
-        inp, max_mode, float(ess_alpha),
-        vary_major_radius=vary_major_radius) if use_ess else None
-    k_cur, _ = _current_dof_setup(inp, current_dofs)
-    if scales is not None and k_cur:
-        scales = np.concatenate([scales, np.ones(k_cur + 1)])
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    scales = dofs.ess_scales(ess_alpha) if use_ess else None
     problem = _run_with_progress(
         lambda: _least_squares_implicit(
             list(objective_terms or ()),
@@ -2226,7 +1842,7 @@ def make_problem(
             jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
             adjoint_maxiter=adjoint_maxiter,
             max_fsq_ratio=max_fsq_ratio,
-            refine_tol=refine_tol,
+            refine_tol=refine_tol, probe_workers=probe_workers,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             initial_state=initial_state,
@@ -2262,6 +1878,27 @@ def make_problem(
     return problem
 
 
+def _max_mode_schedule(max_mode: int | Sequence[int]) -> list[int]:
+    """``max_mode`` as a list of stage values."""
+    return [int(max_mode)] if np.isscalar(max_mode) else [int(m) for m in max_mode]
+
+
+def _run_stages(solve: Callable, inp: VmecInput, modes: list[int], x0) -> Any:
+    """Chain ``solve(stage_input, mode)`` along an increasing ``max_mode`` schedule.
+
+    Each stage starts from the previous stage's optimized input; the last
+    result gains ``stage_results``.
+    """
+    if x0 is not None:
+        raise ValueError("x0 cannot be combined with a max_mode schedule")
+    results, current = [], inp
+    for mode in modes:
+        results.append(solve(current, mode))
+        current = results[-1].input
+    results[-1].stage_results = results
+    return results[-1]
+
+
 def least_squares(
     objective_terms: Sequence[tuple[Callable, float, Any]],
     inp: VmecInput,
@@ -2279,6 +1916,7 @@ def least_squares(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     hot_restart: bool = True,
@@ -2372,6 +2010,9 @@ def least_squares(
     :class:`AdjointSolveError`; transformable JAX methods fall back to reverse
     so no compiled public path returns an uncertified matrix.
 
+    ``jacobian_adjoint_tol`` and ``jacobian_adjoint_maxiter`` set the
+    certificate of the Jacobian columns (relative tolerance and restart
+    budget of the warm-started GMRES pass).
     ``adjoint_tol`` and ``adjoint_maxiter`` control the certified linear
     response solves.  All public optimization paths allow 300 restarts by
     default so QI derivatives cannot fail merely because of the former
@@ -2405,51 +2046,36 @@ def least_squares(
 
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
 
-    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
-                      else [int(m) for m in max_mode])
-    if len(modes_schedule) > 1:
-        if x0 is not None:
-            raise ValueError("x0 cannot be combined with a max_mode schedule")
-        stage_results = []
-        current = inp
-        result = None
-        for mm in modes_schedule:
-            result = least_squares(
-                objective_terms, current, max_mode=mm,
-                vary_major_radius=vary_major_radius,
-                current_dofs=current_dofs, jac=jac,
-                jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
-                adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-                max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
-                hot_restart=hot_restart,
-                warm_start=warm_start, use_ess=use_ess,
-                ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
-                verbose=verbose, **scipy_kwargs)
-            stage_results.append(result)
-            current = result.input
-        result.stage_results = stage_results
-        return result
-    max_mode = modes_schedule[0]
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-
-    def _ess_scale_full() -> np.ndarray:
-        scale = _ess_scale(
-            inp, max_mode, float(ess_alpha),
-            vary_major_radius=vary_major_radius)
-        if k_cur:  # current dofs are already O(1) by construction
-            scale = np.concatenate([scale, np.ones(k_cur + 1)])
-        return scale
+    modes = _max_mode_schedule(max_mode)
+    if len(modes) > 1:
+        return _run_stages(lambda current, mode: least_squares(
+            objective_terms, current, max_mode=mode,
+            vary_major_radius=vary_major_radius,
+            current_dofs=current_dofs, jac=jac,
+            jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
+            adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
+            jacobian_adjoint_tol=jacobian_adjoint_tol,
+            jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
+            hot_restart=hot_restart,
+            warm_start=warm_start, use_ess=use_ess,
+            ess_alpha=ess_alpha, device=device, solve_kwargs=solve_kwargs,
+            verbose=verbose, **scipy_kwargs), inp, modes, x0)
+    max_mode = modes[0]
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
 
     if jac == "implicit":
         if use_ess:
-            scipy_kwargs.setdefault("x_scale", _ess_scale_full())
+            scipy_kwargs.setdefault("x_scale", dofs.ess_scales(ess_alpha))
         return _least_squares_implicit(
             objective_terms, inp, max_mode=max_mode, x0=x0,
             vary_major_radius=vary_major_radius,
             current_dofs=current_dofs,
             jac_chunk_size=jac_chunk_size, jac_solver=jac_solver,
             adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+            jacobian_adjoint_tol=jacobian_adjoint_tol,
+            jacobian_adjoint_maxiter=jacobian_adjoint_maxiter,
+            max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
             warm_start=(warm_start if hot_restart else None),
             solve_kwargs=dict(solve_kwargs or {}),
             device=device, verbose=verbose, **scipy_kwargs)
@@ -2459,22 +2085,9 @@ def least_squares(
     solve_kwargs = dict(solve_kwargs or {})
     solve_kwargs.setdefault("device", device)
     if use_ess:
-        scipy_kwargs.setdefault("x_scale", _ess_scale_full())
+        scipy_kwargs.setdefault("x_scale", dofs.ess_scales(ess_alpha))
     if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    nb = (_n_boundary_families(inp) * len(_dof_modes(inp, max_mode))
-          + int(vary_major_radius))
-
-    def unpack_full(x: np.ndarray) -> VmecInput:
-        trial = unpack_boundary(
-            inp, np.asarray(x, dtype=float)[:nb], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            trial = _apply_current(trial, np.asarray(x, dtype=float)[nb:],
-                                   k_cur, ac_scale)
-        return trial
+        x0 = dofs.pack()
 
     state_holder: dict[str, Any] = {
         "hot": None,
@@ -2485,7 +2098,7 @@ def least_squares(
     single_stage = int(np.asarray(inp.ns_array).size) == 1
 
     def fun(x: np.ndarray) -> np.ndarray:
-        trial = unpack_full(x)
+        trial = dofs.unpack(np.asarray(x, dtype=float))
         try:
             seed = state_holder["hot"] if (hot_restart and single_stage) else None
             eq = solve_equilibrium(trial, initial_state=seed, **solve_kwargs)
@@ -2507,7 +2120,7 @@ def least_squares(
                                           jac="2-point",
                                           verbose=(2 if verbose else 0),
                                           **scipy_kwargs)
-    result.input = unpack_full(result.x)
+    result.input = dofs.unpack(result.x)
     result.equilibrium = state_holder["eq"]
     result.failed_trials = state_holder["failed_trials"]
     return result
@@ -2530,6 +2143,7 @@ def minimize(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     forward_ftol: float | None = None,
     forward_max_iterations: int | None = None,
     **scipy_kwargs,
@@ -2558,34 +2172,23 @@ def minimize(
     objective lanes; an unconverged adjoint is never returned as a gradient.
     """
     inp = _with_forward_controls(inp, forward_ftol, forward_max_iterations)
-    modes_schedule = ([int(max_mode)] if np.isscalar(max_mode)
-                      else [int(m) for m in max_mode])
-    if len(modes_schedule) > 1:
-        if x0 is not None:
-            raise ValueError("x0 cannot be combined with a max_mode schedule")
-        stage_results = []
-        current = inp
-        for mm in modes_schedule:
-            result = minimize(
-                objective_terms, current, max_mode=mm,
-                vary_major_radius=vary_major_radius,
-                current_dofs=current_dofs, hot_restart=hot_restart,
-                device=device, solve_kwargs=solve_kwargs, verbose=verbose,
-                method=method, adjoint_tol=adjoint_tol,
-                adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
-                refine_tol=refine_tol,
-                **scipy_kwargs)
-            stage_results.append(result)
-            current = result.input
-        result.stage_results = stage_results
-        return result
+    modes = _max_mode_schedule(max_mode)
+    if len(modes) > 1:
+        return _run_stages(lambda current, mode: minimize(
+            objective_terms, current, max_mode=mode,
+            vary_major_radius=vary_major_radius,
+            current_dofs=current_dofs, hot_restart=hot_restart,
+            device=device, solve_kwargs=solve_kwargs, verbose=verbose,
+            method=method, adjoint_tol=adjoint_tol,
+            adjoint_maxiter=adjoint_maxiter, max_fsq_ratio=max_fsq_ratio,
+            refine_tol=refine_tol, **scipy_kwargs), inp, modes, x0)
     return _least_squares_implicit(
-        objective_terms, inp, max_mode=modes_schedule[0], x0=x0,
+        objective_terms, inp, max_mode=modes[0], x0=x0,
         vary_major_radius=vary_major_radius,
         current_dofs=current_dofs, jac_solver="reverse",
         warm_start=("state" if hot_restart else None),
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
-        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol,
+        max_fsq_ratio=max_fsq_ratio, refine_tol=refine_tol, probe_workers=probe_workers,
         solve_kwargs=dict(solve_kwargs or {}), device=device, verbose=verbose,
         minimize_method=method, **scipy_kwargs)
 
@@ -2761,6 +2364,7 @@ def _least_squares_implicit(
     adjoint_maxiter: int = 300,
     max_fsq_ratio: float = 1.0e2,
     refine_tol: float = 1.0e-10,
+    probe_workers: int | None = None,
     warm_start: str | None = "perturbation",
     solve_kwargs: dict,
     device: Any = AUTO,
@@ -2856,9 +2460,8 @@ def _least_squares_implicit(
     # Optional AC/CURTOR dof block (spec 6.4): k + 1 trailing dofs, one-hot
     # tangents through ImplicitParams.ac / .curtor (runtime_from_params
     # already traces both).
-    k_cur, ac_scale = _current_dof_setup(inp, current_dofs)
-    nboundary = nfam * nm + int(vary_major_radius)
-    ndof = nboundary + (k_cur + 1 if k_cur else 0)
+    dofs = _Dofs(inp, max_mode, vary_major_radius, current_dofs)
+    k_cur, ac_scale, nboundary, ndof = dofs.k, dofs.ac_scale, dofs.nboundary, dofs.ndof
     # multigrid=True routes the host solve through solve_multigrid so
     # NITER-exhausted trials are penalized instead of raising (same trial
     # policy as the finite-difference path). Public problem/minimize defaults
@@ -2891,6 +2494,7 @@ def _least_squares_implicit(
     # cache (_template_runtime, the residual lane, _LAST_SOLVE) on repeated
     # problem construction with identical content.
     cfg = imp._canonical_config(dataclasses.replace(cfg, device=jac_device))
+    imp.set_probe_workers(cfg, probe_workers)
     if initial_state is not None:
         imp._HOT_CACHE[cfg] = initial_state
 
@@ -2902,11 +2506,7 @@ def _least_squares_implicit(
     params0 = imp.params_from_input(inp, device=jac_device)
     imp._template_runtime(cfg)  # host-built template: warm the per-cfg cache
     # eagerly so runtime_from_params stays traceable under jit below
-    if x0 is None:
-        x0 = pack_boundary(inp, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x0 = np.concatenate([x0, _pack_current(inp, k_cur, ac_scale)])
-    x0 = np.asarray(x0, dtype=float)
+    x0 = np.asarray(dofs.pack() if x0 is None else x0, dtype=float)
 
     # Structural key of the jitted closures below: the canonical config
     # (structure only, see implicit._canonical_config), the term/loss
@@ -2932,11 +2532,8 @@ def _least_squares_implicit(
 
     def params_of(x: jnp.ndarray, data):
         params0 = data["params0"]
-        repl = dict(rbc=params0.rbc.at[row_idx, col_idx].set(x[:nm]),
-                    zbs=params0.zbs.at[row_idx, col_idx].set(x[nm:2 * nm]))
-        if lasym:  # non-symmetric families [rbs..., zbc...] (see pack_boundary)
-            repl["rbs"] = params0.rbs.at[row_idx, col_idx].set(x[2 * nm:3 * nm])
-            repl["zbc"] = params0.zbc.at[row_idx, col_idx].set(x[3 * nm:4 * nm])
+        repl = {family: getattr(params0, family).at[row_idx, col_idx].set(x[i * nm:(i + 1) * nm])
+                for i, family in enumerate(_BOUNDARY_FAMILIES[:nfam])}
         if vary_major_radius:
             repl["rbc"] = repl["rbc"].at[ntor, 0].set(x[nfam * nm])
         params = dataclasses.replace(params0, **repl)
@@ -3352,7 +2949,7 @@ def _least_squares_implicit(
     else:
         probe_chunk = chunk
 
-    def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None):
+    def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None, columns=None):
         """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
 
         Same Jacobian as the default path to ``cfg.adjoint_tol`` (the GMRES
@@ -3362,11 +2959,13 @@ def _least_squares_implicit(
         perturbation warm-start linearization, same contract as
         ``jacobian_rows``).  ``bands`` are the config's shared block
         factorization at ``state`` (``imp._block_bands``); a traced caller
-        omits them and the graph builds its own.
+        omits them and the graph builds its own.  ``columns`` selects the dofs
+        (default all) when the host splits the column chunks over threads.
         """
         _, tangent_of, _, column_of, (params, frozen, _, _) = \
             _jac_parts(x, state, data)
-        tangent_batch = jax.vmap(tangent_of)(tangent_stack)
+        stack = tangent_stack if columns is None else tuple(t[columns] for t in tangent_stack)
+        tangent_batch = jax.vmap(tangent_of)(stack)
         tangent_chunk = ndof if chunk is None else chunk
         dz0, report = imp._implicit_evolved_tangent_multi_rhs(
             params, cfg, frozen, mask_const, tangent_batch,
@@ -3380,9 +2979,7 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(
-            column, (tangent_stack, dz0), chunk_size=tangent_chunk
-        )
+        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
         return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):
@@ -3397,6 +2994,29 @@ def _least_squares_implicit(
         problem_jit_key, "jac", lambda: jax.jit(jac_impl))
     gmres_jit = _problem_jit(
         problem_jit_key, "jac_gmres", lambda: jax.jit(jacobian_rows))
+
+    def block_columns(x, state, roots, bands):
+        """``jac_jit`` with its column chunks split over the config's probe threads.
+
+        The slices hold whole chunks, so every thread runs one compiled program and the
+        columns, state responses and certificate are those of a single call.
+        """
+        width = ndof if chunk is None else chunk
+        chunks = ndof // width
+        split = max((k for k in range(1, imp.probe_workers(cfg) + 1) if chunks % k == 0), default=1)
+        if jac_impl is not jacobian_rows_block or ndof % width or split == 1:
+            return jac_jit(x, state, roots, bands)
+        slices = np.split(np.arange(ndof), split)
+        with concurrent.futures.ThreadPoolExecutor(split) as pool:
+            parts = list(pool.map(lambda c: jac_jit(x, state, roots, bands, c), slices))
+        certificates = np.stack([np.asarray(part[2]) for part in parts])
+        worst = np.argmax(certificates[:, 2] / np.maximum(certificates[:, 3], np.finfo(float).tiny))
+        summary = np.array([
+            certificates[:, 0].max(), certificates[:, 1].sum(), certificates[worst, 2],
+            certificates[worst, 3], certificates[:, 4].sum(), certificates[:, 5].sum()])
+        return (jnp.concatenate([part[0] for part in parts], axis=1),
+                jax.tree.map(lambda *leaves: jnp.concatenate(leaves), *[part[1] for part in parts]),
+                summary)
     reverse_width = ndof if chunk is None else chunk
 
     def reverse_pullback(x, state, status, cotangent_of, count, data):
@@ -3625,7 +3245,7 @@ def _least_squares_implicit(
                 bands = (imp._block_bands(
                     cfg, jax.tree.map(_place, params_np), state, mask_const)
                     if jac_impl is jacobian_rows_block else None)
-                rows, dz_cols, summary = jac_jit(
+                rows, dz_cols, summary = block_columns(
                     _place(x), state, with_roots(x, state, problem_data), bands)
                 jac = np.asarray(jax.device_get(rows), dtype=float)
                 _record_linear_response(holder, summary, cfg)
@@ -3779,22 +3399,7 @@ def _least_squares_implicit(
             return failure_value_and_gradient(xh)[0]
         return value
 
-    def input_from_x(x: np.ndarray) -> VmecInput:
-        result_input = unpack_boundary(
-            inp, np.asarray(x)[:nboundary], max_mode,
-            vary_major_radius=vary_major_radius)
-        if k_cur:
-            result_input = _apply_current(
-                result_input, np.asarray(x)[nboundary:], k_cur, ac_scale
-            )
-        return result_input
-
-    def x_from_input(source: VmecInput) -> np.ndarray:
-        x = pack_boundary(
-            source, max_mode, vary_major_radius=vary_major_radius)
-        if k_cur:
-            x = np.concatenate([x, _pack_current(source, k_cur, ac_scale)])
-        return x
+    input_from_x, x_from_input = dofs.unpack, dofs.pack
 
     def equilibrium_from_x(
         x: np.ndarray, *, newton_iterations: int = 10
@@ -4003,12 +3608,7 @@ def _least_squares_implicit(
 
     if return_problem:
         jax_jac_public = jax_residual_jacobian
-        names = list(boundary_dof_names(
-            inp, max_mode, vary_major_radius=vary_major_radius))
-        if k_cur:
-            label = "AC_AUX_F" if _current_uses_spline(inp) else "AC"
-            names.extend([f"{label}({j})/{ac_scale:.6g}" for j in range(k_cur)])
-            names.append("CURTOR/1e6")
+        names = dofs.names()
         scales = (
             np.ones_like(np.asarray(x0, dtype=float))
             if problem_scales is None else np.asarray(problem_scales, dtype=float)
@@ -4039,9 +3639,7 @@ def _least_squares_implicit(
             input_from_x=input_from_x,
             x_from_input=x_from_input,
             equilibrium_from_x=equilibrium_from_x,
-            boundary_from_x=lambda x: boundary_arrays_from_x(
-                inp, x[:nboundary], max_mode,
-                vary_major_radius=vary_major_radius),
+            boundary_from_x=dofs.boundary_arrays,
             metadata={
                 "derivative_method": "implicit",
                 "derivative_description": (
@@ -4094,12 +3692,7 @@ def _least_squares_implicit(
         result.cost = float(result.fun)
         result.optimality = float(np.linalg.norm(result.jac, ord=np.inf))
         result.monitor = monitor
-    result.input = unpack_boundary(
-        inp, result.x[:nboundary], max_mode,
-        vary_major_radius=vary_major_radius)
-    if k_cur:
-        result.input = _apply_current(result.input, result.x[nboundary:],
-                                      k_cur, ac_scale)
+    result.input = dofs.unpack(result.x)
     stats = imp._SOLVE_STATS.get(cfg)
     result.solve_stats = None if stats is None else dict(stats)
     result.failed_trials = holder["failed_trials"]
