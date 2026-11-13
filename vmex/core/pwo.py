@@ -315,10 +315,13 @@ class FreeMapProblem:
     ``limit_map`` keeps every value valid on every surface. ``band_weight > 0``
     appends the unmapped-band flatness rows (``nband`` nodes per gamma line), the
     sufficient zero-bootstrap condition of the mapped field; see
-    :func:`mapped_pwo_residual_from_boozer`.
+    :func:`mapped_pwo_residual_from_boozer`. The kernel options of ``mapped`` apply
+    to every evaluation. A trial with a non-finite or invalid mapped field returns
+    ``REJECTED`` in every row (and a zero Jacobian), so the optimizer rejects the step.
     """
 
     MAP_BOUNDS = dict(a=(0., .8), b=(-1., 1.), c=(-4., -.5), eta_min=(2.2, 3.1))
+    REJECTED = 1e6
 
     def __init__(self, stage, mapped, equilibrium, values, free, *, weight=1e3, area_floor=.6,
                  band_weight=0., nband=16):
@@ -326,24 +329,22 @@ class FreeMapProblem:
                                      mboz=mapped.mboz, nboz=mapped.nboz, oversample=mapped.oversample)
         ns, nm = booz["bmnc_b"].shape
         self.stage, self.nx, self.nspec = stage, stage.x0.size, ns*nm+ns
-        names = tuple(values)
+        names = tuple(self.MAP_BOUNDS)
         low, high = (np.array([self.MAP_BOUNDS[k][i] for k in names]) for i in (0, 1))
         fixed = np.array([values[k] for k in names], dtype=float)
         index = np.array([i for i, k in enumerate(names) if k in free], dtype=int)
         self.names, self.index = names, index
         xm, xn, nfp = booz["xm_b"], booz["xn_b"], booz["nfp"]
+        options = dict(mapped.options, limit_map=True, nband=nband if band_weight > 0 else 0)
 
         def parameters(u):
             return jnp.asarray(fixed).at[index].set(low[index]+(high[index]-low[index])*jax.nn.sigmoid(u))
         self._parameters = parameters
 
         def rows(spectrum, u):
-            a, b, c, eta_min = parameters(u)
-            out = mapped_pwo_residual_from_boozer(
+            out = mapped.kernel(
                 bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[ns*nm:],
-                nfp=nfp, a=a, b=b, c=c, eta_min=eta_min, weights=mapped.weights, limit_map=True,
-                nband=nband if band_weight > 0 else 0,
-                **{k: v for k, v in mapped.options.items() if k in ("ngamma", "neta")})
+                nfp=nfp, weights=mapped.weights, **(options | dict(zip(names, parameters(u)))))
             area = jnp.sqrt(100.)*jnp.maximum(area_floor-out["mapped_area_fraction"], 0.)
             band = jnp.sqrt(band_weight)*out["band_residuals1d"] if band_weight > 0 else jnp.zeros(0)
             return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area, band))
@@ -358,8 +359,9 @@ class FreeMapProblem:
     def residual(self, z):
         """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""
         raw = np.asarray(self.stage.residual(z[:self.nx]))
-        return np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
+        rows = np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
                                raw[self.nspec:]))
+        return rows if np.isfinite(rows).all() else np.full_like(rows, self.REJECTED)
 
     def residual_jac(self, z):
         """Return the joint Jacobian over the boundary and the free map variables."""
@@ -368,7 +370,9 @@ class FreeMapProblem:
         boundary, free = (np.asarray(q) for q in self._columns(
             jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]), jnp.asarray(full[:self.nspec])))
         rest = np.hstack((full[self.nspec:], np.zeros((full.shape[0]-self.nspec, free.shape[1]))))
-        return np.vstack((np.hstack((boundary, free)), rest))
+        jacobian = np.vstack((np.hstack((boundary, free)), rest))
+        mapped = self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))
+        return jacobian if np.isfinite(jacobian).all() and np.isfinite(mapped).all() else np.zeros_like(jacobian)
 
     def values(self, z):
         """Return the map parameters at ``z`` as a dictionary."""

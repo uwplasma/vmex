@@ -49,6 +49,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
+from .fields import surface_currents
 from .fourier import Resolution, mode_table, trig_tables
 from .residuals import m1_constrained_to_physical
 from .solver import SolverRuntime, SpectralState, _field_chain_lane
@@ -109,6 +110,29 @@ def _mode_matrix(wout, name: str, *, ns: int, mn: int, optional: bool = False) -
 # ---------------------------------------------------------------------------
 
 
+def _full_surface_values(values: Array, *, lasym: bool) -> Array:
+    """Drop the axis slot of a half-mesh array and restore the full poloidal surface.
+
+    The solver's symmetric poloidal grid spans ``[0, pi]``; it is mirrored to
+    the full circle with ``X(2 pi - theta, -zeta) = X(theta, zeta)``.  A
+    ``lasym`` array already holds the full grid.  The axis row is dropped
+    *before* any singular division (``0 * inf`` in reverse AD).
+    """
+    values = jnp.asarray(values)[1:]
+    if lasym:
+        return values
+    ntheta2, nzeta = int(values.shape[1]), int(values.shape[2])
+    ntheta1 = max(2 * (ntheta2 - 1), 1)
+    i_full = np.arange(ntheta1)
+    i_src = np.where(i_full < ntheta2, i_full, ntheta1 - i_full)
+    k = np.arange(nzeta)
+    k_src = np.where(
+        i_full[:, None] < ntheta2, k[None, :],
+        (nzeta - k[None, :]) % nzeta,
+    )
+    return values[:, np.broadcast_to(i_src[:, None], k_src.shape), k_src]
+
+
 def _field_line_frame(pos_fn, lam_fn, modb_fn, q, *, iota, diota, phipf_j, phi_rel=0.0) -> dict:
     """Covariant frame and field at ``q = (t, theta, phi)`` on one flux surface.
 
@@ -161,6 +185,22 @@ def _iotas_half_from_fields(setup, fields) -> jnp.ndarray:
     phips = jnp.asarray(setup.phips)
     safe = jnp.where(phips != 0.0, phips, 1.0)
     return jnp.where(phips != 0.0, jnp.asarray(fields.chips) / safe, 0.0)
+
+
+def _half_mesh_profiles(rt: SolverRuntime, fields):
+    """Half-mesh ``(iota, G, I, phi_edge)`` with the axis slot dropped.
+
+    ``iota`` follows ``add_fluxes.f``, the Boozer covariant averages ``G``/``I``
+    (wout ``bvco``/``buco``) ``fbal.f``; ``phi_edge = phi(s=1)/(2 pi)`` carries
+    the wout sign convention, so ``d(psi)/ds = -phi_edge``.
+    """
+    setup = rt.setup
+    s = jnp.asarray(setup.s_full)
+    cur = surface_currents(bsubu=fields.bsubu, bsubv=fields.bsubv,
+                           trig=rt.trig, s=s, signgs=setup.signgs)
+    phi_edge = float(setup.signgs) * (s[1] - s[0]) * jnp.sum(jnp.asarray(setup.phipf)[1:])
+    return (_iotas_half_from_fields(setup, fields)[1:],
+            jnp.asarray(cur.bvco)[1:], jnp.asarray(cur.buco)[1:], phi_edge)
 
 
 def _iotas_half(state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
@@ -390,8 +430,7 @@ def min_boundary_curvature_radius(state: SpectralState, rt: SolverRuntime) -> Ar
 def mean_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     """Mean rotational transform over the half-mesh surfaces (axis excluded).
 
-    Matches the legacy optimization ``mean_iota`` convention
-    (``mean(iotas[1:])``, i.e. the mean of the wout ``iotas`` profile).
+    ``mean(iotas[1:])``, i.e. the mean of the wout ``iotas`` profile.
     """
     iotas = _iotas_half(state, rt)
     return jnp.mean(iotas[1:])
@@ -408,6 +447,15 @@ def min_abs_iota(state: SpectralState, rt: SolverRuntime) -> Array:
     """
     iotas = _iotas_half(state, rt)
     return jnp.min(jnp.abs(iotas[1:]))
+
+
+def max_abs_iota(state: SpectralState, rt: SolverRuntime) -> Array:
+    """Largest ``|iota|`` over the half-mesh surfaces (axis excluded).
+
+    A ceiling on it keeps the profile below a low-order rational, ``iota = 1``
+    for pwO fields at three periods, whose resonance leaks fast ions.
+    """
+    return jnp.max(jnp.abs(_iotas_half(state, rt)[1:]))
 
 
 def soft_min_abs_iota(

@@ -27,6 +27,7 @@ from vmex.core.errors import AdjointSolveError  # noqa: E402
 from vmex.core.problem import Evaluation, FunctionProblem  # noqa: E402
 from vmex.core.wout import read_wout  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
+from vmex.core import qi  # noqa: E402
 
 from tests.conftest import resolve_golden_dir  # noqa: E402
 
@@ -254,6 +255,8 @@ def test_min_abs_iota_floors_the_profile_not_its_average(solovev_eq):
         float(iotas.min()), rel=1e-10)
     assert (float(opt.soft_min_abs_iota(eq.state, eq.runtime))
             >= float(iotas.min()) - 1.0e-12)
+    assert float(opt.max_abs_iota(eq.state, eq.runtime)) == pytest.approx(
+        float(iotas.max()), rel=1e-10)
 
     # Reducer separation on a profile with a genuine interior minimum, and on
     # its negation: a magnitude floor must not see the transform sign.
@@ -421,7 +424,7 @@ def test_qi_regression_pin_and_jit():
     assert np.all(np.isfinite(res))
     # The residual's two argmins read normalized |B| (range 1) per field line
     # over the periodic and the endpoint-inclusive samples.
-    grid = opt._qi_grid(
+    grid = qi._qi_grid(
         booz["bmnc_b"], booz["xm_b"], booz["xn_b"], booz["iota_b"], nfp=booz["nfp"],
         weights=None, phimin=0.0,
         **{k: QI_KW[k] for k in ("nphi", "nalpha", "n_bounce",
@@ -556,6 +559,31 @@ def test_minimize_scalarized_implicit_smoke(solovev_eq):
     assert np.all(np.isfinite(res.jac))
     assert np.all(res.x >= x0 - 0.5) and np.all(res.x <= x0 + 0.5)
     assert isinstance(res.input, VmecInput)
+
+
+def test_least_squares_forwards_the_jacobian_certificate_knobs(monkeypatch):
+    """``jacobian_adjoint_tol`` and ``jacobian_adjoint_maxiter`` reach the solver config, per stage."""
+    from vmex.core import implicit as imp
+
+    seen = []
+    make_config = imp.make_config
+    monkeypatch.setattr(imp, "make_config", lambda *a, **k: seen.append(k) or make_config(*a, **k))
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    opt.least_squares([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1), jac="implicit",
+                      jacobian_adjoint_tol=3e-5, jacobian_adjoint_maxiter=7, max_nfev=1)
+    assert len(seen) == 2
+    assert all(k["jacobian_adjoint_tol"] == 3e-5 and k["jacobian_adjoint_maxiter"] == 7 for k in seen)
+
+
+def test_minimize_max_mode_schedule():
+    """A ``max_mode`` schedule chains scalar stages through ``result.input``."""
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    res = opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 1),
+                       options={"maxiter": 1})
+    assert len(res.stage_results) == 2 and res.stage_results[-1] is res
+    np.testing.assert_array_equal(opt.pack_boundary(res.input, 1), res.x)
+    with pytest.raises(ValueError, match="x0 cannot be combined"):
+        opt.minimize([(opt.aspect_ratio, 4.0, 1.0)], inp, max_mode=(1, 2), x0=res.x)
 
 
 def test_scipy_bfgs_scalar_lane_completes_and_descends():

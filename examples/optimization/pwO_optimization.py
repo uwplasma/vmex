@@ -53,11 +53,11 @@ BOOTSTRAP_WEIGHT = 1.0e3 if NFP == 3 else 1.0e4  # NFP 2 under-flattens at 1e3
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2, 3]
 MAX_NFEV = [15]*len(MAX_MODES)
-ASPECT_TARGET = 6.0
+ASPECT_TARGET = 7.0
 MAGNETIC_WELL_TARGET = 0          # 0 turns the well off
 # MAGNETIC_WELL_TARGET = 0.01  # add a magnetic well (needed as the seed for pwO_optimization_finite_beta.py)
 MAGNETIC_WELL_WEIGHT = 1e3
-ELONGATION_LIMIT = 9.0
+ELONGATION_LIMIT = 5.0           # lower limits cut alpha losses; 9 gave 5 % of alphas lost, 5 gives under 1 %
 NS_ARRAY = np.array([35])
 NITER_ARRAY = np.array([5000])
 FTOL_ARRAY = np.array([1e-12])
@@ -86,6 +86,7 @@ DKX = [False] * (len(MAX_MODES) - DKX_FINAL_STAGES) + [True] * DKX_FINAL_STAGES
 
 # Targets:
 IOTA_FLOOR = 0.31 if NFP==1 else 0.42  # minimum |iota| over the profile; use 0.31 for NFP = 1
+IOTA_CEILING = 0.9                # maximum |iota|: a profile that crosses iota = 1 (NFP 3) loses 2-5 % of the alphas; None leaves it free
 MIRROR_LIMIT = 0.16               # maximum (Bmax-Bmin)/(Bmax+Bmin) on the pwO surfaces
 AXIS_LIMIT = 0.25                 # maximum RMS helical excursion of the magnetic axis, metres
 EDGE_JACOBIAN_FLOOR = 0.25        # minimum min/max Jacobian ratio in each of the three outer cells
@@ -104,7 +105,7 @@ MINIMUM_MPOL = 5
 
 # Verification solve of the optimized boundary:
 FINAL_NS = [37, 45, 55, 71]        # restarted in small steps: a large jump flips the Jacobian
-FINAL_FTOL = 1.0e-10
+FINAL_FTOL = 1.0e-13
 FINAL_NITER = 30000
 
 # Every output file name contains this:
@@ -152,6 +153,8 @@ objective_function_terms = [
     (opt.Hinge(opt.edge_jacobian_ratio, floor=EDGE_JACOBIAN_FLOOR), 0.0, 100.0),
     (opt.Hinge(opt.max_elongation, ceiling=ELONGATION_LIMIT), 0.0, 10.0),
 ]
+if IOTA_CEILING:
+    objective_function_terms.append((opt.Hinge(opt.max_abs_iota, ceiling=IOTA_CEILING), 0.0, 1000.0))
 if MAGNETIC_WELL_TARGET > 0:
     objective_function_terms.append(
         (opt.magnetic_well, MAGNETIC_WELL_TARGET, MAGNETIC_WELL_WEIGHT))
@@ -259,7 +262,7 @@ print(f"epsilon_eff^(3/2) at s = {neo_surfaces}: seed {seed_Q}, final {final_Q}"
 
 final_total = report("final", final_equilibrium)["pwO total"]
 opt.report_targets(final_equilibrium, aspect=ASPECT_TARGET, iota_floor=IOTA_FLOOR,
-                   well_floor=MAGNETIC_WELL_TARGET)
+                   well_floor=MAGNETIC_WELL_TARGET or None)
 print(f"\npwO total {final_total:.3e}")
 
 input_path = final_input.to_indata(f"input.{OUTPUT_NAME}")

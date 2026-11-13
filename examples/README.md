@@ -5,7 +5,7 @@ a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
 stellarator-symmetric first-order QA example; it does not constrain the
 converged equilibrium to the near-axis expansion or differentiate the generator.
 
-All runnable examples live under this single `examples/` tree. The coil and
+All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16); the package itself supports Python 3.10. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
 
@@ -110,6 +110,10 @@ that research budget as one commented set of constants next to the default.
   | QH | `QH_optimization_scalar.py` | `QH_optimization_finite_beta_scalar.py` |
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
+
+  `QI_optimization.py` starts from the circular NFP 2 torus with a rotating ellipse and spends
+  about 100 residual evaluations in four stages, so it runs longer than the five-minute budget
+  above (15 to 30 min on a 36-core workstation, depending on its load); `VMEX_EXAMPLES_CI=1` runs one 5-evaluation stage.
 
   `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
   1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with

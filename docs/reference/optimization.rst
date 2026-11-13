@@ -327,6 +327,11 @@ driver inputs and validate it for a new normalization.
    monitor.save("objectives.csv")
    monitor.plot("objectives.png")
 
+``opt.StallStop(callback, patience=3, threshold=0.02, min_iterations=0)`` wraps
+a callback and ends a stage whose cost falls by less than ``threshold`` (a
+fraction) over ``patience`` accepted iterations, so ``max_nfev`` is a ceiling
+that a stage still descending can use in full. Create one per stage.
+
 Continuation stages may restart the optimizer iteration counter; the monitor
 keeps the combined saved history strictly increasing. Exact-zero terms are
 drawn at a relative numerical display floor instead of forcing a meaningless
@@ -672,15 +677,18 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
-excursion, the edge-Jacobian ratio and the elongation. The map parameters
+(7), hinges on ``|iota|`` (floor 0.42, ceiling 0.9), the mirror ratio (ceiling
+0.16), the axis excursion, the edge-Jacobian ratio and the elongation (ceiling 5). The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
 The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
 add it. The verified boundary is re-solved on a finer radial grid and compared
 with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
-boundary.
+boundary. Two limits matter for the alpha losses: an elongation ceiling of 9
+loses 5 % of the alphas born at ``s = 0.3`` and 5 loses under 1 %, and a profile
+that crosses ``iota = 1`` at ``NFP = 3`` loses 2-5 % whatever its pwO residual,
+so ``IOTA_CEILING = 0.9`` keeps it below.
 
 Optimize at finite pressure from the plain seed with::
 
@@ -712,16 +720,22 @@ interruption. The NEO baseline is the plain seed in vacuum, which cannot hold th
 target pressure.
 
 ``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
-pressure, and runs one finite-beta plasma stage with the pwO map free. It then
-fits coils to the fixed plasma and adds the pwO residual, with the map held,
-to the joint boundary/coil objective. Coil
-length, curvature and distances are normalized by the seed minor radius;
-dense geometry sampling checks constraints between field quadrature nodes.
-Run the vacuum example first (``NFP = 4`` here; its plasma stage uses the same ``MAX_MODES`` ladder). Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
+pressure, and runs one finite-beta plasma stage with the pwO map free and
+hinges on the boundary elongation and its smallest poloidal radius of curvature
+(:func:`~vmex.core.optimize.min_boundary_curvature_radius`), which keep out the
+sharp tips that coils cannot hold. The pressure is then rescaled to the target
+beta. The coils (``12 // NFP`` shapes) are fitted to the fixed plasma with a
+normal-field tolerance that tightens in two steps, and the pwO residual, with the
+map held, joins the joint boundary/coil objective. Coil
+length, curvature and distances are normalized by the seed minor radius and
+enter as smooth worst-case (power-mean) measures, so L-BFGS keeps a gradient; dense geometry sampling checks
+constraints between field quadrature nodes. The run ends with a cold
+free-boundary solve of the held design and a NEO screen of both the fixed- and
+the free-boundary equilibrium: the second is the transport the coils produce.
+Run the vacuum example first (same ``NFP``; its plasma stage uses the same ``MAX_MODES`` ladder). Set ``COILS_INPUT`` to an ESSOS stage-2 coil file; ``COIL_FIT_MAXITER=0``
 keeps an accepted fit. ``TARGET_BETA=0`` selects vacuum. The field checks
 still apply to supplied coils. The script requires
-``vmex[coils,freeb,neoclassical]`` and checks a subsequent cold free-boundary
-solve and its NEO transport at matched radial resolution. The fixed-boundary target comparison is also printed. At finite pressure,
+``vmex[coils,freeb,neoclassical]``. At finite pressure,
 coil flux need not equal total
 ``PHIEDGE``: common current is fitted to the external boundary vector
 ``B_VMEC - B_plasma`` and pressure balance is verified separately.
@@ -754,7 +768,8 @@ The main entry points are :func:`vmex.core.optimize.make_problem`,
 ESSOS supplies coil curves, Biot–Savart fields and integrated distance penalties.
 ``vmex.core.single_stage`` shares the VMEX adjoint and verification workflow
 between the QA and pwO examples. Its normalized geometry option
-penalizes the worst sampled gap and curvature; ESSOS's integrated losses use
+penalizes the worst sampled gap and curvature through the p = 8 power mean of the
+sampled violations (the maximum, but differentiable); ESSOS's integrated losses use
 a different measure. Length is an upper bound here; ESSOS's length loss instead
 penalizes deviations on both sides of its target. The flux quadrature retains VMEC's
 positive-phi sign convention. Zero pressure and zero prescribed current use
