@@ -29,9 +29,9 @@ The rows are optional hinges, so each costs nothing once met: ``USE_WELL`` puts
 a floor under the magnetic well and ``USE_MERCIER`` asks for Mercier and
 resistive-interchange stability on the dimensionless PHIEDGE**2 DMerc and
 PHIEDGE**2 D_R (VMEC's criteria scale as PHIEDGE**-2) over s >= STABILITY_MIN_S.
-The stability rows enter only after the quasisymmetric basin exists, at a tenth
-of their weight first (``STABILITY_SCALE``): applied from the first stage they
-swamp the quasisymmetry residual (QH ended at QS 1.5 instead of 0.09).
+The stability rows enter only after the quasisymmetric basin exists, at 0.3 of
+their weight first (``STABILITY_SCALE``): applied from the first stage they
+swamp the quasisymmetry residual.
 
 QP is a symmetry demonstration: a quasi-poloidally symmetric field does not
 confine alphas, so judge it by the QS residual alone, with the mirror and
@@ -51,22 +51,23 @@ from vmex import optimize as opt
 from vmex.core.scaling import input_minor_radius
 
 # Symmetry family. Per family: field periods, the rotating-ellipse amplitude added to the
-# circular seed (0.06 to 0.12 find the QH basin at finite beta; 0.16 does not, although the
-# vacuum script does), the pressure scale p(s) = PRES_SCALE (1 - s) in pascal, the transform
-# floor, the magnetic-well floor and whether the well row is used (USE_WELL):
+# circular seed, the aspect ratio, the pressure scale p(s) = PRES_SCALE (1 - s) in pascal,
+# the transform floor, the magnetic-well floor and whether the well row is used (USE_WELL).
+# QH is Mercier stable at aspect ratio 8 from every seed tried (amplitudes 0.06 and 0.12 and
+# an added m = 2 mode) and not at 6 with NFP 3, so it carries the larger aspect ratio:
 FAMILY = "QA"  # "QA", "QH" or "QP"
 if FAMILY == "QA":
-    NFP, SEED_PERTURBATION = 2, 0.05
+    NFP, SEED_PERTURBATION, ASPECT_TARGET = 2, 0.05, 6.0
     PRES_SCALE = 1.0e3
     IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 0.42, 0.01, True
     HELICITY_M, HELICITY_N = 1, 0
 elif FAMILY == "QH":
-    NFP, SEED_PERTURBATION = 4, 0.12
+    NFP, SEED_PERTURBATION, ASPECT_TARGET = 4, 0.12, 8.0
     PRES_SCALE = 8.0e3
     IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 1.0, 0.0, True
     HELICITY_M, HELICITY_N = 1, -1
 elif FAMILY == "QP":
-    NFP, SEED_PERTURBATION = 2, 0.05
+    NFP, SEED_PERTURBATION, ASPECT_TARGET = 2, 0.05, 6.0
     PRES_SCALE = 1.0e3
     IOTA_FLOOR, MAGNETIC_WELL_TARGET, USE_WELL = 0.51, 0.0, False
     HELICITY_M, HELICITY_N = 0, 1
@@ -88,11 +89,10 @@ SURFACES = np.array([0.3, 0.5, 0.7, 0.9]) if FAMILY == "QP" else np.linspace(0.1
 # residual evaluations each stage may spend:
 MAX_MODES = [1, 2, 3, 3]
 MAX_NFEV = [10, 15, 15, 20]
-# Stability enters after a quasisymmetric basin exists, at a tenth of its weight first:
-STABILITY_SCALE = [0.0, 0.0, 0.1, 1.0]
+# Stability enters after a quasisymmetric basin exists, at 0.3 of its weight first:
+STABILITY_SCALE = [0.0, 0.0, 0.3, 1.0]
 
-# Targets, and the optional rows. Each is a hinge, so it costs nothing once met:
-ASPECT_TARGET = 6.0
+# The optional rows. Each is a hinge, so it costs nothing once met:
 WELL_WEIGHT = 10.0
 USE_MERCIER = True                # Mercier and resistive-interchange stability
 
