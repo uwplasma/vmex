@@ -327,6 +327,11 @@ driver inputs and validate it for a new normalization.
    monitor.save("objectives.csv")
    monitor.plot("objectives.png")
 
+``opt.StallStop(callback, patience=3, threshold=0.02, min_iterations=0)`` wraps
+a callback and ends a stage whose cost falls by less than ``threshold`` (a
+fraction) over ``patience`` accepted iterations, so ``max_nfev`` is a ceiling
+that a stage still descending can use in full. Create one per stage.
+
 Continuation stages may restart the optimizer iteration counter; the monitor
 keeps the combined saved history strictly increasing. Exact-zero terms are
 drawn at a relative numerical display floor instead of forcing a meaningless
@@ -672,15 +677,18 @@ Install ``vmex[neoclassical]`` and run the vacuum example::
 The script has the form of ``QA_optimization.py``: set ``NFP`` (default 3) and the
 mode ladder (``MAX_MODES = [1, 2, 3]``) at the top, and the objective is a list of
 ``(function, target, weight)`` terms: the mapped pwO variance, the aspect ratio
-(6), hinges on ``|iota|`` (floor 0.42), the mirror ratio (ceiling 0.16), the axis
-excursion, the edge-Jacobian ratio and the elongation. The map parameters
+(7), hinges on ``|iota|`` (floor 0.42, ceiling 0.9), the mirror ratio (ceiling
+0.16), the axis excursion, the edge-Jacobian ratio and the elongation (ceiling 5). The map parameters
 ``a, b, c, eta_min`` are optimized together with the boundary
 (:class:`~vmex.core.pwo.FreeMapProblem`; see :ref:`objectives-mapped-pwo`).
 The magnetic well is off by default; uncomment ``MAGNETIC_WELL_TARGET = 0.01`` to
 add it. The verified boundary is re-solved on a finer radial grid and compared
 with the seed by a matched NEO calculation of :math:`\epsilon_{\rm eff}^{3/2}`.
 The pwO variance does not establish confinement; trace particles to qualify a
-boundary.
+boundary. Two limits matter for the alpha losses: an elongation ceiling of 9
+loses 5 % of the alphas born at ``s = 0.3`` and 5 loses under 1 %, and a profile
+that crosses ``iota = 1`` at ``NFP = 3`` loses 2-5 % whatever its pwO residual,
+so ``IOTA_CEILING = 0.9`` keeps it below.
 
 Continue the saved vacuum shape to finite pressure with::
 

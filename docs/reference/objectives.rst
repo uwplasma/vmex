@@ -112,6 +112,8 @@ and composable with both gradient modes:
   :func:`~vmex.core.optimize.soft_min_abs_iota` is the smooth variant
   (``softmax``-weighted, so it stays within ``[min, max]``) for optimizers
   that stall on the ties of a hard minimum;
+- :func:`~vmex.core.optimize.max_abs_iota` — the largest ``|iota|`` over the
+  same surfaces, for capping the transform with ``opt.Hinge(..., ceiling=...)``;
 - :func:`~vmex.core.optimize.mean_iota` /
   :func:`~vmex.core.optimize.edge_iota` — profile-average and boundary
   transform, for decks that genuinely want a target rather than a floor;
@@ -269,23 +271,24 @@ Sanity anchors, asserted for :class:`~vmex.core.omnigenity.QIResidual` in
 ``tests/test_omnigenity.py``: an analytically QI field scores ``< 1e-24``;
 the bundled ``nfp1_QI`` deck scores at least 20x below a circular tokamak,
 and lowest of the three when the (QA, deliberately non-QI) Landreman–Paul
-configuration is added.  ``examples/optimization/QI_optimization.py`` starts
-from the near-QI ``input.QI_nfp2_initial`` seed and runs one ``max_mode = 2``
-stage of 20 evaluations: on a 36-core workstation at four threads it reaches
-constructed QI 3.0e-3 (fine-grid validation 2.8e-3) with the ι, mirror and
-elongation limits met in 612 s, where the previous circular-seed example ran
-1,456 s and ended in a final solve that did not converge
-(``benchmarks/qi_optimization_profile_cpu.json``);
+configuration is added.  ``examples/optimization/QI_optimization.py``
+starts from the circular ``input.minimal_seed_nfp2`` torus with a 0.05
+rotating ellipse, spends one 15-evaluation stage with the shape terms
+multiplied by 30 and then three 30-evaluation stages at ``max_mode`` 1, 2
+and 3, and reaches constructed QI 1.4e-3 with the aspect, ι, mirror and
+elongation limits met.  Stages of 15 evaluations stall near 5e-3: with the
+grid argmin the constructed-QI rows are discontinuous in the boundary and
+trust-region steps stay near 1e-4;
 :doc:`/howto/optimize-a-boundary` describes the workflow.  The
 earlier Goodman-style *wout-lane* residual
-(:func:`~vmex.core.optimize.quasi_isodynamic_residual`, host NumPy,
+(:func:`~vmex.core.qi.quasi_isodynamic_residual`, host NumPy,
 ``jac=None``) remains available for diagnostics and cross-checks.
 
 The sampled value is part of the objective definition: always report the
 surface set and discretization with a QI total.  For example, an outer-surface
 diagnostic is not numerically interchangeable with a six-surface core-to-edge
 objective.  The independent wout/Boozer implementation
-(:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`) remains the
+(:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout`) remains the
 cross-check for a finished configuration.
 
 The branch matching, running extrema, and interpolation in the constructed
@@ -781,7 +784,7 @@ Which objectives differentiate how
      - no
      - host-NumPy wout engine (``l_grad_b``: use
        :func:`~vmex.core.optimize.l_grad_b_state` instead)
-   * - :func:`~vmex.core.optimize.quasi_isodynamic_residual` (wout lane)
+   * - :func:`~vmex.core.qi.quasi_isodynamic_residual` (wout lane)
      - yes
      - no
      - host-NumPy Boozer tables (use
