@@ -283,20 +283,20 @@
     },
     {
       "path": "docs/_static/figures/readme_optimization.webp",
-      "sha256": "7e763e1b60e72d302b29571659d71a0a62397b99fec841643f7b54e6a37bbc26",
-      "bytes": 193504,
+      "sha256": "3a6d84629090f98e42488021f4e35fa9af0db1e51392bd13bfacd2c491d50559",
+      "bytes": 147628,
       "generator": "examples/plot_optimized_families.py",
       "command": "python examples/plot_optimized_families.py",
       "inputs": [],
       "record": null,
-      "generated": "2026-07-11",
+      "generated": "2026-11-12",
       "hardware": null,
       "reproducible": "external-data",
       "bytes_verified": false,
       "used_in": [
         "README.md"
       ],
-      "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone. Re-encoded as WebP at quality 82; the plotted data and image dimensions are unchanged."
+      "note": "Reads input.QA_optimized / input.QH_optimized / input.QP_optimized from the working directory. Those decks are the output of examples/optimization/{QA,QH,QP}_optimization.py and are not committed, so the figure cannot be regenerated from a clean checkout alone. The generator writes WebP at quality 55, which keeps the file under 150 KB."
     },
     {
       "path": "docs/_static/figures/readme_polish_before_after.webp",
