@@ -1333,9 +1333,12 @@ def test_bootstrap_optimization_examples(case, figure_of_merit, tmp_path):
     if case == "QI":
         pytest.importorskip("booz_xform_jax")
     script = EXAMPLES / "optimization" / f"{case}_optimization_bootstrap.py"
+    if case == "QI":  # the ladder continues the vacuum design that QI_optimization.py writes
+        _run_example(EXAMPLES / "optimization" / "QI_optimization.py", tmp_path, timeout=1800)
     out = _run_example(script, tmp_path, timeout=1800)
     _assert_cost_decreased(out, f"{case}-bootstrap")
-    assert "self-consistent seed" in out and f"[final] {figure_of_merit}" in out
+    assert ("[stage 0 start]" if case == "QI" else "self-consistent seed") in out
+    assert f"[final] {figure_of_merit}" in out
     match = re.search(r"\[final\].*beta = ([0-9.]+)%", out)
     assert match is not None and 1.0 < float(match.group(1)) < 4.0
     assert (tmp_path / f"input.{case}_bootstrap_optimized").exists()
