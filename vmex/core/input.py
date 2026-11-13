@@ -82,6 +82,11 @@ _INDATA_ARRAY_BOUNDS: dict[str, tuple[tuple[int, int], ...]] = {
 }
 
 
+# VMEC2000 Krylov solvers for the 2-D preconditioned step (readin.f itype_precon);
+# VMEX solves that step with matrix-free GMRES for all of them.
+_KRYLOV_PRECON_TYPES = frozenset({"CG", "GMRES", "GMRESR", "TFQMR"})
+
+
 class UnsupportedInputModeError(ValueError):
     """An input requests semantics which VMEX does not implement.
 
@@ -629,13 +634,14 @@ def _validate_indata_modes(
         )
 
     precon_type = str(first("PRECON_TYPE", "NONE")).strip().upper()
-    if precon_type not in {"", "NONE", "DEFAULT", "GMRES"}:
+    if precon_type not in {"", "NONE", "DEFAULT"} | _KRYLOV_PRECON_TYPES:
         raise UnsupportedInputModeError(
             "D00H_PRECONDITIONER_MODE_UNSUPPORTED",
             "PRECON_TYPE",
-            "only NONE/DEFAULT (1-D) and VMEX matrix-free GMRES are implemented",
+            "only NONE/DEFAULT (1-D) and the VMEC2000 Krylov solvers "
+            "CG/GMRES/GMRESR/TFQMR are recognised",
         )
-    if precon_type == "GMRES" and int(first("PRE_NITER", -1)) != -1:
+    if precon_type in _KRYLOV_PRECON_TYPES and int(first("PRE_NITER", -1)) != -1:
         raise UnsupportedInputModeError(
             "D00I_ITERATION_CONTROL_UNSUPPORTED",
             "PRE_NITER",
