@@ -19,32 +19,15 @@ With its default settings every script finishes in under five minutes on a
 around long compilations and solves). Where a longer run gives a better answer, the script keeps
 that research budget as one commented set of constants next to the default.
 
-- `machine_learning/`: a first stellarator design problem for readers who train
-  models. Both scripts vary the same six boundary coefficients of a vacuum QA
-  seed, with fixed major-radius coefficient and flux. A 5 cm coefficient range allows
-  visible shape changes toward mean iota 0.45 and aspect ratio 5.
-  - `database_optimization.py` builds a small labelled database, fits a quadratic
-    surrogate with a held-out test split, and refines it through sequential
-    acquisition with bounded multistart optimization and independent VMEX evaluations.
-    QS and magnetic well are reported by default; QI, hard Gamma_c, mapped pwO,
-    and NEO effective ripple are optional labels with separate resolution controls.
-  - `differentiable_optimization.py` uses `jax.value_and_grad` with selectable L-BFGS-B or Optax Adam,
-    checks a directional derivative with independent solves, and re-solves the
-    selected boundary on a finer radial grid. Install `vmex[optimizers]`.
-  - `stellarator_optimization.ipynb` introduces the geometry, objective choices,
-    plots and experiments. It is self-contained and runs against an editable
-    checkout of `main`, using existing parameter and plotting APIs. Plot formatting
-    lives in optional setup cells. Advanced sections run sequential acquisition,
-    compare optimizers, and optimize QA with a Fourier-mode continuation from
-    a rotating ellipse, including independent radial/angular refinement.
-    Initial/final 3D views and independently sampled objective paths show the
-    shape changes and local landscape. A more expensive finite-beta QI study
-    examines restarts, discretization sensitivity and gradient reliability,
-    with fixed pressure/flux and zero prescribed net toroidal current.
-    The compactness-only objective can severely worsen QA; both diagnostics
-    are reported so a lower loss is not confused with better confinement. Script outputs go to `results/machine_learning/`;
-    the notebook writes to `results/ml_notebook/`.
-    These are local learning examples, not validated reactor designs.
+- `machine_learning/` introduces design as a learning problem on six boundary
+  coefficients of a vacuum QA seed (target: mean iota 0.45, aspect ratio 5);
+  outputs go to `results/machine_learning/`.
+  - `database_optimization.py` — sample a small equilibrium database, fit a
+    quadratic surrogate with a held-out split, and verify its proposals with
+    true solves.
+  - `differentiable_optimization.py` — `jax.value_and_grad` through the
+    equilibrium solve into L-BFGS-B, checked against finite differences. The
+    compactness target degrades quasi-axisymmetry; the script reports it.
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
