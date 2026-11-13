@@ -6,6 +6,7 @@ import sys
 
 import numpy as np
 import pytest
+import jax
 import jax.numpy as jnp
 
 from vmex.core import single_stage as ss
@@ -219,7 +220,7 @@ def test_initialization_freezes_one_seed_plan_and_preserves_currents(harness, mo
     # Execute the two objective closures without an adjoint or JAX compilation.
     monkeypatch.setattr(ss.jax, "jit", lambda function: function)
     monkeypatch.setattr(ss.jax, "value_and_grad", lambda function, **kw: (
-        lambda u: (function(u), np.zeros_like(u))))
+        lambda u, *rest: (function(u, *rest), np.zeros_like(u))))
     monkeypatch.setattr(ss.opt, "OptimizationMonitor", lambda problem: "monitor")
     h.joint.problem.jax_objective_from_state = lambda x, limits, **kw: (
         calls.append((x.copy(), kw, limits("state", "context"))) or "plasma result")
@@ -234,9 +235,9 @@ def test_initialization_freezes_one_seed_plan_and_preserves_currents(harness, mo
     assert len(data_calls) == 1 and data_calls[0][2]["runtime"] == "seed context"
     _, coils = joint.objects_from_x(joint.x0 + joint.scales)
     np.testing.assert_allclose(coils.updated_dofs, [1.05, 2.05, 3.05, 4., 5.])
-    assert joint._plasma_vg(np.zeros(5))[0] == "plasma result"
-    assert calls[0][1] == {"n_extra_terms": 1, "return_status": True}
-    assert calls[0][2] == 0.
+    assert joint._plasma_vg(np.zeros(5), np.zeros(3))[0] == "plasma result"
+    assert calls[0][1] == {"n_extra_terms": 3, "return_status": True}
+    assert calls[0][2].tolist() == [0., 0., 0.]
     (cost, terms), _ = joint._coil_vg(np.zeros(5))
     assert cost == 10. and terms.tolist() == [1., 2., 3., 4.]
 
@@ -348,6 +349,34 @@ def test_normalized_geometry_costs_are_invariant_under_physical_scale_and_node_c
         np.testing.assert_allclose(scaled_penalty(dense, NS(gamma=surface.gamma * scale)), initial)
     if ncoils == 1:
         assert initial[2] == 0.  # No distinct coil pair exists.
+
+
+def test_normalized_geometry_costs_are_smooth_power_means_of_the_worst_violations(monkeypatch):
+    module = ModuleType("essos.objective_functions")
+    module.loss_coil_separation = module.loss_coil_surface_distance = lambda *a, **kw: 0.
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    t = jnp.linspace(0., 2 * jnp.pi, 8, endpoint=False)
+    ring = jnp.stack((jnp.cos(t), jnp.sin(t), 0 * t), axis=-1)
+    penalty = ss.CoilPenalty(10., 1., .1, .1, normalized=True, curvature_weight=1., distance_weight=1., surface_weight=1.)
+    surface = NS(gamma=jnp.asarray([[[5., 5., 5.]]]))
+
+    def costs(scale, curvature, shift=3.):
+        class Coils(NS):
+            def __len__(self):
+                return 2
+
+        return penalty(Coils(gamma=jnp.stack((scale * ring, scale * ring + shift)), length=jnp.ones(2),
+                             curvature=jnp.stack((curvature, curvature)), dofs_currents=jnp.ones(2)), surface)
+
+    quiet = jnp.zeros(8)
+    assert float(jnp.sum(costs(1., quiet))) < 1e-9
+    # One of eight nodes at twice the limit: the p = 8 power mean is 8**(-1/8) of the maximum.
+    one_node = quiet.at[0].set(2.)
+    np.testing.assert_allclose(costs(1., one_node)[1], .5 * 8**(-.25), rtol=1e-6)
+    # No violation anywhere (and a coil gap violation next to it) still differentiates without NaN.
+    gradient = jax.grad(lambda scale: jnp.sum(costs(scale, quiet, shift=.05)))(1.)
+    assert np.isfinite(float(gradient))
+    assert np.isfinite(float(jax.grad(lambda scale: jnp.sum(costs(scale, quiet)))(1.)))
 
 
 def test_legacy_coil_self_costs_count_only_unique_coils(harness, monkeypatch):
@@ -471,3 +500,138 @@ def test_geometry_resampling_preserves_scaled_essos_coils_and_ad(existing, reque
     copied = ss.jax.value_and_grad(lambda dofs: objective(dofs, True))(coils.dofs)
     for actual, expected_value in zip(copied, direct):
         np.testing.assert_allclose(actual, expected_value, rtol=1e-12, atol=1e-12)
+
+
+def test_multiplier_step_recovers_slacks_from_the_penalty_terms(harness, monkeypatch):
+    h = harness
+    h.seed.solver_context = "seed context"
+    monkeypatch.setattr(ss.jax, "jit", lambda function: function)
+    monkeypatch.setattr(ss.jax, "value_and_grad", lambda function, **kw: function)
+    monkeypatch.setattr(ss.opt, "OptimizationMonitor", lambda problem: "monitor")
+    h.joint.problem.jax_objective_from_state = lambda *a, **kw: None
+    joint = ss.SingleStageProblem(h.joint.problem, h.joint.coils, lambda coils, surface: np.ones(4),
+                                  nphi=17, ntheta=16, iota_floor=.4, aspect_limit=7.,
+                                  normal_field_limit=.03, constraint_weight=2.)
+    assert joint.constraint_names == ["min |iota|", "aspect", "B.n/B RMS"]
+    joint.multipliers = np.array([0., 1., 0.])
+    penalties = [np.array([.01, -.16, 0.]), None]
+
+    def evaluate(u):
+        joint._penalty = penalties.pop(0)
+
+    joint.value_and_grad = evaluate
+    values = joint.update_multipliers(np.zeros(5))
+    assert values["min |iota|"] == pytest.approx(-.1)
+    assert values["aspect"] == pytest.approx(.2)
+    assert values["B.n/B RMS"] is None
+    np.testing.assert_allclose(joint.multipliers, [.2, .6, 0.])
+    with pytest.raises(ValueError, match="certified equilibrium"):
+        joint.update_multipliers(np.zeros(5))
+    with_jump = ss.SingleStageProblem(h.joint.problem, h.joint.coils, lambda coils, surface: np.ones(4),
+                                      nphi=17, ntheta=16, iota_floor=.4, aspect_limit=7.,
+                                      normal_field_limit=.03, jump_limit=.05)
+    assert with_jump.constraint_names[-1] == "|B|^2 jump RMS" and with_jump.multipliers.size == 4
+
+
+def test_constraint_penalty_enforces_the_jump_limit_and_the_multiplier_shift(harness, monkeypatch):
+    h = harness
+    h.seed.solver_context = "seed context"
+    calls = []
+    monkeypatch.setattr(ss.jax, "jit", lambda function: function)
+    monkeypatch.setattr(ss.jax, "value_and_grad", lambda function, **kw: (
+        lambda u, *rest: (function(u, *rest), np.zeros_like(u))))
+    monkeypatch.setattr(ss.opt, "OptimizationMonitor", lambda problem: "monitor")
+    h.joint.problem.jax_objective_from_state = lambda x, limits, **kw: (
+        calls.append(limits("state", "context")) or "plasma result")
+    joint = ss.SingleStageProblem(h.joint.problem, h.joint.coils, lambda coils, surface: np.ones(4),
+                                  nphi=17, ntheta=16, iota_floor=.4, aspect_limit=7.,
+                                  normal_field_limit=.03, jump_limit=.02, constraint_weight=2.)
+    # The mocked jump RMS is about 0.035: a violation of the 0.02 limit by 0.75 of the limit.
+    joint._plasma_vg(np.zeros(5), np.array([0., 0., 0., 1.]))
+    jump_c = 1 - np.sqrt(.25 * .03**2 + .75 * .04**2) / .02
+    assert calls[0][:3].tolist() == [0., 0., 0.] or calls[0][:3].tolist() == [0., 0., -.25]
+    assert calls[0][3] == pytest.approx(.5 * 2 * (1 / 2 - jump_c)**2 - 1 / 4)
+
+
+def test_report_without_beta_checks_only_vacuum_limits():
+    metrics = {"min |iota|": 1.1, "aspect": 5.9, "B.n/B RMS": .005, "coil-surface distance": .2,
+               "coil-coil distance": .1, "maximum curvature": 5., "verification solve converged": True}
+    free = {"converged": True, "delbsq": .01, "sampled_boundary_distance_m": .01, "min_abs_iota": 1.1,
+            "aspect": 5.9, "coil_surface_distance_m": .2}
+    report = ss.design_target_report(
+        metrics, free, iota_floor=1., aspect_limit=6., normal_field_limit=.01, clearance=.15,
+        coil_distance=.08, curvature=7., delbsq_limit=.02, boundary_distance_limit=.02)
+    assert report["met"] and not any("beta" in name for name in report["targets"])
+
+
+def test_coils_around_boundary_offsets_the_cross_section_outward(monkeypatch):
+    class Curves:
+        def __init__(self, dofs, **kwargs):
+            self.dofs, self.kwargs = np.asarray(dofs), kwargs
+
+    modules = {"essos": ModuleType("essos"), "essos.coils": ModuleType("essos.coils")}
+    modules["essos.coils"].Curves = Curves
+    modules["essos.coils"].Coils = lambda curves, currents: NS(curves=curves, currents=currents)
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    # R = 3 + cos(theta), Z = sin(theta) with the usual R(m, n) = rbc[n + ntor, m] layout.
+    rbc, zbs = np.zeros((3, 2)), np.zeros((3, 2))
+    rbc[1, 0], rbc[1, 1], zbs[1, 1] = 3., 1., 1.
+    deck = NS(nfp=2, ntor=1, rbc=rbc, zbs=zbs)
+    coils = ss.coils_around_boundary(deck, 2, 3, .5, n_segments=32, current=7.)
+    assert coils.currents.tolist() == [7., 7.] and coils.curves.kwargs == {
+        "n_segments": 32, "nfp": 2, "stellsym": True}
+    dofs = coils.curves.dofs
+    for i, phi in enumerate((np.arange(2) + .5) * 2 * np.pi / 8):
+        # Circle of radius 1.5 about (3 cos phi, 3 sin phi, 0) in the R-Z plane.
+        expected = np.zeros((3, 7))
+        expected[0, 0], expected[0, 2] = 3 * np.cos(phi), 1.5 * np.cos(phi)
+        expected[1, 0], expected[1, 2] = 3 * np.sin(phi), 1.5 * np.sin(phi)
+        expected[2, 1] = 1.5
+        np.testing.assert_allclose(dofs[i], expected, atol=1e-12)
+
+
+def test_vacuum_coil_fit_drives_the_normal_field_down_and_scales_the_current(monkeypatch):
+    class Coils:
+        dofs_currents = np.array([2.])
+
+        def __init__(self, shape):
+            self.dofs_curves = shape
+
+        def with_dofs(self, dofs):
+            return Coils(dofs[:1])
+
+    surfaces = ModuleType("essos.surfaces")
+    surfaces.surfacerzfourier_from_boundary = lambda *a, **kw: "surface"
+    monkeypatch.setitem(sys.modules, "essos", ModuleType("essos"))
+    monkeypatch.setitem(sys.modules, "essos.surfaces", surfaces)
+    ones = np.ones((2, 2))
+    data = NS(area_vector=np.stack((ones, 0 * ones, 0 * ones)), B_total=np.stack((0 * ones, 0 * ones, ones)),
+              normal=np.stack((ones, 0 * ones, 0 * ones)), gamma="gamma", phi="phi")
+    monkeypatch.setattr(ss.vc, "surface_field_data_from_state", lambda *a, **kw: data)
+    # The coil field (c, 0, 1) has a normal component c; the fit must remove it.
+    monkeypatch.setattr(ss.vc, "external_B_cartesian", lambda field, gamma, phi: field)
+    monkeypatch.setattr(ss, "coil_field", lambda coils: jnp.stack((
+        coils.dofs_curves[0] * ones, 0 * ones, ones)))
+    deck = NS(rbc=np.ones((1, 1)), zbs=np.ones((1, 1)), nfp=2)
+    seed = NS(solution="state", solver_context="context")
+    fitted = ss.fit_vacuum_coils(deck, seed, Coils(np.array([.5])), lambda coils, surface: np.zeros(4),
+                                 nphi=2, ntheta=2, normal_field_limit=.01, maxiter=100, scale=.5)
+    assert abs(float(fitted.dofs_curves[0])) < 1e-2
+    assert float(fitted.dofs_currents[0]) == pytest.approx(2., rel=1e-3)
+    # A field orthogonal to the boundary field has a zero least-squares current.
+    monkeypatch.setattr(ss, "coil_field", lambda coils: np.stack((ones, 0 * ones, 0 * ones)))
+    with pytest.raises(ValueError, match="nonzero coil current"):
+        ss.fit_vacuum_coils(deck, seed, Coils(np.array([.5])), lambda coils, surface: np.zeros(4),
+                            nphi=2, ntheta=2, normal_field_limit=.01, maxiter=3, scale=.5)
+
+
+def test_free_boundary_check_can_use_more_modes_than_the_optimized_deck(harness, monkeypatch):
+    h = harness
+    seen = []
+    monkeypatch.setattr(Deck, "change_resolution", lambda self, **kw: (seen.append(kw), self)[1], raising=False)
+    monkeypatch.setattr(ss.opt, "solve_equilibrium", lambda inp, **kw: h.fine)
+    monkeypatch.setattr(ss.vj, "solve_free_boundary_multigrid", lambda inp, **kw: (_ for _ in ()).throw(
+        ss.VmecError("stop here")))
+    *_, held = ss.verify_design(h.joint, np.ones(5), prefix="test", ns=31, free_mpol=8, verbose=False)
+    assert seen == [{"mpol": 8, "ntor": 8, "ntheta": 32, "nzeta": 32}] and "error" in held
