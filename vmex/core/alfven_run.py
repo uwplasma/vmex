@@ -63,14 +63,16 @@ def run_alfven(wout_path, outdir, *, config=None, density=None, ion_mass=None, n
     ion_mass = ion_mass or pick("plasma", "ion_mass", 2.0)
     emit(f" FAX shear-Alfven continuum: {len(harmonics)} harmonics, n_i = {density:.3g} m^-3, {ion_mass:g} amu: {Path(wout_path).name}")
     s = np.linspace(0.0, 1.0, nodes + 2)[1:-1]  # radial finite-element nodes
-    out = fax.summary(geo.interpolate(s), harmonics, density, ion_mass=ion_mass, **options)
+    out = fax.summary(geo.interpolate(s), harmonics, fax.mass_density(density, ion_mass), ions=(density, ion_mass), **options)
     stem = Path(outdir) / f"{Path(wout_path).stem.removeprefix('wout_')}_alfven"
     figure = fax.plot_summary(out, stem.with_suffix(".png"))
     mode = out["mode"] and {k: v for k, v in out["mode"].items() if k != "structure"}
-    stem.with_suffix(".json").write_text(json.dumps({**{k: out[k] for k in ("harmonics", "density_m3", "ion_mass_amu", "gaps")}, "mode": mode}, indent=2))
+    stem.with_suffix(".json").write_text(json.dumps({**{k: out[k] for k in ("harmonics", "density_m3", "ion_mass_amu", "density_kg_m3", "gaps", "mode_reason")}, "mode": mode}, indent=2))
     for gap in out["gaps"][:3]:
-        emit(f"   {gap['type']} gap {gap['center_khz']:.1f} kHz, width {gap['width_khz']:.1f} kHz at s = {gap['s']:.2f}")
-    if mode:
-        emit(f"   global mode {mode['frequency_khz']:.1f} kHz at s = {mode['peak_s']:.2f}, in gap: {mode['in_gap']}, converged: {mode['converged']}")
+        emit(f"   {gap['type']} gap {gap['center_khz']:.1f} kHz, width {gap['width_khz']:.1f} kHz, closest at s = {gap['s']:.2f}")
+    if not mode:
+        emit(f"   no global mode: {out['mode_reason']}")
+    else:
+        emit(f"   global mode {mode['frequency_khz']:.1f} kHz at s = {mode['peak_s']:.2f}, in the gap, converged: {mode['converged']}")
     emit(f" Wrote Alfven figure: {figure}")
     return out

@@ -65,8 +65,9 @@ def test_alfven_cli_smoke(tmp_path, capsys, monkeypatch):
     assert main(argv) == 0
     assert "FAX shear-Alfven continuum" in capsys.readouterr().out
     out = json.loads((tmp_path / "smoke_alfven.json").read_text())
-    assert out["density_m3"] == 1e19 and out["ion_mass_amu"] == 2.0 and out["gaps"]
-    assert out["mode"]["converged"] and np.isfinite(out["mode"]["frequency_khz"])
+    assert out["density_m3"] == 1e19 and out["ion_mass_amu"] == 2.0 and out["density_kg_m3"] == pytest.approx(2 * 1.6605e-8, rel=1e-3)
+    assert out["mode"] is None or (out["mode"]["converged"] and np.isfinite(out["mode"]["frequency_khz"]))
+    assert out["gaps"] and (out["mode"] or out["mode_reason"])
     assert (tmp_path / "smoke_alfven.png").stat().st_size > 5_000
     case.write_text("[bogus]\nx = 1\n")
     assert main(argv) != 0
