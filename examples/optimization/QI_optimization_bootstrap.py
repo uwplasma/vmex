@@ -17,7 +17,7 @@ Four options shape the physics, and any of them works alone:
   "dkx>=2.14.0"): the row is the absolute difference between the equilibrium's
   <j.B> and DKX's, in MA T/m^2, because the self-normalized form cannot ask for
   less current when DKX's is near zero, as it is for a QI field.
-- MAGNETIC_WELL_FLOOR: a hinge holding the well proxy (V'(0) - V'(1)) / V'(0)
+- MAGNETIC_WELL_FLOOR: a limit holding the well proxy (V'(0) - V'(1)) / V'(0)
   at or above the floor, zero while it holds; None drops it.
 - MERCIER: radially graded Mercier and resistive-interchange rows; False (the
   default) drops them. With them on, NFP 3 approaches marginal Mercier
@@ -27,7 +27,7 @@ Four options shape the physics, and any of them works alone:
 - GAMMA_C_STAGES: the last stages add the smooth Gamma_c fast-ion proxy,
   normalized to its value at the stage start; 0 drops it.
 
-Shape hinges hold the mirror ratio and the elongation.
+Shape limits hold the mirror ratio and the elongation.
 
 Redl takes helicity 0 here, and not because this field is quasi-axisymmetric:
 a quasi-isodynamic field carries no helical symmetry, so the isomorphism shift
@@ -66,15 +66,15 @@ INPUT_FILE = Path("input.QI_optimized")
 
 # Physics toggles:
 BOOTSTRAP = "none"                # "none", "redl" or "dkx"
-MAGNETIC_WELL_FLOOR = 0.01        # None drops the well hinge
+MAGNETIC_WELL_FLOOR = 0.01        # None drops the well limit
 MERCIER = False
 GAMMA_C_STAGES = 0                # last stages that add the Gamma_c row
 GAMMA_C_WEIGHT = 1.0              # cost it carries at the stage start
 
-# Weights, which multiply squared residuals. The hinges are zero while their
+# Weights, which multiply squared residuals. The limits are zero while their
 # limit holds:
 QI_WEIGHT = 100.0
-HINGE_WEIGHT = 100.0              # iota floor, mirror ratio, elongation
+LIMIT_WEIGHT = 100.0              # iota floor, mirror ratio, elongation
 MAGNETIC_WELL_WEIGHT = 1.0e3
 ASPECT_WEIGHT = 2.0
 
@@ -205,7 +205,7 @@ print(f"holding aspect {ASPECT_TARGET:.3f}, min |iota| >= {IOTA_FLOOR:.3f}, "
 ### Set up the objective ######################################################
 
 def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
+    """Limit on the profile minimum of |iota|: a mean target can hide a near-zero surface.
 
     opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
     """
@@ -214,13 +214,13 @@ def iota_floor(equilibrium_state, solver_context):
 
 
 def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
+    """Limit on the mirror ratio above its limit; zero while the limit holds."""
     return jnp.maximum(
         opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
 
 
 def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
+    """Limit on the cross-section elongation above its limit."""
     return jnp.maximum(
         opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
 
@@ -299,14 +299,14 @@ for stage, (beta, max_mode, max_nfev, n_spline) in enumerate(STAGES):
         current_row = bootstrap
     terms = [(qi, 0.0, QI_WEIGHT),
              (opt.aspect_ratio, ASPECT_TARGET, ASPECT_WEIGHT),
-             (iota_floor, 0.0, HINGE_WEIGHT),
-             (mirror_excess, 0.0, HINGE_WEIGHT),
-             (elongation_excess, 0.0, HINGE_WEIGHT),
+             (iota_floor, 0.0, LIMIT_WEIGHT),
+             (mirror_excess, 0.0, LIMIT_WEIGHT),
+             (elongation_excess, 0.0, LIMIT_WEIGHT),
              (opt.volume_average_beta, beta, BETA_RELATIVE_WEIGHT / beta**2)]
     if BOOTSTRAP != "none":
         terms.append((current_row, 0.0, DKX_WEIGHT if use_dkx else 1.0))
     if MAGNETIC_WELL_FLOOR is not None:
-        terms.append((opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0,
+        terms.append((opt.magnetic_well, opt.at_least(MAGNETIC_WELL_FLOOR),
                       MAGNETIC_WELL_WEIGHT))
     if MERCIER:
         state, context = equilibrium.solution, equilibrium.solver_context

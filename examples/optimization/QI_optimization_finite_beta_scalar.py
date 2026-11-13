@@ -56,7 +56,7 @@ ASPECT_TARGET = 8.0
 IOTA_FLOOR = 0.51                 # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
 ELONGATION_LIMIT = 8.0
-MAGNETIC_WELL_FLOOR = None        # a hinge on (V'(0) - V'(1)) / V'(0); None drops the row
+MAGNETIC_WELL_FLOOR = None        # a limit on (V'(0) - V'(1)) / V'(0); None drops the row
 MAGNETIC_WELL_WEIGHT = 1.0e3
 MERCIER = True                    # False drops the Mercier and resistive-interchange rows
 STABILITY_MIN_S = 0.2
@@ -153,7 +153,7 @@ objective_terms = [
     # (at fixed flux beta scales as ASPECT**-4); it carries the QI row's weight.
     (opt.volume_average_beta, TARGET_BETA, 10.0 / TARGET_BETA**2)]
 if MAGNETIC_WELL_FLOOR is not None:
-    objective_terms.append((opt.Hinge(opt.magnetic_well, floor=MAGNETIC_WELL_FLOOR), 0.0,
+    objective_terms.append((opt.magnetic_well, opt.at_least(MAGNETIC_WELL_FLOOR),
                             MAGNETIC_WELL_WEIGHT))
 if MERCIER:
     objective_terms += [(opt.mercier_stability_residual, 0.0, stability_weights),
