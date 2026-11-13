@@ -240,6 +240,50 @@ def test_every_example_parses() -> None:
             raise AssertionError(f"{script.relative_to(REPO)}: {error}") from error
 
 
+#: Optimization examples whose output names are fixed by a plotted summary pair
+#: rather than an ``OUTPUT_NAME`` global.
+_NO_OUTPUT_NAME = {
+    "single_stage_free_boundary_optimization.py",
+    "single_stage_free_boundary_optimization_finite_beta.py",
+    "single_stage_optimization.py",
+    "single_stage_optimization_augmented_lagrangian.py",
+    "single_stage_optimization_finite_beta.py",
+    "single_stage_optimization_least_squares.py",
+    "single_stage_optimization_pwO.py",
+}
+
+
+def test_examples_follow_the_flat_template() -> None:
+    """Examples are flat scripts: no argparse, no ``__main__``, one smoke switch.
+
+    Optimization examples also name their outputs from one top-of-script
+    ``OUTPUT_NAME`` and read ``VMEX_EXAMPLES_CI`` through ``ci_smoke`` so the
+    smoke budget has a single, visible place.
+    """
+    problems = {}
+    for script in _shipped_examples():
+        tree = ast.parse(script.read_text())
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                names = [a.name for a in node.names] + [getattr(node, "module", None) or ""]
+                if any(n.split(".")[0] == "argparse" for n in names):
+                    found.append("imports argparse")
+            if (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name)
+                    and node.left.id == "__name__"):
+                found.append("has a __main__ guard")
+        if "optimization" in script.parts:
+            assigned = {t.id for n in tree.body if isinstance(n, ast.Assign)
+                        for t in n.targets if isinstance(t, ast.Name)}
+            if "ci_smoke" not in assigned:
+                found.append("does not define ci_smoke")
+            if script.name not in _NO_OUTPUT_NAME and "OUTPUT_NAME" not in assigned:
+                found.append("does not define OUTPUT_NAME")
+        if found:
+            problems[str(script.relative_to(REPO))] = sorted(set(found))
+    assert not problems, problems
+
+
 def _smoke_block_clobbers(tree: ast.Module) -> list[str]:
     """Values a ``ci_smoke`` block sets that a later statement discards.
 
