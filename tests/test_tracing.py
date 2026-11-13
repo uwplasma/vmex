@@ -64,7 +64,7 @@ def test_counts_are_consistent(traced):
 
 
 def test_boozer_field_matches_the_host_transform(solovev_wout):
-    """The jitted batched transform stores the same spectra the surface-by-surface host loop does."""
+    """The magnetic-only batched transform stores the |B| spectra the surface-by-surface host loop does."""
     from booz_xform_jax import Booz_xform
     from vmex.core import tracing
 
@@ -73,8 +73,11 @@ def test_boozer_field_matches_the_host_transform(solovev_wout):
     host = Booz_xform(verbose=0, mboz=8, nboz=8)
     host.read_wout_data(wout, flux=False)
     host.run()
-    for name in ("bmnc_b", "rmnc_b", "zmns_b", "numns_b", "Boozer_G", "Boozer_I", "s_b", "xm_b", "xn_b"):
+    for name in ("bmnc_b", "Boozer_G", "Boozer_I", "s_b", "xm_b", "xn_b"):
         np.testing.assert_allclose(getattr(bx, name), getattr(host, name), rtol=0, atol=1e-12, err_msg=name)
+    assert bx.rmnc_b is None  # R, Z and nu are not computed for the orbits
+    for name, value in tracing.boundary_geometry(wout, mboz=8, nboz=8).items():
+        np.testing.assert_allclose(value, getattr(host, name)[:, -1], rtol=0, atol=1e-12, err_msg=name)
 
 
 def test_trace_timing_separates_setup_from_orbits(solovev_wout, traced, monkeypatch):
@@ -829,14 +832,29 @@ def test_trace_boundary_handoff_keeps_sine_partners(solovev_wout, monkeypatch):
     field, bx = tracing.boozer_field(wout, mboz=8, nboz=8)
     bx.asym = True
     names = ("rmns_b", "zmnc_b", "numnc_b")
-    for name in names:
-        setattr(bx, name, np.full_like(bx.rmnc_b, 0.125))
+    geometry = {name: np.full(3, 0.125) for name in ("rmnc_b", "zmns_b", "numns_b", *names)}
     monkeypatch.setattr(tracing, "boozer_field", lambda *a, **k: (field, bx))
+    monkeypatch.setattr(tracing, "boundary_geometry", lambda *a, **k: geometry)
     result = trace_alphas(wout, scale=None, **{
         **TRACE_KWARGS, "tmax": 1e-7, "timestep": 1e-7, "times_to_trace": 2})
     assert result.boozer["asym"] is True
     for name in names:
-        np.testing.assert_array_equal(result.boozer[name], getattr(bx, name)[:, -1])
+        np.testing.assert_array_equal(result.boozer[name], geometry[name])
+
+
+def test_trace_runs_the_host_transform_only_for_the_boundary_geometry(solovev_wout, monkeypatch):
+    from booz_xform_jax import Booz_xform
+
+    calls = []
+    run = Booz_xform.run
+    monkeypatch.setattr(Booz_xform, "run", lambda self, *a, **k: calls.append(list(self.compute_surfs)) or run(self, *a, **k))
+    result = trace_alphas(read_wout(solovev_wout), scale=None, **{
+        **TRACE_KWARGS, "tmax": 1e-7, "timestep": 1e-7, "times_to_trace": 2})
+    assert calls == [] and len(result.boozer) == 9  # keys are listed without computing anything
+    assert result.boozer["nfp"] and calls == []
+    assert result.boozer["rmnc_b"].ndim == 1 and len(calls) == 1 and len(calls[0]) == 1
+    result.boozer["zmns_b"], result.boozer["numns_b"]
+    assert len(calls) == 1  # one transform serves every geometry key
 
 
 def test_asymmetric_trace_preserves_sine_boundary(tmp_path):
@@ -1051,8 +1069,7 @@ def test_angular_table_control_is_forwarded_and_saved(monkeypatch, angle_grid, t
         def __new__(cls, **kwargs):
             return bx
     bx.read_wout_data = lambda *args, **kwargs: None
-    bx.run_jax = lambda: {name: np.ones((1, 1)) for name in (
-        "bmnc_b", "rmnc_b", "zmns_b", "numns_b")} | {"bvco_b": np.ones(1), "buco_b": np.ones(1)}
+    bx.run_jax = lambda magnetic_only: {"bmnc_b": np.ones((1, 1)), "bvco_b": np.ones(1), "buco_b": np.ones(1)}
     monkeypatch.setattr(booz_xform_jax, "Booz_xform", Transform)
     def construct(booz, psi0, mode_tolerance, *, angle_grid):
         calls["angle_grid"] = angle_grid
