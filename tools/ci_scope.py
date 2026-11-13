@@ -67,8 +67,8 @@ _IMPORTS = re.compile(r"^\s*(?:from|import)\s+(examples)\b", re.MULTILINE)
 def _is_narrowable(path: str) -> bool:
     """Whether ``path`` can be attributed to particular lanes.
 
-    Documentation is narrowable wherever it sits, including the root files the
-    README and changelog live in: prose cannot change what the package computes,
+    Documentation is narrowable wherever it sits, including the root
+    README: prose cannot change what the package computes,
     only what the documentation guards read. Everything else must sit under a
     tree the package does not import.
     """
