@@ -148,6 +148,7 @@ EXECUTED_EXAMPLES = {
     "examples/free_boundary_phiedge.py",
     "examples/free_boundary_position_control.py",
     "examples/free_boundary_relax_constraint.py",
+    "examples/free_boundary_tokamak_pf_response.py",
     "examples/hot_restart_scan.py",
     "examples/mirror/mirror_fixed_boundary_axisymmetric.py",
     "examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py",
@@ -969,6 +970,14 @@ def test_free_boundary_relax_constraint(tmp_path):
     rows = dict(re.findall(r"^\s*(converged|relaxed)\s+\S+\s+([0-9.eE+-]+)", out, re.M))
     assert set(rows) == {"converged", "relaxed"}, out
     assert float(rows["relaxed"]) < 0.5 * float(rows["converged"]), out  # 3x at ns = 12
+
+
+@pytest.mark.full  # nightly: coarse free-boundary tokamak solve, one adjoint per observable and six re-solves
+def test_free_boundary_tokamak_pf_response(tmp_path):
+    pytest.importorskip("essos.fields")
+    out = _run_example(EXAMPLES / "free_boundary_tokamak_pf_response.py", tmp_path, timeout=1500)
+    worst = float(re.search(r"relative to each row's largest entry: ([0-9.eE+-]+)", out).group(1))
+    assert worst < 1e-3, out  # implicit derivative vs reconverged central differences
 
 
 @pytest.mark.full  # nightly: free-bdy NESTOR solve with direct-coil Biot-Savart (~90s)
