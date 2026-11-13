@@ -690,16 +690,34 @@ loses 5 % of the alphas born at ``s = 0.3`` and 5 loses under 1 %, and a profile
 that crosses ``iota = 1`` at ``NFP = 3`` loses 2-5 % whatever its pwO residual,
 so ``IOTA_CEILING = 0.9`` keeps it below.
 
-Continue the saved vacuum shape to finite pressure with::
+Optimize at finite pressure from the plain seed with::
 
    python examples/optimization/pwO_optimization_finite_beta.py
 
-Run the vacuum example first, with the same ``NFP`` and the magnetic well enabled
-(the continuation reads ``input.pwO_optimized_nfp{NFP}_well0.01`` and its WOUT; from a
-vacuum hill it does not reach a well). The zero-current pressure is
-proportional to ``1-s``, calibrated to 0.5% volume-average beta at fixed flux,
-and the beta error and a Mercier floor join the objective list. It uses the same
-``MAX_MODES`` ladder.
+The script needs no saved vacuum result: ``SEED_MODES`` perturbs one or two boundary
+modes of the circular seed by a fraction of its minor radius (``{(-1, 1): 0.5}``, a
+rotating ellipse; at a fraction of 0.25 the NFP 3 ladder sticks at its iota floor).
+Each stage of the ladder names a boundary mode number and a volume-average beta
+(``MAX_MODES``, ``BETA_FRACTIONS``, ``TARGET_BETA``): the first three run in vacuum,
+as the vacuum example does, and the last three bring the zero-current pressure ``p``
+proportional to ``1-s`` to the target. The pwO residual uses 8 x 8 Boozer modes, no
+oversampling and a 16 x 16 quadrature in the loop and 16 x 16 modes, oversample 2 and
+32 x 32 for the final design; the final solves reach ns 71 at ftol 1e-13.
+
+The magnetic well and Mercier stability are hinges that act at finite beta only;
+``MAGNETIC_WELL_FLOOR = None`` or ``MERCIER_MARGIN = None`` removes one.
+``BOOTSTRAP_TERM = "band"`` and ``DKX_FINAL_STAGES`` control the bootstrap current as
+in the vacuum example, and ``GAMMA_C_FINAL_STAGES`` adds the GammaC proxy to the last
+stages. The pwO rows weigh 1e3 in vacuum and ``BETA_PWO_WEIGHT`` at finite beta, and the
+shape hinges scale with it. The hinges and the transport compete: at NFP 4 and 3 %
+beta, a design with the well and Mercier hinges off has pwO 6e-6 and loses 1.8 % of its
+alphas, one with Mercier stability alone loses 24 % and one with both hinges 37 %, so the
+switches expose the trade rather than hide it. Holding the plasma volume
+(``HOLD_VOLUME = True``) stalls the NFP 4 ladder. Each stage writes
+``input.<name>_stage<k>``; set ``INPUT_FILE`` to one, ``SEED_MODES = None``,
+``MAP_PARAMETERS`` to its printed map and trim the ladder lists to resume after an
+interruption. The NEO baseline is the plain seed in vacuum, which cannot hold the
+target pressure.
 
 ``single_stage_optimization_pwO.py`` reads the vacuum result, calibrates the
 pressure, and runs one finite-beta plasma stage with the pwO map free and
