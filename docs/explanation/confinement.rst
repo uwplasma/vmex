@@ -102,7 +102,7 @@ One transform implementation — ``booz_xform_jax``'s — executes these
 equations; vmex only feeds it. The host driver
 :func:`vmex.core.boozer.run_booz_xform` calls it on a ``wout_*.nc`` file and
 writes a standard ``boozmn_*.nc`` (used by ``vmex --booz`` and by
-:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`). The
+:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout`). The
 traceable :func:`~vmex.core.omnigenity.boozer_spectrum_state` calls the same
 jittable kernel in memory on wout-convention tables built from the solver's
 internal state (:func:`~vmex.core.boozer_tables.boozer_input_tables`), so
@@ -564,7 +564,7 @@ Use :class:`~vmex.core.qi.ConstructedQIResidual` for production optimization,
 with reduced sampling only when its ranking has been checked against the
 default resolution. When quoting "how QI is this equilibrium?", also evaluate
 the wout/Boozer-based
-:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout` on the written
+:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout` on the written
 ``wout``. Always report the surfaces and sampling because an outer-surface
 total is not numerically interchangeable with a core-to-edge total.
 
