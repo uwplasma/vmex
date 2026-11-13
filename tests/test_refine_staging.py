@@ -511,3 +511,36 @@ def test_resume_budget_has_a_floor_for_hot_restarted_solves(monkeypatch) -> None
     for iterations in (25, 10 * im._REFINE_RESUME_MIN_ITERATIONS):
         assert im._resumed_refinement(cfg, p0, state, mask, iterations) is None
     assert budgets == [min(cfg.max_iterations, im._REFINE_RESUME_MIN_ITERATIONS), cfg.max_iterations]
+
+
+def test_a_carried_correction_from_another_device_seeds_the_refinement() -> None:
+    """The memoized correction is placed beside the state, not where it was computed."""
+    import pytest
+
+    devices = jax.devices("cpu")
+    if len(devices) < 2:
+        pytest.skip("needs two devices")
+    _, cfg, p0 = _small_solovev_setup()
+    state, mask = _host_state(cfg, p0)
+    state = jax.device_put(state, devices[0])
+    mask = jax.device_put(mask, devices[0])
+    im._LAST_REFINED.pop(cfg, None)
+    im._LAST_REFINEMENT_CORRECTION[cfg] = jax.device_put(
+        jax.tree.map(jnp.zeros_like, state), devices[1])
+    refined = im._refine_fixed_point(cfg, p0, state, mask)
+    assert all(leaf.devices() == {devices[0]} for leaf in jax.tree.leaves(refined))
+
+
+def test_force_evaluation_accepts_a_state_from_another_device() -> None:
+    """A host-solved state is evaluated beside the runtime, not mixed with it."""
+    import pytest
+    from vmex.core import solver
+
+    devices = jax.devices("cpu")
+    if len(devices) < 2:
+        pytest.skip("needs two devices")
+    inp, _, _ = _small_solovev_setup()
+    runtime = solver.prepare_runtime(inp)
+    state = jax.device_put(solver._initial_state(runtime.setup), devices[1])
+    _, residuals, _ = solver.evaluate_forces(state, runtime)
+    assert np.isfinite(float(residuals.fsqr))
