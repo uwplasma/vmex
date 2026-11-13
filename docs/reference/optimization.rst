@@ -327,6 +327,11 @@ driver inputs and validate it for a new normalization.
    monitor.save("objectives.csv")
    monitor.plot("objectives.png")
 
+``opt.StallStop(callback, patience=3, threshold=0.02, min_iterations=0)`` wraps
+a callback and ends a stage whose cost falls by less than ``threshold`` (a
+fraction) over ``patience`` accepted iterations, so ``max_nfev`` is a ceiling
+that a stage still descending can use in full. Create one per stage.
+
 Continuation stages may restart the optimizer iteration counter; the monitor
 keeps the combined saved history strictly increasing. Exact-zero terms are
 drawn at a relative numerical display floor instead of forcing a meaningless

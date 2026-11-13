@@ -269,8 +269,7 @@ def boozer_field(wout, *, mboz: int = 32, nboz: int = 32, mode_tolerance: float 
     bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
     bx.read_wout_data(wout, flux=False)
     # The orbits need only |B|, G and I on every surface: one jitted magnetic-only batched pass.
-    # booz_xform_jax releases before magnetic_only existed compute (and discard) the geometry as well.
-    out = bx.run_jax(**({"magnetic_only": True} if "magnetic_only" in signature(bx.run_jax).parameters else {}))
+    out = bx.run_jax(magnetic_only=True)
     for name in ("bmnc_b", "bmns_b") if bx.asym else ("bmnc_b",):
         setattr(bx, name, np.asarray(out[name]).T)
     bx.Boozer_G, bx.Boozer_I, bx.s_b = np.asarray(out["bvco_b"]), np.asarray(out["buco_b"]), np.asarray(bx.s_in)
