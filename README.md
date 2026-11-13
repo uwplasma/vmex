@@ -63,7 +63,7 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.14` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.15` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
@@ -73,10 +73,10 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.35.1 | `pip install vmex` | `pip install "solvax>=0.35.1"` |
+| `solvax` | 0.36.1 | `pip install vmex` | `pip install "solvax>=0.36.1"` |
 | `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.14 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.14"` |
+| `virtual-casing-jax` | 0.0.15 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.15"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
 | `dkx` | 2.14.0 | `vmex[neoclassical]` | `pip install "dkx>=2.14.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
@@ -693,5 +693,5 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
-and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
+and `vmex --doctor` output. See [citation](CITATION.cff),
 [license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).

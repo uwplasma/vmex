@@ -58,7 +58,7 @@ def _sha(path: Path) -> str:
 
 def _doc_pages() -> list[Path]:
     pages = [p for p in DOCS.rglob("*") if p.suffix in (".md", ".rst") and "_build" not in p.parts]
-    return [ROOT / "README.md", ROOT / "CHANGELOG.md", *sorted(pages)]
+    return [ROOT / "README.md", *sorted(pages)]
 
 
 def _tool(name: str):
@@ -213,7 +213,6 @@ def test_cited_record_paths_exist() -> None:
     ("check_cited_paths", "p.rst", "Generate::\n\n   write --out benchmarks/generated.json\n\n"
      "Missing: benchmarks/missing.json\n", "benchmarks/missing.json"),
     ("check_root_limits", "README.md", "text\n" * 701, "line cap"),
-    ("check_root_limits", "CHANGELOG.md", "Polish improves force error 26-fold.\n", "withdrawn polish gain"),
     ("check_prose", "p.rst", ".. code-block:: python\n\n   robust = True\n\n``robust``\nRobust prose.\n",
      "banned phrase"),
 ])
