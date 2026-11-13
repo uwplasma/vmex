@@ -1712,6 +1712,8 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
         with _timed(cfg, "refinement"):
             _count(cfg, refinements=1)
             guess = _LAST_REFINEMENT_CORRECTION.get(cfg)
+            if guess is not None:  # an earlier call may have run on another device
+                guess = jax.device_put(guess, next(iter(jax.tree.leaves(state)[0].devices())))
             solved = _LAST_SOLVE.get(cfg)
             resume = (_REFINE_BLOCK_MAX_STEPS > 0 and _REFINE_RESUME_FTOL < cfg.ftol
                       and solved is not None and solved[0] == key
