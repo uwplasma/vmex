@@ -66,6 +66,7 @@ or pick what you need:
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.15` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
 | `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
+| `pip install "vmex[alfven]"` | `alfvex>=1.1.0`, `matplotlib` | shear-Alfven continuum gaps and the widest-gap global mode with `vmex --alfven` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
 
@@ -80,6 +81,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
 | `dkx` | 2.14.0 | `vmex[neoclassical]` | `pip install "dkx>=2.14.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
+| `alfvex` | 1.1.0 | `vmex[alfven]` | `pip install "alfvex>=1.1.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
 ### Existing environments

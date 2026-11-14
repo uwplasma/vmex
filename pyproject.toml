@@ -99,6 +99,12 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
+# Shear-Alfven continuum and global modes (``vmex --alfven``) via FAX (PyPI name
+# ``alfvex``). 1.1.0 adds ``fax.summary`` and ``fax.plot_summary``.
+alfven = [
+  "alfvex>=1.1.0",
+  "matplotlib",
+]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
 # 0.20.1: per-pair Coulomb logarithms in the collision rates that collisional
 # `vmex --trace` uses (ESSOS #128); needs Python 3.11 and diffrax 0.7.2.
@@ -112,7 +118,7 @@ coils = [
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
 all = [
-  "vmex[coils,freeb,neoclassical,optimizers,turbulence]",
+  "vmex[alfven,coils,freeb,neoclassical,optimizers,turbulence]",
 ]
 docs = [
   "sphinx",
@@ -164,11 +170,12 @@ relative_files = true
 # so the module is excluded from the core >=95% coverage gate. It is
 # exercised by the optional-integrations CI lane. turbulence.py is
 # likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
-# (the ``vmex --turbulence`` driver).
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+# (the ``vmex --turbulence`` driver); alfven_run.py (``vmex --alfven``) likewise
+# needs the ``alfven`` extra.
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/alfven_run.py"]
 
 [tool.coverage.report]
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/alfven_run.py"]
 
 [tool.ruff]
 line-length = 120
