@@ -163,10 +163,18 @@ def _boozer_kernel_state(state, rt, *, rows, s_half, mboz, nboz, oversample,
     )
 
     lasym = bool(rt.setup.lasym)
-    tables = [boozer_input_tables(state, rt, int(row)) for row in rows]
-    stack = lambda name: jnp.stack([table[name] for table in tables])  # noqa: E731
-    first = tables[0]
-    xm, xn = np.asarray(first["xm"]), np.asarray(first["xn"])
+    # One traced pass over the rows: the field chain does not depend on the
+    # row, so it is built once instead of once per surface.
+    modes = {}
+
+    def row_tables(row):
+        table = boozer_input_tables(state, rt, row)
+        modes["xm"], modes["xn"] = table.pop("xm"), table.pop("xn")
+        return table
+
+    tables = jax.vmap(row_tables)(jnp.asarray(rows))
+    stack = tables.__getitem__
+    xm, xn = np.asarray(modes["xm"]), np.asarray(modes["xn"])
     # An axisymmetric state (no toroidal input harmonics) has exactly no
     # n != 0 Boozer content -- the Boozer relabelling of an axisymmetric
     # field is axisymmetric -- so drop the toroidal band outright.  This
