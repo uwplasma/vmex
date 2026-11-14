@@ -10,14 +10,15 @@ FAX enables 64-bit floats when imported, so it is imported only here, after the 
 from __future__ import annotations
 
 import json
+import sys
 from math import ceil
 from pathlib import Path
 
 import numpy as np
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # Python 3.10
+else:  # Python 3.10
     import tomli as tomllib
 
 __all__ = ["default_harmonics", "run_alfven"]
