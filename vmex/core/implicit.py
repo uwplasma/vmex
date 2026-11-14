@@ -3646,6 +3646,64 @@ def implicit_state_pullback_multi_rhs(
             response_chunk_size=response_chunk_size))
 
 
+def _neopax_raw_block_solve(
+    params, cfg, x_star, dof_mask, rhs, *, probe_chunk_size=1, transpose=False,
+):
+    """Legacy NEOPAX raw block inverse, without equilibration or refinement."""
+    frozen = jax.lax.stop_gradient(x_star)
+    project = _dof_projector(cfg, dof_mask)
+    z_star = project(x_star)
+    residual = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    ns = int(cfg.resolution.ns)
+    mask = jax.device_get(dof_mask)
+    mn = int(np.asarray(mask.R_cos).shape[1])
+    fields = tuple(name for name in _STATE_FIELDS if np.asarray(getattr(mask, name)).any())
+    if not fields:
+        return jax.tree.map(jnp.zeros_like, rhs)
+    count, width = len(fields), len(fields) * mn
+
+    def pack(tree):
+        return jnp.concatenate([jnp.asarray(getattr(tree, name), jnp.float64) for name in fields], axis=1)
+
+    def unpack(matrix):
+        parts = dict(zip(fields, jnp.split(matrix, count, axis=1)))
+        return SpectralState(**{
+            name: parts.get(name, jnp.zeros((ns, mn), matrix.dtype)) for name in _STATE_FIELDS
+        })
+
+    def probe(spec):
+        color, field, column = spec
+        matrix = jnp.where(
+            (jnp.arange(ns) % 3 == color)[:, None],
+            jax.nn.one_hot(column, mn, dtype=jnp.float64)[None], 0.,
+        )
+        stack = jax.nn.one_hot(field, count, dtype=jnp.float64)[:, None, None] * matrix[None]
+        direction = unpack(jnp.concatenate([stack[i] for i in range(count)], axis=1))
+        response = jax.jvp(lambda z: residual(z, params), (z_star,), (direction,))[1]
+        return pack(jax.tree.map(lambda a, b, p: a + (b-p), response, direction, project(direction)))
+
+    probes = chunk_map(probe, (
+        jnp.asarray(np.repeat(np.arange(3), width)),
+        jnp.asarray(np.tile(np.repeat(np.arange(count), mn), 3)),
+        jnp.asarray(np.tile(np.tile(np.arange(mn), count), 3)),
+    ), chunk_size=max(1, int(probe_chunk_size))).reshape((3, width, ns, width))
+    rows = jnp.arange(ns)
+
+    def band(offset):
+        return jnp.swapaxes(probes[(rows+offset) % 3, :, rows, :], 1, 2)
+
+    lower, diagonal, upper = band(-1), band(0), band(1)
+    if transpose:
+        zeros = jnp.zeros_like(diagonal)
+        lower, diagonal, upper = (
+            jnp.concatenate([zeros[:1], jnp.swapaxes(upper[:-1], -1, -2)], axis=0),
+            jnp.swapaxes(diagonal, -1, -2),
+            jnp.concatenate([jnp.swapaxes(lower[1:], -1, -2), zeros[:1]], axis=0),
+        )
+    factors = block_thomas_factor(lower, diagonal, upper)
+    return project(unpack(block_thomas_solve(factors, pack(project(rhs))[..., None])[..., 0]))
+
+
 def implicit_state_tangent_raw_block(
     params: ImplicitParams,
     cfg: ImplicitConfig,
@@ -3655,18 +3713,22 @@ def implicit_state_tangent_raw_block(
     *,
     probe_chunk_size: int = 1,
 ) -> SpectralState:
-    """Single-direction view of the certified, batched raw-block response.
-
-    Retains the NEOPAX calling convention without a second implementation
-    of the factorization, residual or boundary-assembly derivative.
-    """
-    tangent_batch = jax.tree.map(lambda value: value[None], param_tangent)
-    states, report = implicit_state_tangent_multi_rhs(
-        params, cfg, x_star, dof_mask, tangent_batch,
-        probe_chunk_size=probe_chunk_size, response_chunk_size=1,
+    """NEOPAX's original frozen raw-block tangent; no response refinement."""
+    frozen = jax.lax.stop_gradient(x_star)
+    project = _dof_projector(cfg, dof_mask)
+    edge = _edge_mask(cfg)
+    residual = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    z_star = project(x_star)
+    rhs = jax.tree.map(jnp.negative, jax.jvp(
+        lambda prm: residual(z_star, prm), (params,), (param_tangent,),
+    )[1])
+    dz = _neopax_raw_block_solve(
+        params, cfg, x_star, dof_mask, rhs, probe_chunk_size=probe_chunk_size,
     )
-    _raise_unconverged_rows(cfg, report, "block")
-    return jax.tree.map(lambda value: value[0], states)
+    return jax.jvp(
+        lambda z, prm: _assemble(z, runtime_from_params(prm, cfg), frozen, project, edge),
+        (z_star, params), (dz, param_tangent),
+    )[1]
 
 
 def implicit_state_pullback_multi_rhs_raw_block_transpose(
@@ -3678,11 +3740,27 @@ def implicit_state_pullback_multi_rhs_raw_block_transpose(
     *,
     probe_chunk_size: int = 1,
 ) -> ImplicitParams:
-    """NEOPAX-compatible view of the certified batched block transpose."""
-    return implicit_state_pullback_multi_rhs(
-        params, cfg, x_star, dof_mask, gbar_batch,
-        solver="block", probe_chunk_size=probe_chunk_size, response_chunk_size=1,
+    """NEOPAX's original paired raw-block transpose and boundary pullback."""
+    frozen = jax.lax.stop_gradient(x_star)
+    project = _dof_projector(cfg, dof_mask)
+    edge = _edge_mask(cfg)
+    residual = residual_fn(cfg, frozen, dof_mask, formulation="raw")
+    z_star = project(x_star)
+    _, assemble_z = jax.vjp(
+        lambda z: _assemble(z, runtime_from_params(params, cfg), frozen, project, edge), z_star,
     )
+    _, residual_p = jax.vjp(lambda prm: residual(z_star, prm), params)
+    _, assemble_p = jax.vjp(
+        lambda prm: _assemble(z_star, runtime_from_params(prm, cfg), frozen, project, edge), params,
+    )
+    rhs = jax.vmap(lambda bar: assemble_z(bar)[0])(gbar_batch)
+    multipliers = jax.vmap(lambda value: _neopax_raw_block_solve(
+        params, cfg, x_star, dof_mask, value,
+        probe_chunk_size=probe_chunk_size, transpose=True,
+    ))(rhs)
+    implicit_bar = jax.vmap(lambda mu: residual_p(jax.tree.map(jnp.negative, mu))[0])(multipliers)
+    boundary_bar = jax.vmap(lambda bar: assemble_p(bar)[0])(gbar_batch)
+    return jax.tree.map(jnp.add, implicit_bar, boundary_bar)
 
 
 def _block_state_pullback(

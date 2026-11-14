@@ -10,35 +10,76 @@ import vmex
 from vmex.core import implicit, omnigenity, stability
 
 
-def test_raw_block_views_preserve_tangent_transpose_and_certificate(monkeypatch):
-    matrix = jnp.array([[2.0, -0.4], [0.3, 1.5]])
-    tangent = {"boundary": jnp.array([0.2, -0.1])}
-    params, cfg, state, mask = (object() for _ in range(4))
-    certificates = []
+@pytest.mark.parametrize("chunk", [1, 2])
+def test_raw_block_views_preserve_legacy_inverse_and_assembly_transpose(monkeypatch, chunk):
+    """Four scalar blocks exercise the real direct solve, never a VMEX solve."""
+    fields = implicit._STATE_FIELDS
+    def make(**values):
+        return implicit.SpectralState(**{
+            name: values.get(name, jnp.zeros((4, 1))) for name in fields
+        })
+    matrix = jnp.diag(jnp.array([2., 3., 2.5, 4.]))
+    matrix += jnp.diag(jnp.array([.2, -.1, .3]), -1)
+    matrix += jnp.diag(jnp.array([-.4, .3, .2]), 1)
+    forcing = jnp.array([[.2, -.3], [.3, -.1], [.4, .2], [.5, .4]])
+    direct_r = jnp.tile(jnp.array([.2, -.3]), (4, 1))
+    direct_z = jnp.tile(jnp.array([-.1, .4]), (4, 1))
+    params, tangent = jnp.array([.1, .2]), jnp.array([.2, -.1])
+    state, mask = make(), make(R_cos=jnp.ones((4, 1)))
+    cfg = SimpleNamespace(resolution=SimpleNamespace(ns=4))
+    def project(tree):
+        return jax.tree.map(jnp.multiply, tree, mask)
 
-    def forward(p, c, x, m, batch, **options):
-        assert (p, c, x, m) == (params, cfg, state, mask)
-        assert options == {"probe_chunk_size": 2, "response_chunk_size": 1}
-        assert batch["boundary"].shape == (1, 2)
-        return {"state": batch["boundary"] @ matrix.T}, "certificate"
+    def residual(_cfg, frozen, dofs, *, formulation):
+        assert formulation == "raw" and dofs is mask
+        return lambda z, p: make(R_cos=(matrix @ z.R_cos[:, 0] + forcing @ p)[:, None])
 
-    def reverse(p, c, x, m, bars, **options):
-        assert (p, c, x, m) == (params, cfg, state, mask)
-        assert options == {"solver": "block", "probe_chunk_size": 2, "response_chunk_size": 1}
-        return {"boundary": bars["state"] @ matrix}
+    def assemble(z, p, frozen, proj, edge):
+        return make(R_cos=z.R_cos + (direct_r @ p)[:, None],
+                    Z_sin=2*z.R_cos + (direct_z @ p)[:, None])
 
-    monkeypatch.setattr(implicit, "implicit_state_tangent_multi_rhs", forward)
-    monkeypatch.setattr(implicit, "implicit_state_pullback_multi_rhs", reverse)
-    monkeypatch.setattr(implicit, "_raise_unconverged_rows", lambda *args: certificates.append(args))
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Legacy raw-block helpers must not use refined/certified response lanes")
+
+    monkeypatch.setattr(implicit, "_dof_projector", lambda *args: project)
+    monkeypatch.setattr(implicit, "_edge_mask", lambda cfg: make())
+    monkeypatch.setattr(implicit, "residual_fn", residual)
+    monkeypatch.setattr(implicit, "runtime_from_params", lambda p, cfg: p)
+    monkeypatch.setattr(implicit, "_assemble", assemble)
+    for name in ("implicit_state_tangent_multi_rhs", "implicit_state_pullback_multi_rhs",
+                 "_raw_block_system", "_block_factor", "_raise_unconverged_rows"):
+        monkeypatch.setattr(implicit, name, forbidden)
+
+    response_r = -np.linalg.solve(np.asarray(matrix), np.asarray(forcing))
+    expected_r, expected_z = response_r + direct_r, 2*response_r + direct_z
     response = implicit.implicit_state_tangent_raw_block(
-        params, cfg, state, mask, tangent, probe_chunk_size=2)
-    bars = {"state": jnp.array([[0.8, -0.6], [0.2, 0.9]])}
+        params, cfg, state, mask, tangent, probe_chunk_size=chunk)
+    np.testing.assert_allclose(response.R_cos[:, 0], expected_r @ tangent, rtol=1e-12)
+    np.testing.assert_allclose(response.Z_sin[:, 0], expected_z @ tangent, rtol=1e-12)
+    compiled_response = jax.jit(lambda direction: implicit.implicit_state_tangent_raw_block(
+        params, cfg, state, mask, direction, probe_chunk_size=chunk))(tangent)
+    np.testing.assert_allclose(compiled_response.R_cos, response.R_cos, rtol=1e-12)
+    bars = jax.tree.map(lambda value: jnp.stack([value+.3, value-.2]), make())
     gradient = implicit.implicit_state_pullback_multi_rhs_raw_block_transpose(
-        params, cfg, state, mask, bars, probe_chunk_size=2)
-    np.testing.assert_allclose(response["state"], matrix @ tangent["boundary"])
-    np.testing.assert_allclose(
-        bars["state"] @ response["state"], gradient["boundary"] @ tangent["boundary"])
-    assert certificates == [(cfg, "certificate", "block")]
+        params, cfg, state, mask, bars, probe_chunk_size=chunk)
+    expected = bars.R_cos[..., 0] @ expected_r + bars.Z_sin[..., 0] @ expected_z
+    np.testing.assert_allclose(gradient, expected, rtol=1e-12, atol=1e-13)
+    compiled_gradient = jax.jit(lambda cotangents: implicit.implicit_state_pullback_multi_rhs_raw_block_transpose(
+        params, cfg, state, mask, cotangents, probe_chunk_size=chunk))(bars)
+    np.testing.assert_allclose(compiled_gradient, expected, rtol=1e-12, atol=1e-13)
+    products = sum(jnp.sum(b*t[None], axis=(1, 2)) for b, t in zip(
+        jax.tree.leaves(bars), jax.tree.leaves(response), strict=True))
+    np.testing.assert_allclose(products, gradient @ tangent, rtol=1e-12, atol=1e-13)
+
+
+def test_raw_block_empty_mask_has_zero_inverse(monkeypatch):
+    state = implicit.SpectralState(**{name: jnp.zeros((2, 1)) for name in implicit._STATE_FIELDS})
+    cfg = SimpleNamespace(resolution=SimpleNamespace(ns=2))
+    monkeypatch.setattr(implicit, "_dof_projector", lambda *args: lambda tree: tree)
+    monkeypatch.setattr(implicit, "residual_fn", lambda *args, **kwargs: None)
+    for transpose in (False, True):
+        result = implicit._neopax_raw_block_solve(cfg, cfg, state, state, state, transpose=transpose)
+        assert all(np.count_nonzero(value) == 0 for value in jax.tree.leaves(result))
 
 
 def test_constructed_j_surrogate_values_directions_and_edge_cases():
