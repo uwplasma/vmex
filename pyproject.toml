@@ -81,7 +81,7 @@ neoclassical = [
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.15",
+    "virtual-casing-jax>=0.0.15,!=0.0.16",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
