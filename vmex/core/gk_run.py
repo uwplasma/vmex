@@ -312,8 +312,16 @@ def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
     nl_case = gkx.load(write_deck(outdir / f"{label}_gkx_nonlinear.toml", wout_path, cfg, nonlinear=True))
     stages.begin("nl", f"Nonlinear run to saturation or t={cfg.t_max:g}")
     with _gkx_warnings(emit):
-        nl = gkx.solve(nl_case, Nl=cfg.nl, Nm=cfg.nm, return_state=True,
-                       status_callback=lambda msg: emit(f"          {msg}"))
+        try:  # GKX >= the progress reporter (GKX #495); older GKX gets its raw status lines
+            from gkx.workflows.runtime.chunks import ProgressReporter
+
+            rep = ProgressReporter()
+        except ImportError:
+            rep = lambda msg: emit(f"          {msg}")  # noqa: E731
+        nl = gkx.solve(nl_case, Nl=cfg.nl, Nm=cfg.nm, return_state=True, status_callback=rep)
+        if hasattr(rep, "finish"):  # summary line and Q(t) / Q(ky) plots next to the output file
+            rep.finish(nl, plot=str(out).removesuffix(".out.nc").removesuffix(".nc"),
+                       ky=np.asarray(gkx.build_spectral_grid(nl_case.grid).ky))
     d = nl.diagnostics
     t = np.asarray(d.t, float)
     # GKX's own decision (window, mean, SEM, status); the last half of the run when it made none.
