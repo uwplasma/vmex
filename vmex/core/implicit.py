@@ -1890,10 +1890,12 @@ def _refine_block_factors(cfg: ImplicitConfig, params: ImplicitParams,
 #: less than this fraction of its norm.  The anchor's Newton steps and the
 #: Jacobian's backsolve use them only as a preconditioner of the exact raw
 #: operator, which certifies the result, so a nearby factorization costs
-#: at most a few Krylov iterations.  The refinement moves the iterate by
-#: 3e-4..2e-3 (QA example) between the two factorizations it would otherwise
-#: pay (0.2 s each, 92% in the 3 * block_size colored JVP probes).
-_BANDS_REUSE_TOL = 1.0e-2
+#: at most a few Krylov iterations.  On the QA example the refined state sits
+#: 1e-3..1.6e-2 from the refinement's factorization point, growing as the
+#: boundary leaves the seed; at 1e-2 the Jacobian refactored 23 of 40 times,
+#: at this tolerance never, for twice the backsolve iterations and 13% less
+#: Jacobian time.
+_BANDS_REUSE_TOL = 5.0e-2
 
 #: Relative residual the Jacobian's backsolve iterates to on supplied bands.
 _STALE_BANDS_RTOL = 1.0e-12
