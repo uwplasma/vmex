@@ -336,8 +336,12 @@ def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
         emit("          not saturated by GKX's criterion: the mean is indicative only; raise --turbulence-tmax")
     stages.end(f"t_end={t[-1]:.1f}, Q/Q_gB={q_mean:.4g} +/- {q_err:.2g}")
 
-    # GKX's own NetCDF bundle (traces, spectra, saturation verdict); placeholder until GKX exposes this.
-    from gkx.workflows.runtime.artifacts import write_runtime_nonlinear_artifacts
+    # GKX NetCDF bundle (traces, spectra, saturation verdict): an internal GKX call since 2.6.0; no public writer yet.
+    try:
+        from gkx.workflows.runtime.artifacts import write_runtime_nonlinear_artifacts
+    except ImportError as exc:
+        raise ImportError(f"vmex --turbulence needs gkx.workflows.runtime.artifacts.write_runtime_nonlinear_artifacts, "
+                          f"absent from GKX {gkx.__version__}; install a GKX release that provides it (2.6.0 does)") from exc
 
     write_runtime_nonlinear_artifacts(out, nl, nl_case)
     summary = {
