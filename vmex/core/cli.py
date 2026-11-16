@@ -58,7 +58,6 @@ non-convergence visible where VMEC2000 loses it: ``wout.ier_flag`` records
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import os
 import re
 import shutil
