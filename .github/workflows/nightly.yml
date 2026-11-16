@@ -58,15 +58,16 @@ jobs:
           retention-days: 7
 
   example-python-matrix:
-    # The oldest and newest supported Pythons run the canonical optimization
-    # example; the PR lanes run Python 3.12 only.
+    # The oldest and newest Pythons that run the optimization examples execute
+    # the canonical one; the PR lanes run Python 3.12 only.  The examples pass
+    # least_squares(callback=), which needs SciPy 1.16 and so Python 3.11.
     name: QA optimization example (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.13"]
+        python: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
