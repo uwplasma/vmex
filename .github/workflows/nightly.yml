@@ -171,11 +171,11 @@ jobs:
         # to skip in every lane -- which is how #354's aliased effective ripple
         # shipped.  This is the one job that exercises the released extras.
         run: |
-          python -m pip install ".[coils,turbulence,freeb,neoclassical,optimizers]" \
+          python -m pip install ".[alfven,coils,turbulence,freeb,neoclassical,optimizers]" \
             simsopt pytest pytest-xdist
       - name: Verify imports
         run: |
-          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax"
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax, fax"
           python -c "import simsopt"
       - name: Fetch reference assets
         run: python tools/fetch_assets.py --bundle reference-nc
