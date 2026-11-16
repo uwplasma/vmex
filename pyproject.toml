@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.14.0"
+version = "0.15.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -81,7 +81,7 @@ neoclassical = [
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.15",
+    "virtual-casing-jax>=0.0.17",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -158,7 +158,7 @@ markers = [
 # Coverage files from different runners (Linux and macOS paths) combine only
 # when the recorded paths are relative to the repository root.
 relative_files = true
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.15
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.17
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is
