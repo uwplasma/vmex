@@ -47,19 +47,33 @@ class TurbulenceSettings:
     ky_min: float = 0.1
     ky_max: float = 1.0
     nky: int = 8
-    nx: int = 32  # nonlinear grid (Nx, Ny, Nz)
-    ny: int = 32
-    nz: int = 32
-    nl: int = 2  # Laguerre moments
-    nm: int = 6  # Hermite moments
-    t_max: float = 250.0  # nonlinear horizon, a / v_ti
+    nx: int = 64  # nonlinear grid (Nx, Ny); nz points per poloidal turn
+    ny: int = 64
+    nz: int = 24
+    npol: float = 3.0  # poloidal turns of the flux tube (VMEC field lines need >= 3)
+    nl: int = 4  # Laguerre moments
+    nm: int = 8  # Hermite moments
+    t_max: float = 1000.0  # nonlinear cap, a / v_ti; GKX stops earlier on saturation
     kinetic_electrons: bool = False
     d_hyper: float = 0.05  # k_perp hyperdiffusion coefficient
+    precision: str = "f32"  # "f32" or "f64"
+    out: str | None = None  # GKX NetCDF bundle; default <outdir>/<case>_turbulence.out.nc
+
+    @property
+    def ntheta(self) -> int:
+        """Total parallel points ``nz * npol``."""
+        return int(round(self.nz * self.npol))
+
+
+# ``--turbulence-fast``: coarse, for screening only.  Fluxes are not converged (Cyclone-like
+# cases read ~3x high at 32x32x16, (2,4)).
+FAST = {"nx": 32, "ny": 32, "nz": 16, "npol": 1.0, "nl": 2, "nm": 4, "t_max": 250.0, "nky": 4}
 
 
 # Linear-run horizon (a / v_ti, capped at t_max); GKX falls back to a Krylov eigensolve when the
 # time fit is not a clean growing mode.
 _T_LINEAR = 50.0
+_NU_ION = 0.01
 
 
 _DECK = """schema_version = 1
@@ -68,12 +82,12 @@ _DECK = """schema_version = 1
 [grid]
 Nx = {nx}
 Ny = {ny}
-Nz = {nz}
+Nz = {ntheta}
 Lx = {lx:.6g}
 Ly = {ly:.6g}
 boundary = "{boundary}"
 y0 = {y0:.6g}
-ntheta = {nz}
+ntheta = {ntheta}
 nperiod = 1
 
 [time]
@@ -86,7 +100,7 @@ model = "vmec"
 vmec_file = "{wout}"
 torflux = {s:.6g}
 alpha = {alpha:.6g}
-npol = 1.0
+npol = {npol:.6g}
 
 [init]
 # Seed every (kx, ky) mode: a single seeded mode never couples nonlinearly.
@@ -137,14 +151,14 @@ kinetic = true
 
 def write_deck(path: Path, wout: Path, cfg: TurbulenceSettings, *, nonlinear: bool) -> Path:
     """Write the GKX TOML deck for the linear scan or the nonlinear run."""
-    species = _SPECIES.format(name="ion", charge=1.0, mass=1.0, tprim=cfg.tprim, fprim=cfg.fprim, nu=0.01)
+    species = _SPECIES.format(name="ion", charge=1.0, mass=1.0, tprim=cfg.tprim, fprim=cfg.fprim, nu=_NU_ION)
     if cfg.kinetic_electrons:
         species += _SPECIES.format(name="electron", charge=-1.0, mass=0.00027,
                                    tprim=cfg.tprim, fprim=cfg.fprim, nu=0.0)
     y0 = 1.0 / cfg.ky_min
     path.write_text(_DECK.format(
         name=path.name, species=species, wout=wout.resolve(), s=cfg.s, alpha=cfg.alpha, t_max=cfg.t_max if nonlinear else min(_T_LINEAR, cfg.t_max),
-        nx=cfg.nx if nonlinear else 1, ny=cfg.ny if nonlinear else 3 * int(ky_grid(cfg)[-1] * y0 + 0.5) + 1, nz=cfg.nz,
+        nx=cfg.nx if nonlinear else 1, ny=cfg.ny if nonlinear else 3 * int(ky_grid(cfg)[-1] * y0 + 0.5) + 1, ntheta=cfg.ntheta, npol=cfg.npol,
         lx=2 * np.pi * y0, ly=2 * np.pi * y0, y0=y0, boundary="fix aspect" if nonlinear else "linked",
         linear=str(not nonlinear).lower(), nonlinear=str(nonlinear).lower(),
         adiabatic=str(not cfg.kinetic_electrons).lower(), d_hyper=cfg.d_hyper,
@@ -226,9 +240,40 @@ def _gkx():
     return gkx
 
 
+def settings_block(wout: Path, cfg: TurbulenceSettings, *, backend: str, out: Path) -> list[str]:
+    """The resolved settings, one compact block (mirrors the ``--trace`` banner)."""
+    y0 = 1.0 / cfg.ky_min
+    ele = ("kinetic (m_e/m_i = 1/3670, nu = 0)" if cfg.kinetic_electrons else "adiabatic (tau_e = 1)")
+    return [
+        f" Gyrokinetic turbulence on {wout.name} ({backend}, {'float64' if cfg.precision == 'f64' else 'float32'})",
+        f"   flux tube : s = {cfg.s:g} (rho = {np.sqrt(cfg.s):.3f}), alpha = {cfg.alpha:g}, npol = {cfg.npol:g}",
+        f"   gradients : a/LT = {cfg.tprim:g}, a/Ln = {cfg.fprim:g} (ions{', electrons' if cfg.kinetic_electrons else ''}); electrons {ele}",
+        f"   grid      : Nx x Ny x Nz = {cfg.nx} x {cfg.ny} x {cfg.ntheta} ({cfg.nz} per turn), "
+        f"(Nl, Nm) = ({cfg.nl}, {cfg.nm}), ky_min = {cfg.ky_min:g} (y0 = {y0:g}), Lx = Ly = {2 * np.pi * y0:.1f}",
+        f"   time      : GKX CFL-controlled RK4, t_max = {cfg.t_max:g} a/v_ti, stop when the heat-flux window "
+        "reaches 5% SEM and both halves agree",
+        f"   collisions: nu_i = {_NU_ION:g}{'' if not cfg.kinetic_electrons else ', nu_e = 0'}; "
+        f"hypercollisions on; k_perp hyperdiffusion D = {cfg.d_hyper:g}",
+        f"   output    : {out}",
+        "   Change with --turbulence-s/-alpha/-gradients/-ky/-grid/-npol/-moments/-tmax/-precision/-out, "
+        "--turbulence-kinetic-electrons, --turbulence-fast (coarse screening)",
+    ]
+
+
 def run_turbulence(wout_path: Path, outdir: Path, cfg: TurbulenceSettings = TurbulenceSettings(),
                    *, emit=print) -> dict:
     """Linear ``k_y`` scan + nonlinear run on one flux tube; returns the summary dict."""
+    import jax
+
+    prev = bool(jax.config.jax_enable_x64)
+    jax.config.update("jax_enable_x64", cfg.precision == "f64")
+    try:
+        return _run(wout_path, outdir, cfg, emit)
+    finally:
+        jax.config.update("jax_enable_x64", prev)
+
+
+def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
     from .turbulence import gk_fieldline_geometry_from_wout
 
     gkx = _gkx()
@@ -238,20 +283,17 @@ def run_turbulence(wout_path: Path, outdir: Path, cfg: TurbulenceSettings = Turb
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     label = wout_path.stem.removeprefix("wout_")
-    electrons = "kinetic" if cfg.kinetic_electrons else "adiabatic"
-    emit(f" Gyrokinetic turbulence (GKX {gkx.__version__}, {jax.default_backend()} backend): "
-         f"s={cfg.s:g}, alpha={cfg.alpha:g}, a/LTi={cfg.tprim:g}, a/Ln={cfg.fprim:g}, {electrons} electrons")
-    emit(f"   linear: {cfg.nky} ky in [{cfg.ky_min:g}, {cfg.ky_max:g}]; nonlinear: "
-         f"{cfg.nx}x{cfg.ny}x{cfg.nz} (Nx,Ny,Nz), (Nl,Nm)=({cfg.nl},{cfg.nm}), t_max={cfg.t_max:g} a/v_ti")
-    emit("   Change with --turbulence-s, --turbulence-alpha, --turbulence-ky MIN MAX N, "
-         "--turbulence-grid NX NY NZ, --turbulence-moments NL NM, --turbulence-tmax, "
-         "--turbulence-gradients TPRIM FPRIM, --turbulence-kinetic-electrons")
+    out = Path(cfg.out) if cfg.out else outdir / f"{label}_turbulence.out.nc"
+    for line in settings_block(wout_path, cfg, backend=f"GKX {gkx.__version__}, {jax.default_backend()}", out=out):
+        emit(line)
     stages = _Stages(emit, {"geom": 1.0, "scan": 3.0, "mode": 1.0, "nl": 6.0})
 
     stages.begin("geom", "Sampling field-line geometry")
     geom = {k: v if isinstance(v, dict) else np.asarray(v) for k, v in gk_fieldline_geometry_from_wout(
         wout_path, s=cfg.s, alpha=cfg.alpha, ntheta=128, equal_arc=False).items()}
     stages.end(f"q={float(geom['q']):.3f}, s_hat={float(geom['s_hat']):.3f}")
+    if not abs(float(geom["q"])) < 1e3:
+        raise ValueError(f"iota is ~0 at s={cfg.s:g}: the field line never closes poloidally, so no flux tube is defined")
 
     lin_case = gkx.load(write_deck(outdir / f"{label}_gkx_linear.toml", wout_path, cfg, nonlinear=False))
     ky = ky_grid(cfg)
@@ -274,14 +316,22 @@ def run_turbulence(wout_path: Path, outdir: Path, cfg: TurbulenceSettings = Turb
                        status_callback=lambda msg: emit(f"          {msg}"))
     d = nl.diagnostics
     t = np.asarray(d.t, float)
-    # GKX's own saturation window when it measured one, else the last half.
-    t_win = (nl.saturation or {}).get("window_tmin")
+    # GKX's own decision (window, mean, SEM, status); the last half of the run when it made none.
+    sat = nl.saturation or {}
+    t_win = sat.get("window_tmin")
     q_mean, q_err, t_sat = saturated_mean(t, d.heat_flux_t, t_start=t_win)
+    if sat.get("mean") is not None and sat.get("sem") is not None:
+        q_mean, q_err = float(sat["mean"]), float(sat["sem"])
     g_mean, g_err, _ = saturated_mean(t, d.particle_flux_t, t_start=t_win)
-    if not (nl.saturation or {}).get("saturated", False):
-        emit("          not saturated by GKX's criterion: treat the mean as indicative; raise --turbulence-tmax")
+    status = "saturated" if sat.get("saturated", False) else "NOT saturated"
+    if status != "saturated":
+        emit("          not saturated by GKX's criterion: the mean is indicative only; raise --turbulence-tmax")
     stages.end(f"t_end={t[-1]:.1f}, Q/Q_gB={q_mean:.4g} +/- {q_err:.2g}")
 
+    # GKX's own NetCDF bundle (traces, spectra, saturation verdict); placeholder until GKX exposes this.
+    from gkx.workflows.runtime.artifacts import write_runtime_nonlinear_artifacts
+
+    write_runtime_nonlinear_artifacts(out, nl, nl_case)
     summary = {
         "wout": wout_path.name, "settings": asdict(cfg), "gkx_version": gkx.__version__,
         "backend": jax.default_backend(), "q": float(geom["q"]), "shat": float(geom["s_hat"]),
@@ -289,7 +339,8 @@ def run_turbulence(wout_path: Path, outdir: Path, cfg: TurbulenceSettings = Turb
         "ky_peak": float(ky[ipk]), "gamma_peak": float(gamma[ipk]),
         "t_end": float(t[-1]), "window_start": t_sat,
         "heat_flux": [q_mean, q_err], "particle_flux": [g_mean, g_err],
-        "saturation": nl.saturation, "wall_time_s": time.perf_counter() - stages.start,
+        "status": status, "saturation": nl.saturation, "output": str(out),
+        "steps": int(getattr(nl.diagnostics, "n_steps", 0) or 0), "wall_time_s": time.perf_counter() - stages.start,
     }
     grid = gkx.build_spectral_grid(nl_case.grid)
     written = plot_turbulence(summary, geom, mode, nl, np.asarray(grid.ky), outdir, name=label)

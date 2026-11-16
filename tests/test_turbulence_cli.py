@@ -44,6 +44,38 @@ def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
                                            nonlinear=True).read_text())
     assert [s["name"] for s in deck["species"]] == ["ion", "electron"]
     assert deck["physics"]["nonlinear"] is True and deck["physics"]["adiabatic_electrons"] is False
+def test_defaults_deck_and_settings_block(tmp_path):
+    from vmex.core.cli import build_parser
+
+    cfg = gk_run.TurbulenceSettings()
+    assert (cfg.nx, cfg.ny, cfg.nz, cfg.npol, cfg.nl, cfg.nm, cfg.t_max) == (64, 64, 24, 3.0, 4, 8, 1000.0)
+    out = tmp_path / "x.out.nc"
+    deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
+                                           nonlinear=True).read_text())
+    assert deck["grid"]["Nz"] == deck["grid"]["ntheta"] == 72 and deck["geometry"]["npol"] == 3.0
+    assert deck["grid"]["boundary"] == "fix aspect"
+    text = "\n".join(gk_run.settings_block(Path("wout_x.nc"), cfg, backend="GKX test, cpu", out=out))
+    for needle in ("s = 0.5 (rho = 0.707)", "alpha = 0", "a/LT = 3", "a/Ln = 1", "64 x 64 x 72", "(Nl, Nm) = (4, 8)",
+                   "y0 = 10", "t_max = 1000", "adiabatic", "nu_i = 0.01", "D = 0.05", "float32", str(out)):
+        assert needle in text, needle
+    args = build_parser().parse_args(["w.nc", "--turbulence", "--turbulence-npol", "2", "--turbulence-precision", "f64",
+                                      "--turbulence-out", "o.nc", "--turbulence-fast"])
+    assert (args.turbulence_npol, args.turbulence_precision, args.turbulence_out) == (2.0, "f64", "o.nc")
+
+
+def test_fast_preset_and_kinetic_moments(tmp_path, monkeypatch):
+    from vmex.core import cli
+
+    seen = []
+    monkeypatch.setattr(gk_run, "run_turbulence", lambda wout, outdir, cfg, emit: seen.append(cfg))
+    for flags in (["--turbulence-fast"], ["--turbulence-kinetic-electrons"], ["--turbulence-fast", "--turbulence-npol", "3"]):
+        args = cli.build_parser().parse_args(["w.nc", "--turbulence", *flags])
+        cli._run_turbulence(tmp_path / "w.nc", args, tmp_path, emit=print, quiet=True)
+    assert (seen[0].nx, seen[0].nz, seen[0].npol, seen[0].nm) == (32, 16, 1.0, 4)
+    assert seen[1].nm == 16 and seen[1].kinetic_electrons
+    assert seen[2].npol == 3.0 and seen[2].nz == 16  # an explicit flag beats the preset
+
+
 def test_turbulence_cli_smoke(tmp_path, capsys):
     pytest.importorskip("gkx", minversion="2.6.0")
     import vmex
@@ -59,7 +91,8 @@ def test_turbulence_cli_smoke(tmp_path, capsys):
                "--turbulence-moments", "2", "2", "--turbulence-tmax", "2"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "Linear ky scan" in out and "Turbulence summary" in out
+    assert "Linear ky scan" in out and "Turbulence summary" in out and "flux tube" in out
+    assert (tmp_path / "smoke_turbulence.out.nc").stat().st_size > 0
     summary = json.loads((tmp_path / "smoke_turbulence.json").read_text())
     assert summary["ky"] == pytest.approx([0.2])
     assert np.all(np.isfinite(summary["gamma"])) and np.all(np.isfinite(summary["heat_flux"]))
