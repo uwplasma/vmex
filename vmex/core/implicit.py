@@ -3368,6 +3368,18 @@ def _implicit_evolved_tangent_multi_rhs(
                      chunk_size=max(1, int(response_chunk_size)))
 
 
+@aot_lane(static_argnames=("cfg", "active_fields", "probe_chunk_size",
+                            "response_chunk_size", "certify_maxiter"))
+def _evolved_tangent_lane(params, x_star, dof_mask, tangent_batch, certify_rtol, bands, *,
+                          cfg, active_fields, probe_chunk_size, response_chunk_size,
+                          certify_maxiter):
+    """:func:`_implicit_evolved_tangent_multi_rhs` as a per-config, AOT-cached lane."""
+    return _implicit_evolved_tangent_multi_rhs(
+        params, cfg, x_star, dof_mask, tangent_batch, active_fields=active_fields,
+        probe_chunk_size=probe_chunk_size, response_chunk_size=response_chunk_size,
+        certify_rtol=certify_rtol, certify_maxiter=certify_maxiter, bands=bands)
+
+
 def implicit_state_tangent_multi_rhs(
     params: ImplicitParams,
     cfg: ImplicitConfig,

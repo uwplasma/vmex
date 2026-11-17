@@ -169,6 +169,7 @@ class AotLane:
         self.__doc__ = fn.__doc__
         self._static_names = tuple(jit_kwargs.get("static_argnames") or ())
         self._memory: dict[str, Any] = {}
+        self._lock = threading.Lock()     # threads asking for one program build it once
         _LANES.append(self)
 
     def __getattr__(self, name: str) -> Any:     # lower, eval_shape, ...
@@ -194,6 +195,14 @@ class AotLane:
         if found is None:
             return None
         text, device = found
+        hit = self._memory.get(text)
+        if hit is not None:
+            return hit
+        with self._lock:
+            return self._load_or_build(directory, text, device, args, static)
+
+    def _load_or_build(self, directory: Path, text: str, device: Any,
+                       args: tuple, static: dict) -> Any:
         hit = self._memory.get(text)
         if hit is not None:
             return hit
