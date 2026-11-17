@@ -179,3 +179,20 @@ def test_static_arguments_with_an_aot_key_are_keyed_by_content(tmp_path, monkeyp
     for k in (2, 2, 3):
         np.testing.assert_array_equal(lane(x, cfg=Config(k)), x * k)
     assert len(list((tmp_path / "aot").glob("*.aot"))) == 2
+
+
+def test_implicit_config_key_follows_the_compiled_content():
+    """Boundary values reach the implicit lanes traced, so they leave the key alone;
+    a tolerance or a resolution changes it."""
+    import dataclasses
+    from pathlib import Path
+
+    from vmex.core import implicit as im
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1] / "examples" / "data" / "input.solovev")
+    moved = dataclasses.replace(inp, rbc=np.asarray(inp.rbc) * 1.01)
+    key = im.make_config(inp)._aot_key()
+    assert im.make_config(moved)._aot_key() == key
+    assert im.make_config(inp, adjoint_tol=1e-9)._aot_key() != key
+    assert im.make_config(inp, ns=7)._aot_key() != key
