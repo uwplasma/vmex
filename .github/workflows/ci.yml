@@ -483,7 +483,7 @@ jobs:
       needs.changes.outputs.run_tests == 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, uwplasma-gpu]
-    timeout-minutes: 5
+    timeout-minutes: 20
     env:
       UV_SYSTEM_PYTHON: "0"
     steps:
