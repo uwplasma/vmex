@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import warnings
 from dataclasses import dataclass, fields, replace
 from itertools import product
@@ -700,9 +701,9 @@ def toml_as_json(path: Path, text: str) -> str:
     """``text`` as JSON when ``path`` is a ``.toml`` file, else unchanged."""
     if path.suffix.lower() != ".toml":
         return text
-    try:
+    if sys.version_info >= (3, 11):
         import tomllib
-    except ModuleNotFoundError:  # Python 3.10
+    else:  # pragma: no cover - Python 3.10
         import tomli as tomllib
     return json.dumps(tomllib.loads(text))
 
