@@ -164,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmex --trace wout_*.nc — trace alpha particles (ESSOS), plot losses\n"
             "  vmex --turbulence input.X — solve, then GKX linear + nonlinear turbulence\n"
             "  vmex --neoclassical wout_*.nc — DKX neoclassical transport, plot panels\n"
-            "  vmex --alfven wout_*.nc — FAX Alfven continuum gaps and the widest-gap mode\n"
+            "  vmex --alfven wout_*.nc — FAX Alfven continuum gaps and a gap mode\n"
             "  vmex --scale input.X [B R] — scale an input or WOUT\n"
             "  vmex --to-input wout_*.nc — reconstruct input.* from a WOUT\n"
             "  vmex --doctor          — installation and JAX backend diagnostics\n"
@@ -491,8 +491,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--alfven", action="store_true",
         help=(
             "Shear-Alfven continuum with FAX (pip install 'vmex[alfven]') after solving an input "
-            "file, or from a wout_*.nc: gaps (TAE, EAE, MAE, HAE) and the global mode of the widest "
-            "one. Writes *_alfven.png and *_alfven.json. Frequencies scale as the density^(-1/2)."
+            "file, or from a wout_*.nc: local gaps per mode family (TAE, EAE, MAE, HAE, BAE) and a gap "
+            "mode clear of the continuum. Writes *_alfven.png and *_alfven.json. Frequencies scale as the density^(-1/2)."
         ),
     )
     p.add_argument("--alfven-config", metavar="TOML", default=None,

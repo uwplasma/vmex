@@ -15,6 +15,7 @@ from math import ceil
 from pathlib import Path
 
 import numpy as np
+from netCDF4 import Dataset
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -25,12 +26,14 @@ __all__ = ["default_harmonics", "run_alfven"]
 
 
 def default_harmonics(nfp: int, iota) -> tuple[list[int], int]:
-    """Toroidal families ``n = j nfp`` for j = 0, 1, 2 (plus ``n = +-1`` when iota < 1) and the poloidal cap.
+    """Toroidal mode numbers ``n = j nfp`` for j = 0, 1, 2, plus ``n = +-1`` in a stellarator with iota < 1, and the poloidal cap.
+
+    A tokamak already has ``n = 1``, and ``n = -1`` with ``m >= 0`` would only add its non-resonant copy.
 
     ``m_max = min(12, ceil(3 max(1, iota_max n_max) + 4))``: the cost grows as about H^3 per surface.
     """
     iota_max = float(np.max(np.abs(iota)))
-    n = sorted({j * nfp for j in range(3)} | ({1, -1} if iota_max < 1 else set()))
+    n = sorted({j * nfp for j in range(3)} | ({1, -1} if iota_max < 1 and nfp > 1 else set()))
     return n, min(12, ceil(3 * max(1.0, iota_max * max(map(abs, n))) + 4))
 
 
@@ -49,8 +52,12 @@ def run_alfven(wout_path, outdir, *, config=None, density=None, ion_mass=None, n
     case = fax.load(raw)  # validates the schema, rejecting unknown keys
     pick = lambda table, key, default: case[table][key] if key in raw.get(table, {}) else default  # noqa: E731
     mboz, nboz = pick("geometry", "mboz", 6), pick("geometry", "nboz", 6)
-    surfaces = tuple(pick("geometry", "surfaces", [(i + 0.5) / 12 for i in range(12)]))
-    geo = fax.from_wout(wout_path, mboz=mboz, nboz=nboz, surfaces=surfaces)
+    s = np.linspace(0.0, 1.0, nodes + 2)[1:-1]  # radial finite-element nodes
+    if "surfaces" in raw.get("geometry", {}):  # Boozer on the given surfaces, interpolated to the nodes
+        geo = fax.from_wout(wout_path, mboz=mboz, nboz=nboz, surfaces=tuple(case["geometry"]["surfaces"])).interpolate(s)
+    else:  # Boozer on every node: interpolating harmonics puts kinks in the metric derivatives
+        geo = fax.from_wout(wout_path, mboz=mboz, nboz=nboz, surfaces=tuple(s))
+        s = np.asarray(geo.s)
     if "n" in raw.get("modes", {}):
         n, m_max = case["modes"]["n"], case["modes"]["m_max"]
     else:
@@ -62,18 +69,23 @@ def run_alfven(wout_path, outdir, *, config=None, density=None, ion_mass=None, n
     options = dict(ntheta=pick("run", "ntheta", 32), nzeta=pick("run", "nzeta", nzeta), count=pick("run", "count", 4))
     density = density or pick("plasma", "density", 1e19)
     ion_mass = ion_mass or pick("plasma", "ion_mass", 2.0)
-    emit(f" FAX shear-Alfven continuum: {len(harmonics)} harmonics, n_i = {density:.3g} m^-3, {ion_mass:g} amu: {Path(wout_path).name}")
-    s = np.linspace(0.0, 1.0, nodes + 2)[1:-1]  # radial finite-element nodes
-    out = fax.summary(geo.interpolate(s), harmonics, fax.mass_density(density, ion_mass), ions=(density, ion_mass), **options)
+    n_i = density * np.polyval(pick("plasma", "density_profile", [1.0])[::-1], s)
+    with Dataset(wout_path) as w:  # pressure on the VMEC half mesh, s_j = (j - 1/2) / (ns - 1)
+        pres = np.asarray(w["pres"][1:], dtype=float)
+    pressure = np.interp(s, (np.arange(len(pres)) + 0.5) / len(pres), pres) if pres.max() > 0 else None
+    emit(f" FAX shear-Alfven continuum: {len(harmonics)} harmonics, n_i(0) = {density:.3g} m^-3, {ion_mass:g} amu: {Path(wout_path).name}")
+    rho = fax.mass_density(n_i, ion_mass)
+    out = fax.summary(geo, harmonics, rho, pressure=pressure, ions=(n_i.tolist(), ion_mass), **options)
     stem = Path(outdir) / f"{Path(wout_path).stem.removeprefix('wout_')}_alfven"
     figure = fax.plot_summary(out, stem.with_suffix(".png"))
-    mode = out["mode"] and {k: v for k, v in out["mode"].items() if k != "structure"}
-    stem.with_suffix(".json").write_text(json.dumps({**{k: out[k] for k in ("harmonics", "density_m3", "ion_mass_amu", "density_kg_m3", "gaps", "mode_reason")}, "mode": mode}, indent=2))
+    mode = out["mode"] and {k: v for k, v in out["mode"].items() if k not in ("structure", "cross_section")}
+    keys = ("harmonics", "density_m3", "ion_mass_amu", "density_kg_m3", "sound", "alfven_khz", "gaps", "mode_reason")
+    stem.with_suffix(".json").write_text(json.dumps({**{k: out[k] for k in keys}, "mode": mode}, indent=2))
     for gap in out["gaps"][:3]:
-        emit(f"   {gap['type']} gap {gap['center_khz']:.1f} kHz, width {gap['width_khz']:.1f} kHz, closest at s = {gap['s']:.2f}")
+        emit(f"   {gap['type']} gap {gap['center_khz']:.1f} kHz, width {gap['width_khz']:.1f} kHz, open over s = {gap['s_range'][0]:.2f}-{gap['s_range'][1]:.2f}")
     if not mode:
-        emit(f"   no global mode: {out['mode_reason']}")
+        emit(f"   no gap mode: {out['mode_reason']}")
     else:
-        emit(f"   global mode {mode['frequency_khz']:.1f} kHz at s = {mode['peak_s']:.2f}, in the gap, converged: {mode['converged']}")
+        emit(f"   gap mode {mode['frequency_khz']:.1f} kHz peaked at s = {mode['peak_s']:.2f}, clear of the continuum, converged: {mode['converged']}")
     emit(f" Wrote Alfven figure: {figure}")
     return out

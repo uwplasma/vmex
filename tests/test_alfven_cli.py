@@ -16,7 +16,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
 
 @pytest.mark.parametrize("nfp, iota, n, m_max", [
-    (1, [0.3, 0.5], [-1, 0, 1, 2], 7),  # tokamak: iota < 1 adds n = +-1; m_max = 3 max(1, 0.5 * 2) + 4
+    (1, [0.3, 0.5], [0, 1, 2], 7),  # tokamak: n = -1 would be a non-resonant copy of n = 1; m_max = 3 max(1, 0.5 * 2) + 4
     (5, [1.1, 1.3], [0, 5, 10], 12),  # iota > 1: no n = +-1; the cap of 12
     (2, [0.8, 0.9], [-1, 0, 1, 2, 4], 12),
 ])
@@ -47,8 +47,8 @@ def test_alfven_flag_runs_after_a_solve_and_reports_missing_fax(tmp_path, monkey
 
 def test_alfven_cli_smoke(tmp_path, capsys, monkeypatch):
     fax = pytest.importorskip("fax")
-    if not hasattr(fax, "summary"):
-        pytest.skip("this FAX predates fax.summary")
+    if not hasattr(fax, "mode_families"):
+        pytest.skip("this FAX predates the local-gap fax.summary")
     import vmex
     from vmex import _compat
     from vmex.core import optimize as opt
@@ -59,16 +59,21 @@ def test_alfven_cli_smoke(tmp_path, capsys, monkeypatch):
     inp = dataclasses.replace(inp, ns_array=np.array([8]), ftol_array=np.array([1e-12]), niter_array=np.array([2000]))
     wout = vmex.write_wout(tmp_path / "wout_smoke.nc", opt.solve_equilibrium(inp).wout)
     case = tmp_path / "alfven.toml"
-    case.write_text('[geometry]\nmboz = 4\nnboz = 4\nsurfaces = [0.2, 0.4, 0.6, 0.8]\n[modes]\nn = [1]\nm_max = 3\nm_min = 1\n'
-                    '[run]\nntheta = 16\nnzeta = 8\ncount = 3\n')
+    case.write_text('[geometry]\nmboz = 4\nnboz = 4\nsurfaces = [0.2, 0.4, 0.6, 0.8]\n[modes]\nn = [1]\nm_max = 4\nm_min = 0\n'
+                    '[plasma]\ndensity_profile = [1.0, -0.5]\n[run]\nntheta = 16\nnzeta = 8\ncount = 3\n')
     argv = [str(wout), "--alfven", "--outdir", str(tmp_path), "--alfven-config", str(case)]
     assert main(argv) == 0
     assert "FAX shear-Alfven continuum" in capsys.readouterr().out
     out = json.loads((tmp_path / "smoke_alfven.json").read_text())
-    assert out["density_m3"] == 1e19 and out["ion_mass_amu"] == 2.0 and out["density_kg_m3"] == pytest.approx(2 * 1.6605e-8, rel=1e-3)
+    n_i, rho = np.array(out["density_m3"]), np.array(out["density_kg_m3"])
+    assert n_i[0] < 1e19 and np.all(np.diff(n_i) < 0) and out["ion_mass_amu"] == 2.0 and out["sound"]  # 1 - s / 2, finite pressure
+    assert rho == pytest.approx(n_i * 2 * 1.6605e-27, rel=1e-3) and out["alfven_khz"] > 0
     assert out["mode"] is None or (out["mode"]["converged"] and np.isfinite(out["mode"]["frequency_khz"]))
-    assert out["gaps"] and (out["mode"] or out["mode_reason"])
+    assert out["mode"] or out["mode_reason"]
     assert (tmp_path / "smoke_alfven.png").stat().st_size > 5_000
+    case.write_text('[geometry]\nmboz = 4\nnboz = 4\n[modes]\nn = [1]\nm_max = 4\n[run]\nntheta = 16\nnzeta = 8\ncount = 2\n')
+    assert main(argv) == 0  # Boozer on the half-mesh surfaces themselves, no interpolation
+    assert len(json.loads((tmp_path / "smoke_alfven.json").read_text())["density_m3"]) == 7  # ns = 8
     case.write_text("[bogus]\nx = 1\n")
     assert main(argv) != 0
     assert "unknown table or key in [bogus]" in capsys.readouterr().out

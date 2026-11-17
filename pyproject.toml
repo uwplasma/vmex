@@ -100,9 +100,9 @@ turbulence = [
   "jaxlib>=0.10.1",
 ]
 # Shear-Alfven continuum and global modes (``vmex --alfven``) via FAX (PyPI name
-# ``alfvex``). 1.1.0 adds ``fax.summary`` and ``fax.plot_summary``.
+# ``alfvex``). 1.2.0 has the local-gap ``fax.summary`` and ``fax.plot_summary``.
 alfven = [
-  "alfvex>=1.1.0",
+  "alfvex>=1.2.0",
   "matplotlib",
 ]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
