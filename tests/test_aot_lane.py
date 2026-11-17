@@ -158,3 +158,24 @@ def test_target_device_follows_jit_placement():
     assert aot._device([jax.device_put(jnp.ones(2), cpu)]) == cpu
     with jax.default_device(cpu):
         assert aot._device([np.ones(2)]) == cpu
+
+
+def test_static_arguments_with_an_aot_key_are_keyed_by_content(tmp_path, monkeypatch):
+    """Equal ``_aot_key`` shares one executable across objects; a new key builds another."""
+    monkeypatch.setattr(aot, "_directory", lambda: tmp_path / "aot")
+
+    class Config:
+        def __init__(self, k):
+            self.k = k
+
+        def _aot_key(self):
+            return f"Config:{self.k}"
+
+    def fn(x, *, cfg):
+        return x * cfg.k
+
+    lane = aot.AotLane(fn, static_argnames=("cfg",))
+    x = jnp.arange(4.0)
+    for k in (2, 2, 3):
+        np.testing.assert_array_equal(lane(x, cfg=Config(k)), x * k)
+    assert len(list((tmp_path / "aot").glob("*.aot"))) == 2

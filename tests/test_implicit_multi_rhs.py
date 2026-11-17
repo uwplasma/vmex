@@ -325,11 +325,11 @@ def _factor_arguments():
 def test_probe_workers_give_the_single_program_bands(workers):
     """Probes run in pieces on threads assemble the bands one program computes, to round-off."""
     cfg, arguments = _factor_arguments()
-    whole = im._refine_block_factor_core(*arguments, cfg)
+    whole = im._refine_block_factor_core(*arguments, cfg=cfg)
     im.set_probe_workers(cfg, workers)
     pieces = im._probe_responses(cfg, arguments)
     assert len(pieces) == workers and len({piece.shape for piece in pieces}) == 1
-    split = im._refine_block_factor_core(*arguments, cfg, pieces)
+    split = im._refine_block_factor_core(*arguments, pieces, cfg=cfg)
     for expected, found in zip(jax.tree.leaves(whole), jax.tree.leaves(split)):
         scale = max(np.abs(np.asarray(expected)).max(), 1.0)
         np.testing.assert_allclose(found, expected, rtol=0, atol=1e-12 * scale)

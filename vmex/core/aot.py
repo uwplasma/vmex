@@ -127,7 +127,10 @@ def _device(leaves: list) -> Any:
 def _structure(args: tuple, static: dict) -> tuple[str, Any] | None:
     """Exact call-structure string and target device, or None when not safely hashable."""
     leaves, treedef = jax.tree_util.tree_flatten(args)
-    parts = [str(treedef), repr(sorted(static.items()))]
+    # A static argument with an ``_aot_key()`` (a content digest) is keyed by it.
+    parts = [str(treedef), repr(sorted(
+        (name, value._aot_key() if hasattr(value, "_aot_key") else value)
+        for name, value in static.items()))]
     for leaf in leaves:
         if isinstance(leaf, jax.core.Tracer):
             return None

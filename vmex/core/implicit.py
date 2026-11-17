@@ -135,6 +135,7 @@ import concurrent.futures
 import contextlib
 import dataclasses
 import functools
+import hashlib
 import os
 import sys
 import time
@@ -161,6 +162,7 @@ from solvax import (
     gmres as _solvax_gmres,
 )
 
+from .aot import aot_lane
 from .device import (
     AUTO, _put_numeric_leaves, commit_to_single_device, resolve_implicit_device,
 )
@@ -387,6 +389,11 @@ class ImplicitConfig:
     def __hash__(self):
         self._structure()
         return self.__dict__["_token"][1]
+
+    def _aot_key(self) -> str:
+        """Process-independent digest of the content the implicit lanes compile from."""
+        return "ImplicitConfig:" + hashlib.sha256(repr(
+            (self._structure(), self.adjoint_tol, self.jacobian_adjoint_tol)).encode()).hexdigest()
 
 
 def make_config(
@@ -1756,7 +1763,7 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
 # ``jit(while)`` recompile per optimizer evaluation — and the remaining ops
 # dispatched one primitive at a time: 5.7-8.6 s of every 11-14 s smoke-mode
 # QA_optimization evaluation was this eager refinement.
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@aot_lane(static_argnames=("cfg",))
 def _refine_step_core(z: SpectralState, fz: SpectralState,
                       params: ImplicitParams, frozen: SpectralState,
                       dof_mask: SpectralState, cfg: ImplicitConfig):
@@ -1805,13 +1812,13 @@ def _refine_step(cfg: ImplicitConfig, params: ImplicitParams,
     arguments = commit_to_single_device(tuple(
         _pin_concrete(cfg, tree) for tree in (z, fz, params, frozen, dof_mask)))
     z, fz, residual_norm, iterations, linear = _refine_step_core(
-        *arguments, cfg)
+        *arguments, cfg=cfg)
     _count(cfg, refinement_steps=1,
            refinement_krylov_iterations=int(iterations))
     return z, fz, residual_norm, linear
 
 
-@functools.partial(jax.jit, static_argnames=("cfg", "chunk"))
+@aot_lane(static_argnames=("cfg", "chunk"))
 def _refine_probe_core(z: SpectralState, params: ImplicitParams,
                        frozen: SpectralState, dof_mask: SpectralState,
                        indices: Array, cfg: ImplicitConfig, chunk: int):
@@ -1820,10 +1827,10 @@ def _refine_probe_core(z: SpectralState, params: ImplicitParams,
                              z_star=z, probe_indices=indices)
 
 
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@aot_lane(static_argnames=("cfg",))
 def _refine_block_factor_core(z: SpectralState, params: ImplicitParams,
                               frozen: SpectralState, dof_mask: SpectralState,
-                              cfg: ImplicitConfig, responses: tuple | None = None):
+                              responses: tuple | None = None, *, cfg: ImplicitConfig):
     """Raw block factors, scales and bands linearized at the iterate ``z``.
 
     The one compiled block factorization of a config: the anchor's Newton
@@ -1841,7 +1848,7 @@ def _refine_block_factor_core(z: SpectralState, params: ImplicitParams,
             system.lower, system.diagonal, system.upper)
 
 
-@functools.partial(jax.jit, static_argnames=("cfg",))
+@aot_lane(static_argnames=("cfg",))
 def _refine_block_step_core(z: SpectralState, params: ImplicitParams,
                             frozen: SpectralState, dof_mask: SpectralState,
                             factors, cfg: ImplicitConfig):
@@ -1941,7 +1948,7 @@ def _probe_responses(cfg: ImplicitConfig, arguments: tuple) -> tuple | None:
     chunk = -(-total // (workers * batches))
     indices = np.minimum(np.arange(workers * batches * chunk), total - 1).reshape(workers, -1)
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        return tuple(pool.map(lambda part: _refine_probe_core(*arguments, part, cfg, chunk), indices))
+        return tuple(pool.map(lambda part: _refine_probe_core(*arguments, part, cfg=cfg, chunk=chunk), indices))
 
 
 def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
@@ -1968,7 +1975,7 @@ def _block_bands(cfg: ImplicitConfig, params: ImplicitParams,
         return hit[2]
     _count(cfg, block_factorizations=1,
            block_bands_rejected=int(z is None and hit is not None))
-    bands = _refine_block_factor_core(*arguments, cfg, _probe_responses(cfg, arguments))
+    bands = _refine_block_factor_core(*arguments, _probe_responses(cfg, arguments), cfg=cfg)
     _LAST_BANDS[cfg] = (key, zp, bands)
     return bands
 
@@ -1980,7 +1987,7 @@ def _refine_block_step(cfg: ImplicitConfig, params: ImplicitParams,
     arguments = commit_to_single_device(tuple(
         _pin_concrete(cfg, tree) for tree in (z, params, frozen, dof_mask)))
     z, fz, residual_norm, iterations, linear = _refine_block_step_core(
-        *arguments, factors, cfg)
+        *arguments, factors, cfg=cfg)
     _count(cfg, refinement_steps=1,
            refinement_krylov_iterations=int(iterations))
     return z, fz, residual_norm, linear
