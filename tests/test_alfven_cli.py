@@ -1,4 +1,4 @@
-"""``vmex --alfven``: default harmonic selection, the dependency message, and an end-to-end smoke run (FAX)."""
+"""``vmex --alfven``: the dependency message and end-to-end smoke runs (FAX)."""
 
 from __future__ import annotations
 
@@ -13,15 +13,6 @@ from vmex.core import alfven_run
 from vmex.core.cli import main
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-
-
-@pytest.mark.parametrize("nfp, iota, n, m_max", [
-    (1, [0.3, 0.5], [0, 1, 2], 7),  # tokamak: n = -1 would be a non-resonant copy of n = 1; m_max = 3 max(1, 0.5 * 2) + 4
-    (5, [1.1, 1.3], [0, 5, 10], 12),  # iota > 1: no n = +-1; the cap of 12
-    (2, [0.8, 0.9], [-1, 0, 1, 2, 4], 12),
-])
-def test_default_harmonic_selection(nfp, iota, n, m_max):
-    assert alfven_run.default_harmonics(nfp, np.array(iota)) == (n, m_max)
 
 
 def test_alfven_flag_runs_after_a_solve_and_reports_missing_fax(tmp_path, monkeypatch):
@@ -71,8 +62,9 @@ def test_alfven_cli_smoke(tmp_path, capsys, monkeypatch):
     assert out["mode"] is None or (out["mode"]["converged"] and np.isfinite(out["mode"]["frequency_khz"]))
     assert out["mode"] or out["mode_reason"]
     assert (tmp_path / "smoke_alfven.png").stat().st_size > 5_000
-    case.write_text('[geometry]\nmboz = 4\nnboz = 4\n[modes]\nn = [1]\nm_max = 4\n[run]\nntheta = 16\nnzeta = 8\ncount = 2\n')
-    assert main(argv) == 0  # Boozer on the half-mesh surfaces themselves, no interpolation
+    case.write_text('[geometry]\nmboz = 4\nnboz = 4\n[modes]\nm_max = 4\n[run]\ncount = 2\n')
+    assert main(argv) == 0  # Boozer on the half-mesh surfaces themselves; fax.alfven_harmonics picks n = 1, 2
+    assert {n for _, n in json.loads((tmp_path / "smoke_alfven.json").read_text())["harmonics"]} == {1, 2}
     assert len(json.loads((tmp_path / "smoke_alfven.json").read_text())["density_m3"]) == 7  # ns = 8
     case.write_text("[bogus]\nx = 1\n")
     assert main(argv) != 0
