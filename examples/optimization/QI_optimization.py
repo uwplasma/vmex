@@ -38,9 +38,11 @@ NFP = 2
 SEED_MODES = {("rbc", -1, 1): -0.05, ("zbs", -1, 1): 0.05}
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
-# Radial grid every optimizer trial is solved on:
+# Radial grid every optimizer trial is solved on. Each trial is Newton-refined to a
+# force residual below 1e-10 before it is scored, so a tighter FTOL only adds solver
+# iterations (1e-12 took 2.8x as many for the same refined state):
 STAGE_NS = 31
-STAGE_FTOL = 1.0e-12
+STAGE_FTOL = 1.0e-10
 STAGE_NITER = 5500
 
 # Flux surfaces the QI residual is evaluated on:

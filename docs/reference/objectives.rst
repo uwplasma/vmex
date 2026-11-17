@@ -306,8 +306,9 @@ configuration is added.  ``examples/optimization/QI_optimization.py``
 starts from the circular ``input.minimal_seed_nfp2`` torus with a 0.05
 rotating ellipse, spends one 15-evaluation stage with the shape terms
 multiplied by 30 and then three 30-evaluation stages at ``max_mode`` 1, 2
-and 3, and reaches constructed QI 1.4e-3 with the aspect, ι, mirror and
-elongation limits met.  Stages of 15 evaluations stall near 5e-3: with the
+and 3, and reaches constructed QI 1.2e-3 to 1.7e-3 with the aspect, ι, mirror
+and elongation limits met; round-off moves the optimizer path, and with it the
+final value, within that range.  Stages of 15 evaluations stall near 5e-3: with the
 grid argmin the constructed-QI rows are discontinuous in the boundary and
 trust-region steps stay near 1e-4;
 :doc:`/howto/optimize-a-boundary` describes the workflow.  The
