@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import types
 from pathlib import Path
 
 import numpy as np
@@ -104,3 +105,31 @@ def test_implicit_problem_passes_host_roots_to_terms():
     np.testing.assert_allclose(rows[0], 2.0 * rows[1], rtol=1e-10)
     np.testing.assert_allclose(jac[0], 2.0 * jac[1], rtol=1e-8, atol=1e-12)
     assert Doubled.calls >= 1
+
+
+def test_probe_workers_split_the_jacobian_columns_without_changing_them(monkeypatch):
+    """Column chunks run on threads return the single-program Jacobian."""
+    import concurrent.futures
+
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    inp = inp.change_resolution(mpol=3, ntor=0, ntheta=12, nzeta=4)
+    inp = dataclasses.replace(inp, ns_array=np.asarray([5]),
+                              ftol_array=np.asarray([1.0e-10]), niter_array=np.asarray([1000]))
+    pools = []
+
+    class Pool(concurrent.futures.ThreadPoolExecutor):
+        def __init__(self, workers):
+            pools.append(workers)
+            super().__init__(workers)
+
+    monkeypatch.setattr(opt, "concurrent", types.SimpleNamespace(
+        futures=types.SimpleNamespace(ThreadPoolExecutor=Pool)))
+    jacobians = {}
+    for workers in (1, 2):
+        problem = opt.VmecProblem.from_tuples(
+            inp, [(opt.aspect_ratio, 0.0, 1.0), (opt.mean_iota, 0.0, 1.0)], max_mode=1,
+            device="cpu", jacobian_batch_size=1, probe_workers=workers)
+        assert problem.x0.size >= 2
+        jacobians[workers] = problem.residual_jac(problem.x0)
+    assert pools == ([2] if problem.x0.size % 2 == 0 else [])
+    np.testing.assert_allclose(jacobians[2], jacobians[1], rtol=1e-10, atol=1e-12)

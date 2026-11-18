@@ -29,11 +29,11 @@ with the normal-field limit applied to the total field. Self-consistent
 bootstrap current and current-profile optimization are not part of this
 example.
 
-Measured end to end on an Apple M3 Max laptop with a cold JAX cache: about
-290 s. It takes 12 L-BFGS-B iterations and 16 trials, and every target is met:
-the minimum |iota| rises from 0.407 to 0.430 and beta ends at 0.498%. (At an
-earlier commit, 14 iterations took 19 trials, reached 0.430 and 0.502%, and
-moved the boundary by up to 8 mm and the coils by up to 11 mm.)
+Measured end to end at commit 2ec4069b on a 36-core Linux workstation under
+load, with a cold JAX cache: about 10 minutes. It takes 12 L-BFGS-B iterations
+and 16 trials, and every target is met on the ns = 101 re-solve: the minimum
+|iota| rises from 0.407 to 0.4295, the aspect ratio ends at 5.973 and beta at
+0.503%.
 
 Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
