@@ -69,7 +69,7 @@ from .errors import (
 )
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
-from .geometry import half_mesh_jacobian
+from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_geometry
 from .input import VmecInput
 from .mgrid import MgridField
 from .position_control import (
@@ -88,7 +88,7 @@ from .solver import (
     SolveResult, SolverRuntime, SpectralState, VacuumOutput,
     _LANE_EXECUTABLES, _USED_LANE_KEYS,
     _due_rows_pending,
-    _finalize, _geometry, _initial_carry, _select, _initial_state, _leaf_signature,
+    _finalize, _geometry, _initial_carry, _physical_coefficients, _select, _initial_state, _leaf_signature,
     _loop_driver_config, _make_body,
     _result_from_carry, _trajectory_rows, _zero_cache, prepare_runtime, resolution_from_input,
     reguess_initial_axis, runtime_with_baselines,
@@ -144,15 +144,31 @@ def _vacuum_scalars(state: SpectralState, rt: SolverRuntime):
       (``bsqsav(:,3)`` for the DEL-BSQ diagnostic).
     """
     setup = rt.setup
-    s = setup.s_full
-    _, geometry = _geometry(state, rt)
+    lo = max(setup.s_full.shape[0] - 3, 0)  # only the last two half-mesh rows and the axis row are read
+    coeffs = _physical_coefficients(
+        state, modes=rt.modes, lthreed=setup.lthreed, lasym=setup.lasym, lconm1=setup.lconm1
+    )
+    lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=rt.modes, ntor=rt.resolution.ntor)
+
+    def synth(a, b, closure):
+        R_cos, R_sin, Z_cos, Z_sin = (c[a:b] for c in coeffs)
+        return real_space_geometry(
+            R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
+            lambda_cos=state.L_cos[a:b], lambda_sin=lambda_sin[a:b],
+            modes=rt.modes, trig=rt.trig, s=setup.s_full[a:b], axis_closure=closure,
+            odd_m_scaling=setup.scalxc[a:b],
+        )
+
+    s = setup.s_full[lo:]
+    geometry = synth(lo, None, lo == 0)
+    axis = synth(0, 1, False)  # even-m axis values need no closure
     jacobian = half_mesh_jacobian(geometry, s=s)
     metrics = metric_elements(geometry, s=s)
     fields = magnetic_fields(
         geometry=geometry, jacobian=jacobian, metrics=metrics, trig=rt.trig,
-        s=s, phips=setup.phips, phipf=setup.phipf, chips=setup.chips,
-        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass,
-        ncurr=setup.ncurr, enclosed_current=setup.icurv,
+        s=s, phips=setup.phips[lo:], phipf=setup.phipf[lo:], chips=setup.chips[lo:],
+        signgs=setup.signgs, gamma=rt.gamma, mass=setup.mass[lo:],
+        lamscale=setup.lamscale, ncurr=setup.ncurr, enclosed_current=setup.icurv[lo:],
     )
     wint = jnp.asarray(rt.weights)  # (ntheta_eff,), zeta-constant wint
     buco = jnp.sum(fields.bsubu * wint[None, :, None], axis=(1, 2))
@@ -160,8 +176,8 @@ def _vacuum_scalars(state: SpectralState, rt: SolverRuntime):
     sgn = jnp.asarray(float(setup.signgs))
     ctor = sgn * (2.0 * jnp.pi) * (1.5 * buco[-1] - 0.5 * buco[-2])
     rbtor = 1.5 * bvco[-1] - 0.5 * bvco[-2]
-    axis_r = geometry.R_even[0, 0, :]
-    axis_z = geometry.Z_even[0, 0, :]
+    axis_r = axis.R_even[0, 0, :]
+    axis_z = axis.Z_even[0, 0, :]
     bsq = fields.total_pressure
     bsq_edge_extrap = 1.5 * bsq[-1] - 0.5 * bsq[-2]
     return ctor, rbtor, axis_r, axis_z, bsq_edge_extrap, fields.pressure[-1]
@@ -458,43 +474,45 @@ def boundary_from_coefficients(rmnc, zmns, rmns, zmnc, *, modes: ModeTable,
     so all v-derivatives are geometric-phi derivatives, exactly as
     ``surface.f``; using ``zeta`` directly would double-count nfp.
     """
-    xm = jnp.asarray(np.asarray(modes.m, dtype=float))
-    xn = jnp.asarray(np.asarray(modes.n, dtype=float) * float(basis.nfp))
-    th = jnp.asarray(np.asarray(basis.theta, dtype=float))[:, None]
-    ze = jnp.asarray(np.asarray(basis.zeta, dtype=float))[:, None] * float(basis.onp)
-    arg = th * xm[None, :] - ze * xn[None, :]
-    cosmn = jnp.cos(arg)
-    sinmn = jnp.sin(arg)
+    # The (theta, zeta) grid is a tensor product, so cos/sin(m*theta - xn*phi)
+    # separate into theta and phi tables that are NumPy constants: every
+    # derivative sum is then two small matmuls, with no per-call
+    # transcendentals or (points x modes) temporaries.
+    nt, nz = int(basis.ntheta3), int(basis.nzeta)
+    xm_np = np.asarray(modes.m, dtype=float)
+    xn_np = np.asarray(modes.n, dtype=float) * float(basis.nfp)
+    th_u = np.asarray(basis.theta, dtype=float).reshape(nt, nz)[:, 0]
+    ph_u = np.asarray(basis.zeta, dtype=float).reshape(nt, nz)[0, :] * float(basis.onp)
+    ca, sa = (jnp.asarray(f(th_u[:, None] * xm_np[None, :])) for f in (np.cos, np.sin))
+    cb, sb = (jnp.asarray(f(ph_u[:, None] * xn_np[None, :])) for f in (np.cos, np.sin))
+    xm, xn = jnp.asarray(xm_np), jnp.asarray(xn_np)
+
+    def cos_syn(w):  # sum_k w_k cos(arg_ik): (o, nm) -> (o, nt, nz)
+        return (w[:, None, :] * ca) @ cb.T + (w[:, None, :] * sa) @ sb.T
+
+    def sin_syn(w):  # sum_k w_k sin(arg_ik)
+        return (w[:, None, :] * sa) @ cb.T - (w[:, None, :] * ca) @ sb.T
+
     rc = jnp.asarray(rmnc)
     zs = jnp.asarray(zmns)
-    R = cosmn @ rc
-    Z = sinmn @ zs
-    Ru = -(sinmn * xm[None, :]) @ rc
-    Rv = (sinmn * xn[None, :]) @ rc
-    Zu = (cosmn * xm[None, :]) @ zs
-    Zv = -(cosmn * xn[None, :]) @ zs
-    ruu = -(cosmn * (xm * xm)[None, :]) @ rc
-    ruv = (cosmn * (xm * xn)[None, :]) @ rc
-    rvv = -(cosmn * (xn * xn)[None, :]) @ rc
-    zuu = -(sinmn * (xm * xm)[None, :]) @ zs
-    zuv = (sinmn * (xm * xn)[None, :]) @ zs
-    zvv = -(sinmn * (xn * xn)[None, :]) @ zs
+    # Outputs [R, Zu, Zv, ruu, ruv, rvv] are cosine sums of these weights and
+    # [Z, Ru, Rv, zuu, zuv, zvv] sine sums.
+    cos_w = [rc, xm * zs, -xn * zs, -(xm * xm) * rc, (xm * xn) * rc, -(xn * xn) * rc]
+    sin_w = [zs, -xm * rc, xn * rc, -(xm * xm) * zs, (xm * xn) * zs, -(xn * xn) * zs]
     if rmns is not None and zmnc is not None:
         rs = jnp.asarray(rmns)
         zc = jnp.asarray(zmnc)
-        R = R + sinmn @ rs
-        Z = Z + cosmn @ zc
-        Ru = Ru + (cosmn * xm[None, :]) @ rs
-        Rv = Rv - (cosmn * xn[None, :]) @ rs
-        Zu = Zu - (sinmn * xm[None, :]) @ zc
-        Zv = Zv + (sinmn * xn[None, :]) @ zc
-        ruu = ruu - (sinmn * (xm * xm)[None, :]) @ rs
-        ruv = ruv + (sinmn * (xm * xn)[None, :]) @ rs
-        rvv = rvv - (sinmn * (xn * xn)[None, :]) @ rs
-        zuu = zuu - (cosmn * (xm * xm)[None, :]) @ zc
-        zuv = zuv + (cosmn * (xm * xn)[None, :]) @ zc
-        zvv = zvv - (cosmn * (xn * xn)[None, :]) @ zc
-    shape = (int(basis.ntheta3), int(basis.nzeta))
+        cos_w += [zc, xm * rs, -xn * rs, -(xm * xm) * zc, (xm * xn) * zc, -(xn * xn) * zc]
+        sin_w += [rs, -xm * zc, xn * zc, -(xm * xm) * rs, (xm * xn) * rs, -(xn * xn) * rs]
+    cs = cos_syn(jnp.stack(cos_w))
+    sn = sin_syn(jnp.stack(sin_w))
+    if len(cos_w) == 12:
+        cc, cs_x = cs[:6], cs[6:]
+        sn_s, sn_c = sn[:6], sn[6:]
+        cs, sn = cc + sn_c, sn_s + cs_x
+    R, Zu, Zv, ruu, ruv, rvv = cs
+    Z, Ru, Rv, zuu, zuv, zvv = sn
+    shape = (nt, nz)
     return VacuumBoundary(
         R=R.reshape(shape), Z=Z.reshape(shape),
         Ru=Ru.reshape(shape), Zu=Zu.reshape(shape),
@@ -559,18 +577,25 @@ def _axis_current_field(R, Z, axis_r, axis_z, current, tables: dict[str, Any]):
     cos1 = jnp.broadcast_to(cosuv[None, :], (ntheta, nv)).reshape(-1)
     sin1 = jnp.broadcast_to(sinuv[None, :], (ntheta, nv)).reshape(-1)
     rp = jnp.reshape(R, (-1,))
-    xobs = jnp.stack([rp * cos1, rp * sin1, jnp.reshape(Z, (-1,))], axis=1)
-    capRv = xobs[:, None, :] - xnod.T[None, :, :]
-    capR = jnp.sqrt(jnp.maximum(eps_sq, jnp.sum(capRv * capRv, axis=2)))
+    # Component-wise (points, nodes) arrays: no (points, nodes, 3) stacks or
+    # jnp.cross temporaries, so XLA fuses each node sum into one loop.
+    rvx = (rp * cos1)[:, None] - xnod[0][None, :]
+    rvy = (rp * sin1)[:, None] - xnod[1][None, :]
+    rvz = jnp.reshape(Z, (-1,))[:, None] - xnod[2][None, :]
+    capR = jnp.sqrt(jnp.maximum(eps_sq, rvx * rvx + rvy * rvy + rvz * rvz))
     R1p2 = capR[:, :-1] + capR[:, 1:]
     denom = jnp.maximum(R1p2 * R1p2 - lsqnod[None, :], eps_sq)
     Rfactor = 2.0 * R1p2 / (capR[:, :-1] * capR[:, 1:] * denom)
-    crossv = jnp.cross(dxnod.T[None, :, :], capRv[:, :-1, :])
-    bxyz = (current * 1.0e-7) * jnp.sum(crossv * Rfactor[:, :, None], axis=1)
-    br = cos1 * bxyz[:, 0] + sin1 * bxyz[:, 1]
-    bp = -sin1 * bxyz[:, 0] + cos1 * bxyz[:, 1]
+    dx, dy, dz = dxnod[0][None, :], dxnod[1][None, :], dxnod[2][None, :]
+    rx, ry, rz = rvx[:, :-1], rvy[:, :-1], rvz[:, :-1]
+    scale = current * 1.0e-7
+    bx = scale * jnp.sum((dy * rz - dz * ry) * Rfactor, axis=1)
+    by = scale * jnp.sum((dz * rx - dx * rz) * Rfactor, axis=1)
+    bz = scale * jnp.sum((dx * ry - dy * rx) * Rfactor, axis=1)
+    br = cos1 * bx + sin1 * by
+    bp = -sin1 * bx + cos1 * by
     return (br.reshape((ntheta, nv)), bp.reshape((ntheta, nv)),
-            bxyz[:, 2].reshape((ntheta, nv)))
+            bz.reshape((ntheta, nv)))
 
 
 def _external_field_channels(boundary: VacuumBoundary, br, bp, bz, *,

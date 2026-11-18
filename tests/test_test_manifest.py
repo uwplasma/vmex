@@ -56,17 +56,16 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     # Root prose is narrowable wherever it lives, because prose rides
     # along with almost every change and cannot alter what the package
     # computes. It still runs the lanes owning the guards that read it.
-    plan_lanes = ci_scope.needed_lanes(["CHANGELOG.md"])
-    assert plan_lanes is not None and "pr-parity-c2" in plan_lanes
-    assert ci_scope.needed_lanes(["README.md"]) is not None
+    prose_lanes = ci_scope.needed_lanes(["README.md"])
+    assert prose_lanes is not None and "pr-parity-c2" in prose_lanes
     mixed = ci_scope.needed_lanes(
-        ["examples/optimization/single_stage_optimization.py", "CHANGELOG.md"]
+        ["examples/optimization/single_stage_optimization.py", "README.md"]
     )
-    assert mixed is not None and mixed >= plan_lanes, (
+    assert mixed is not None and mixed >= prose_lanes, (
         "a change carrying prose must still run the prose's guards"
     )
     # Prose alongside package code keeps the full matrix.
-    assert ci_scope.needed_lanes(["vmex/core/solver.py", "CHANGELOG.md"]) is None
+    assert ci_scope.needed_lanes(["vmex/core/solver.py", "README.md"]) is None
 
 
 def test_ci_scope_skips_only_documentation_and_rendered_media() -> None:
@@ -241,9 +240,13 @@ def test_every_manifest_lane_runs_in_a_workflow_or_is_declared_local_only() -> N
         "workflow, move their tests to a lane that runs, or declare them under "
         "local_only with a reason and command."
     )
-    workflows = "\n".join(
-        path.read_text() for path in (ROOT / ".github" / "workflows").glob("*.yml"))
-    assert "self-hosted" not in workflows, "no self-hosted runner is registered"
+    # Self-hosted runners never take fork code: every self-hosted job carries
+    # the same-repository guard.
+    for name, text in {path.name: path.read_text()
+                       for path in (ROOT / ".github" / "workflows").glob("*.yml")}.items():
+        for job in re.split(r"\n  (?=[a-z][a-z-]*:\n)", text)[1:]:
+            if "self-hosted" in job:
+                assert "head.repo.full_name == github.repository" in job, (name, job[:60])
 
 
 def test_workflow_selects_manifest_lanes() -> None:

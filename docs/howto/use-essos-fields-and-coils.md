@@ -100,31 +100,15 @@ the supplied coil field. The plasma part is a quadrature over a source grid on
 the plasma surface, sampled by default from the boundary's aspect ratio, field
 periods and requested digits. Its error grows rapidly near that surface, so at
 the points where its error estimate misses the requested digits an eager call
-switches to a target-graded quadrature, accurate to about 1e-12 of the field
-down to 0.01 minor radii at a few milliseconds per point;
+switches to a target-graded quadrature (from virtual-casing-jax), accurate to
+about 1e-12 of the field from one minor radius to the surface itself at a few
+milliseconds per point;
 `with_graded_quadrature()` uses it everywhere, including under `jit`. Targets
 must also stay away from coil filaments, and an MGRID field has a finite
 tabulated domain. The exterior field-line example
 (`examples/vmex_fieldline_tracing_finite_beta.py`) traces through the graded
 field; a finite trace does not by itself establish magnetic topology. See
 {doc}`/explanation/nestor-vacuum` for the derivation.
-
-Graded quadrature evaluates one target rule at a time by default. To trade
-memory for throughput, set a static positive `graded_target_batch_size`:
-
-```python
-field = vj.VmecExtender.from_file(
-    "wout_my_case.nc", external_field=coils.B
-).with_graded_quadrature()
-field.graded_target_batch_size = 8
-```
-
-Use `None` to restore serial evaluation. This setting batches targets without
-changing nodes, formulas or accuracy checks; source and target chunk settings
-for direct quadrature do not control it. Benchmark synchronized calls at your
-node counts and derivative order, since larger batches increase the working
-set and may be slower on a particular device. Choose the setting before
-compiling an enclosing objective with `jax.jit`.
 
 ![Poincare sections of the extended field around finite-beta free-boundary QA equilibria, one with an iota = 1/2 island chain](../_static/figures/readme_extender_islands.webp)
 

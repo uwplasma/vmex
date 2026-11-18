@@ -13,7 +13,7 @@ from vmex.core.run_options import InputRequest, RunOptions
 def test_device_option_parses_supported_choices():
     parser = cli.build_parser()
     assert parser.parse_args(["input.case"]).device == "auto"
-    assert parser.parse_args(["input.case"]).prefetch_compile is False
+    assert parser.parse_args(["input.case"]).prefetch_compile is True
     assert parser.parse_args(
         ["input.case", "--prefetch-compile"]
     ).prefetch_compile is True

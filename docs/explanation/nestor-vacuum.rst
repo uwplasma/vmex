@@ -309,7 +309,7 @@ target-graded quadrature of the same surface data on the 2.5 % beta QA deck
 estimate tracks the error (0.76 to 1.09 times it) and flags every such point.
 :meth:`~vmex.core.extender.VmecExtender.B` and its derivatives therefore
 switch, at every point whose estimate misses ``10**-digits``, to a
-target-graded periodic trapezoid rule
+target-graded periodic trapezoid rule of virtual-casing-jax
 (:func:`~vmex.core.virtual_casing.graded_plasma_field`): about the target's
 nearest surface point the angles are substituted,
 :math:`\theta=\theta^*+u-a\sin u` and likewise :math:`\phi`, and the rule
@@ -317,20 +317,22 @@ is applied on a uniform grid in :math:`u`. The substitution is entire and
 periodic, so the rule stays spectrally accurate, while the node spacing at the
 target shrinks to one eighth of the distance. The surface data are
 interpolated spectrally from their samples, and the closed-form layer kernels
-give ``B`` and its derivatives in one pass. At the default 128 x 512 nodes it
-matches a converged reference of the same data to 1e-12 in the field and 1e-10
-in its gradient from one minor radius down to 0.01 a, and 3e-8 at 0.003 a; on
-the two-source torus it reproduces the filament field outside and minus the
-applied field inside to 6e-10 of the field scale 1 mm from a 0.3 m surface.
-It costs 6--12 ms per point on a loaded laptop CPU (2--5 ms at 32 x 128 to
-64 x 256 nodes, which keep the field to 1e-5 or better down to 0.01 a). Its
-error estimate is the difference from the same rule at three quarters of the
-nodes. ``near_surface="direct"`` restores the direct path everywhere;
+give ``B`` and its derivatives in one pass. Within 1e-3 of the half-extent the
+rule is evaluated at that distance and Taylor-continued along the normal, from
+the target's side. On the QA bootstrap deck at 64 x 64 per period it matches the
+same rule on four times the nodes to 1e-14..1e-11 in the field and 1e-12..4e-8
+in its gradient from one minor radius to the surface, on both sides, and at 128
+x 128 to 6e-13 and 6e-10 on the surface; the direct path on the same data is
+off by 1e-5..1e-3. On the two-source torus it reproduces the filament field
+outside and minus the applied field inside. It costs about 7 ms per point on a
+laptop CPU. Its error estimate is the largest of the change from every second
+node, the last Taylor term and the field data's own spectrum at the edge of what
+the samples resolve. ``near_surface="direct"`` restores the direct path everywhere;
 ``near_surface="graded"`` or
 :meth:`~vmex.core.extender.VmecExtender.with_graded_quadrature` uses the
-graded rule everywhere, including under ``jit``, where the per-point switch is
-not available. The graded rule is our own construction for this global
-toroidal rule, validated numerically, not taken from a reference.
+graded rule everywhere, including under ``jit``. The rule is validated
+numerically against the closed forms and analytic oracles, not taken from a
+reference.
 
 Spatial derivatives of the direct path come from the same closed-form
 kernels on the finest schedule level, where nested ``jacfwd`` through the

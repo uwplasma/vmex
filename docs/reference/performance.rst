@@ -418,6 +418,23 @@ normal matrix (partial assembly ``A = D S``, 0.55 s on the final 4 369-coordinat
 chart), the SuperLU KKT factors (about 0.9 s each), and the two independent
 certificates dominate.  Peak RSS is about 3.5 GB.
 
+Solver keywords
+---------------
+
+Keywords of :func:`vmex.solve` and :func:`vmex.solve_multigrid` not described
+elsewhere. ``time_step`` overrides the deck's initial ``DELT``. ``emit`` is a
+callable that receives each printed line instead of ``print``. ``prec2d`` takes
+a :class:`~vmex.core.preconditioner_2d.Prec2DConfig` for the opt-in 2D block
+preconditioner above. ``polish_config`` takes a ``PolishConfig`` for the
+force-balance polish below. ``lconm1`` (default true) applies VMEC2000's m=1
+R/Z constraint pair. ``max_iterations`` caps the iterations of a single-grid
+solve (default: the deck's ``NITER``). On a multigrid ladder
+``coarse_grid_retry`` (default true) retries once with an automatic ``ns=3``
+stage when the first grid has an invalid Jacobian, ``release_stage_cache``
+(default false) clears JAX's in-memory caches between radial grids to lower
+peak memory, and ``prefetch_compile`` compiles the next rung in a background
+thread; none of the three changes the result.
+
 Historical and generated records
 --------------------------------
 

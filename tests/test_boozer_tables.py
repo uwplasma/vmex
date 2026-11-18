@@ -722,3 +722,19 @@ def test_boozer_geometry_preserves_the_major_radius_range(lasym_solved):
     span = float(reference.max() - reference.min())
     assert abs(boozer.min() - reference.min()) < 0.05 * span
     assert abs(boozer.max() - reference.max()) < 0.05 * span
+
+
+def test_batched_spectrum_equals_per_surface_construction(symmetric_eq):
+    """One traced pass over all rows reproduces the surface-by-surface result."""
+    eq = symmetric_eq
+    surfaces = [0.2, 0.5, 0.8]
+    kwargs = dict(mboz=4, nboz=4, oversample=1)
+    batched = boozer_spectrum_state(eq.state, eq.runtime, surfaces=surfaces, **kwargs)
+    for i, s in enumerate(surfaces):
+        single = boozer_spectrum_state(eq.state, eq.runtime, surfaces=[s], **kwargs)
+        for key in ("bmnc_b", "bmns_b", "iota_b", "G_b", "I_b", "s_b", "psi_b"):
+            np.testing.assert_allclose(np.asarray(batched[key])[i],
+                                       np.asarray(single[key])[0], rtol=1e-12,
+                                       atol=1e-14, err_msg=key)
+        np.testing.assert_array_equal(np.asarray(batched["xm_b"]),
+                                      np.asarray(single["xm_b"]))

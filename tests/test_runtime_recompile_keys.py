@@ -18,6 +18,7 @@ import dataclasses
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from vmex.core import solver
 from vmex.core.input import VmecInput
@@ -227,6 +228,25 @@ def test_mixed_named_sharding_is_not_normalized(monkeypatch):
         )
         assert seen == [named] * 3
         assert lookups == ([1] if cached else [])
+
+
+def test_lane_lowering_out_of_memory_is_raised(monkeypatch) -> None:
+    """Out of memory while lowering the lane is raised, not retried on demand."""
+    def lane(carry, runtime):
+        raise AssertionError("the on-demand lane must not run")
+
+    def executable(*args):
+        raise RuntimeError("RESOURCE_EXHAUSTED: out of memory")
+
+    lane.executable = executable
+    monkeypatch.setattr(solver, "_block_lane", lane)
+    monkeypatch.setattr(solver, "_LANE_EXECUTABLES", {})
+    rt = _small_runtime(1.0)
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        solver._run_loop(
+            solver._initial_state(rt.setup), rt, mode="cli", ijacob=0,
+            verbose=False, emit=None, time_step0=0.9, nstep=200,
+        )
 
 
 def test_silent_cpu_solve_keeps_block_lane(monkeypatch) -> None:
