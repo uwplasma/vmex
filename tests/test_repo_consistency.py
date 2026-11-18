@@ -14,10 +14,6 @@ import inspect
 import json
 import re
 import sys
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +23,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 import vmex
+from vmex._compat import load_toml
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -38,7 +35,7 @@ import render_capabilities as capabilities  # noqa: E402
 import render_performance_docs as performance  # noqa: E402
 import update_figure_manifest as figure_tool  # noqa: E402
 
-PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text())
+PYPROJECT = load_toml((ROOT / "pyproject.toml").read_text())
 PROJECT = PYPROJECT["project"]
 EXTRAS = PROJECT["optional-dependencies"]
 WORKFLOWS = {p.name: p.read_text() for p in (ROOT / ".github" / "workflows").glob("*.yml")}

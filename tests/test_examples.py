@@ -83,12 +83,9 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     from packaging.version import Version
 
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python 3.10
-        import tomli as tomllib
+    from vmex._compat import load_toml
 
-    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
+    pyproject = load_toml((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
     assert coils == ["essos>=0.22.0; python_version >= '3.11'"], coils
 
