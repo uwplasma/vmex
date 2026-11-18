@@ -1071,24 +1071,16 @@ def solve_file(
 
     # Free-boundary routing exactly as ``vmex <input>`` does it: MGRID_FILE is
     # resolved against the deck's directory, the coil metadata reaches the
-    # wout, and an unreadable mgrid falls back to a fixed-boundary solve
-    # (VMEC2000 policy).  Explicit mgrid_path/external_field keywords win.
+    # wout, and a missing mgrid raises.  Explicit mgrid_path/external_field keywords win.
     freeb_plan = None
     if bool(inp.lfreeb) and not ({"mgrid_path", "external_field"} & solve_kwargs.keys()):
-        import dataclasses
         import types
-        import warnings
 
         from .cli import _free_boundary_plan
 
-        def _warn(message):
-            warnings.warn(" ".join(message.split()), RuntimeWarning, stacklevel=3)
-
         freeb_plan = _free_boundary_plan(
-            types.SimpleNamespace(coils=None), inp, _Path(path), emit=_warn
+            types.SimpleNamespace(coils=None), inp, _Path(path), emit=print
         )
-        if freeb_plan is None:
-            inp = dataclasses.replace(inp, lfreeb=False)
 
     if bool(inp.lfreeb):
         if options.polish is not False:

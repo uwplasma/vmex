@@ -155,9 +155,18 @@ def _read_bundle(bundle: AssetBundle) -> bytes:
     is what a CI log showed when ``assets-20260316-nc`` disappeared.
     """
     try:
-        with urllib.request.urlopen(bundle.url) as resp:
-            return resp.read()
-    except (urllib.error.URLError, OSError) as exc:
+        try:
+            with urllib.request.urlopen(bundle.url) as resp:
+                return resp.read()
+        except (urllib.error.URLError, OSError):
+            # The release-download host can time out while the API still serves the asset.
+            owner, repo, _, _, tag, name = bundle.url.split("/")[3:9]
+            with urllib.request.urlopen(f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}") as resp:
+                asset = next(a for a in json.load(resp)["assets"] if a["name"] == name)
+            request = urllib.request.Request(asset["url"], headers={"Accept": "application/octet-stream"})
+            with urllib.request.urlopen(request) as resp:
+                return resp.read()
+    except (urllib.error.URLError, OSError, StopIteration, KeyError) as exc:
         raise SystemExit(
             f"Could not download bundle {bundle.name!r} from {bundle.url}\n"
             f"  {type(exc).__name__}: {exc}\n"

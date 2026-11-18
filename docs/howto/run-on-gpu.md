@@ -27,7 +27,7 @@ The defaults should cover most runs. They do the following:
 | `workers=` | available CPUs, at most one per case | Sharing a node, or the case count exceeds what the cores can run well: each worker also uses XLA threads |
 | `adjoint_solver=` (free boundary) | `boundary_schur` | Use `coupled_gcrot` only to cross-check a gradient, or when the banded factor does not fit host memory |
 | `jac_chunk_size=` | `auto` | Memory runs out (smaller), or memory is ample and Jacobians are slow (larger) |
-| `NPROC`, `OPENBLAS_NUM_THREADS` | not set | Several processes share a node: give each its share before starting Python |
+| `NPROC`, `OPENBLAS_NUM_THREADS` | `min(available_cpus(), 16)` when unset | Set per-process shares before JAX backend initialization (`NPROC`) or BLAS loading; existing values are preserved |
 | `VMEX_COMPILATION_CACHE_DIR` | under `~/.cache` | The home filesystem is slow or small, or a cluster needs a shared path; `disabled` turns the cache off |
 | `XLA_PYTHON_CLIENT_PREALLOCATE=true` | `false` | A dedicated GPU, one process, and you want JAX's preallocation |
 | `VMEX_FAST_COMPILE=1` | off | Short CPU runs dominated by compile time; warm kernels get slightly slower |

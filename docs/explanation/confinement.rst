@@ -102,7 +102,7 @@ One transform implementation — ``booz_xform_jax``'s — executes these
 equations; vmex only feeds it. The host driver
 :func:`vmex.core.boozer.run_booz_xform` calls it on a ``wout_*.nc`` file and
 writes a standard ``boozmn_*.nc`` (used by ``vmex --booz`` and by
-:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout`). The
+:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout`). The
 traceable :func:`~vmex.core.omnigenity.boozer_spectrum_state` calls the same
 jittable kernel in memory on wout-convention tables built from the solver's
 internal state (:func:`~vmex.core.boozer_tables.boozer_input_tables`), so
@@ -261,6 +261,70 @@ Catto (2012) <https://arxiv.org/abs/1112.5725>`_. A small variance alone does no
 establish common extrema, complete wells, compatible transitions or radial
 action behavior, and it does not certify confinement: pair the residual with a
 mirror ceiling, a transform floor and an independent neoclassical (NEO) or particle-tracing check.
+
+
+.. _confinement-pwo-bootstrap:
+
+Bootstrap current of a pwO field
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In the :math:`1/\nu` regime the parallel bootstrap current is
+:math:`\langle j_\parallel B\rangle\propto G_{\rm bs}` times the profile gradients
+(`Shaing and Callen 1983 <https://doi.org/10.1063/1.864108>`_; `Nakajima et al.
+1989 <https://doi.org/10.1088/0029-5515/29/4/006>`_). With Boozer covariant
+components :math:`G` (toroidal) and :math:`I` (poloidal, the enclosed current),
+:math:`\xi=\sqrt{1-\lambda B}` and :math:`\langle\cdot\rangle` the flux-surface average,
+
+.. math::
+
+   G_{\rm bs}=-\frac{f_s+\langle uB^2\rangle}{f_t},\qquad
+   f_s=\frac{3\langle B^2\rangle}{4}\int_0^{1/B_{\max}}
+       \frac{\lambda\langle g_4\rangle}{\langle\xi\rangle}\,d\lambda,
+
+.. math::
+
+   \mathbf B\!\cdot\!\nabla u=-(\mathbf B\times\nabla\psi)\!\cdot\!\nabla B^{-2},\qquad
+   \mathbf B\!\cdot\!\nabla(g_4/\xi)=+(\mathbf B\times\nabla\psi)\!\cdot\!\nabla\xi^{-1},
+
+with :math:`u=g_4=0` where :math:`B=B_{\max}`, the global maximum. Quasi-axisymmetry gives
+:math:`G_{\rm bs}=G/\iota`, and any omnigenous field gives
+:math:`(MG+NI)/(\iota M-N)` (`Landreman and Catto 2012
+<https://arxiv.org/abs/1112.5725>`_), which is :math:`-I` for QI. Helander, Geiger and
+Maassberg (2011) relate the stellarator bootstrap current to the tokamak value.
+
+`Calvo et al. (2025) <https://arxiv.org/abs/2505.02546v3>`_ evaluate this for a pwO field
+whose :math:`B=B_M` region is bounded by two families of contours
+:math:`\theta-a_i\zeta=\text{const}`. Writing :math:`\chi_i` for the indicator of
+region :math:`i`, the part of :math:`\langle j_\parallel B\rangle` proportional to
+:math:`G` is proportional to
+
+.. math::
+
+   \Delta=\sum_i\frac{\langle\chi_i\rangle}{\iota-a_i},
+
+and the enclosed-current part is removed by :math:`I(0)=0`. The bootstrap current
+vanishes for arbitrary profiles if and only if :math:`\Delta=0`, which needs
+:math:`\iota-a_1` and :math:`\iota-a_2` of opposite sign.
+
+The mapped field of :ref:`confinement-mapped-pwo` has poloidally closed contours and a
+bounce length :math:`2D(\eta)/N` independent of the field line, so its :math:`\Delta`
+vanishes for every :math:`(a,b,c,\eta_{\min})` and :math:`\iota`. The mapped
+target therefore carries zero bootstrap current by construction. The current of an
+optimized boundary comes from the unmapped band between the cut contour of one period
+and the next, where :math:`B_{\max}` lives. A flat band with
+:math:`B=\text{const}` is sufficient for :math:`\Delta=0`, not necessary. With
+``BOOTSTRAP_TERM = "band"`` the optimizer adds
+
+.. math::
+
+   r^{\rm band}_{sjk}=\sqrt{\frac{w_b\,w_s}{N_\gamma N_{\rm band}}}
+     \frac{B_{sjk}-\overline{B}_s}{B_{00,s}},
+
+the spread of :math:`B` over :math:`N_{\rm band}` nodes per gamma line across the band
+(:class:`~vmex.core.pwo.FreeMapProblem`, ``band_weight`` :math:`=w_b`). The price is a
+higher edge :math:`\epsilon_{\rm eff}`. Check the current with the finite-collisionality
+DKX :math:`\langle j_\parallel B\rangle`, not with the 1/nu geometry alone: a reduced
+:math:`G_{\rm bs}` does not by itself guarantee a smaller current at reactor collisionality.
 
 
 Bounce action
@@ -500,7 +564,7 @@ Use :class:`~vmex.core.qi.ConstructedQIResidual` for production optimization,
 with reduced sampling only when its ranking has been checked against the
 default resolution. When quoting "how QI is this equilibrium?", also evaluate
 the wout/Boozer-based
-:func:`~vmex.core.optimize.quasi_isodynamic_residual_from_wout` on the written
+:func:`~vmex.core.qi.quasi_isodynamic_residual_from_wout` on the written
 ``wout``. Always report the surfaces and sampling because an outer-surface
 total is not numerically interchangeable with a core-to-edge total.
 
@@ -917,3 +981,79 @@ shape derivatives, so even the smooth gradient is approximate. Check actual
 forward descent and sampling refinement for each configuration. The surrogate
 can underestimate shallow ripple wells; anneal ``temperature`` with a finer
 budget and report the independent hard value.
+
+.. _confinement-resolution:
+
+Resolution and cost of the metrics
+----------------------------------
+
+Every metric above has resolution knobs, and the cost of one objective
+evaluation plus its Jacobian scales with them. The settings below were chosen
+by comparing each against a converged reference on 39 optimized vacuum
+equilibria (20 QI runs and 19 pwO runs, ARIES-CS scale, 0.1 % to 100 % alpha
+loss) and on two sets of ten random boundary perturbations of a QH
+(``nfp4_QH_finite_beta``) and a QI (``nfp2_QI``) deck, which are the
+near-equal candidates an optimizer actually compares. "Rank" is the Spearman
+coefficient over the equilibria of a set; "error" is the median relative
+difference from the reference. Alpha losses are 2000 fusion alphas born at
+:math:`s = 0.25` and traced for 10 ms (binomial standard error 0.2 to 1 %).
+
+.. list-table:: Settings that rank like the converged reference
+   :header-rows: 1
+   :widths: 14 30 30 16 10
+
+   * - Metric
+     - Optimization loop
+     - Acceptance or report
+     - Rank, error (loop)
+     - One-tangent JVP
+   * - :class:`~vmex.core.pwo.MappedPwOResidual`
+     - ``mboz=nboz=8``, ``oversample=1``, ``ngamma=neta=16``
+     - ``mboz=nboz=16``, ``oversample=2``, 32 x 32 (the examples)
+     - 1.00, 0.02 to 0.2 %
+     - 0.04 s against 0.3 s
+   * - :class:`~vmex.core.qi.ConstructedQIResidual`
+     - ``mboz=nboz=8``, ``nphi=41``, ``nalpha=12``, ``n_bounce=13``
+     - ``mboz=nboz=14``, ``nphi=101``, ``nalpha=29``, ``n_bounce=31``
+     - 0.98, 34 %
+     - 0.08 s against 0.25 s
+   * - :class:`~vmex.core.gammac.GammaCSmooth`
+     - ``nalpha=5``, 3 transits, 32 points, 24 pitch, 16 nodes
+     - hard :class:`~vmex.core.gammac.GammaC` at 13 lines, 6 transits, 96 points, 48 pitch, 48 nodes
+     - 0.98, 12 % (hard value)
+     - 0.5 s against 1.5 s (default)
+   * - NEO effective ripple
+     - not in the loop
+     - ``diagnostic_neo_config()`` (32 x 32, 24 particles, 20 steps per period)
+     - 0.996, 2.5 %
+     - not available
+
+The constructed-QI residual is limited by its field-line sampling, not by the
+Boozer resolution (``mboz`` 6 to 24 change it by less than 0.5 %); the sampling
+set above is 34 % from the converged value yet ranks equilibria at 0.98, so
+report the validation set. The sampling noise of :math:`\Gamma_c` is real:
+shifting the field-line origin changes the hard value by 5 to 13 % and can
+reorder near-equal candidates; between distinct designs the order is stable.
+
+**Which metric predicts the alpha loss.** Across the 39 optimized equilibria
+the Spearman coefficient between the metric and the alpha loss is 0.93 for
+:math:`\Gamma_c`, 0.64 for :math:`\epsilon_{\mathrm{eff}}^{3/2}`, 0.66 for the
+mapped pwO residual and 0.05 for the constructed-QI residual. The loss follows
+:math:`\Gamma_c` almost linearly, but the leave-one-out error of that map is 60
+to 80 % of the spread of the losses, so :math:`\Gamma_c` ranks designs and does
+not predict a fraction. Among ten QH perturbations
+:math:`\epsilon_{\mathrm{eff}}^{3/2}` has no rank correlation with the loss
+(0.02) and :math:`\Gamma_c` has 0.6: keep both.
+
+**Alpha tracing.** 500 alphas for 5 ms rank the 39 equilibria at 0.99 for a
+quarter of the cost of 2000 alphas for 10 ms; candidates whose losses differ
+by 1 to 2 % need the 2000-alpha run.
+
+**Kinetic bootstrap current.** On six decks solved with the full Fokker-Planck
+operator (``dkx.bootstrap.KineticBootstrapCurrent``), the
+:math:`13 \times 19 \times 32 \times 5` grid is 8 % from the
+:math:`15 \times 21 \times 48 \times 5` reference at the median, pure
+pitch-angle scattering 74 % and the coarse pitch-angle grid 190 %, with sign
+changes on the QI decks. Optimize with the cheap traced row, then compare a
+Fokker-Planck solve on the finest affordable grid and refine until it stops
+moving.

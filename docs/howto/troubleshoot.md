@@ -63,9 +63,8 @@ iteration traces part ways. Both are described in `tools/README.md`.
 
 ## Free-boundary specifics
 
-- A missing `MGRID_FILE` silently falls back to a fixed-boundary solve with
-  a warning (VMEC2000 behavior) — check for the `In VACUUM` block if the
-  boundary did not move.
+- A missing `MGRID_FILE` is an input error (exit code 5), as in STELLOPT's
+  VMEC; a free-boundary deck never runs as a fixed-boundary one.
 - Free-boundary Jacobian recovery rebuilds the axis-current filament and the
   NESTOR structures before continuing; a failure before the
   `VACUUM PRESSURE TURNED ON` banner is a plasma-side problem, not a vacuum

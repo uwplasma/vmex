@@ -48,9 +48,10 @@ def test_joint_trial_rejection_is_costly_differentiable_and_cached(seed_cost):
     joint.monitor = OptimizationMonitor()
     joint.counts, joint._cached = {"trials": 0, "rejected": 0}, {}
     joint.rejected_trial_cost = 10.0
+    joint.multipliers = np.zeros(1)
     coil_calls = []
 
-    def plasma_vg(u):
+    def plasma_vg(u, multipliers):
         accepted = float(u[0]) < 0.5
         return ((seed_cost, (np.array([np.sqrt(2 * seed_cost)]), np.array([0.0]),
                             np.asarray(0 if accepted else 1))),

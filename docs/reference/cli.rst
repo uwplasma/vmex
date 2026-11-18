@@ -90,6 +90,21 @@ Options
        order first), optional ``helicity_n``. Adds the Redl ``<j.B>`` curve.
    * - ``--nc-er X``
      - ``E_r`` [kV/m] for ``--neoclassical`` (default: the ambipolar root).
+   * - ``--alfven``
+     - Shear-Alfven continuum with FAX on a ``wout_*.nc`` input or after
+       solving an input file: the local gaps of each mode family (TAE, EAE,
+       MAE, HAE, and BAE when the WOUT has pressure) and a gap mode that stays
+       clear of the continuum. Writes ``*_alfven.png`` (continuum against
+       ``r/a`` coloured by dominant ``m``, the mode harmonics and the mode in
+       the poloidal plane) and ``*_alfven.json`` (requires
+       ``pip install "vmex[alfven]"``). Defaults pick the harmonics from
+       ``nfp`` and the rotational transform; frequencies scale as the inverse
+       square root of the density. The WOUT needs about 32 radial surfaces
+       or more; VMEX warns below that.
+   * - ``--alfven-config TOML`` / ``--alfven-density M3`` / ``--alfven-ion-mass AMU``
+     - A ``fax run`` case file (unknown keys are rejected; ``[plasma]
+       density_profile`` gives polynomial coefficients in ``s``), the central
+       ion number density (default ``1e19`` m^-3) and the ion mass (default 2 amu).
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
    * - ``--trace-no-resolution-check``
@@ -152,9 +167,10 @@ Options
        ``RESTART_WOUT`` deck entry. See
        :doc:`/howto/restart-from-previous-run`.
    * - ``--prefetch-compile`` / ``--no-prefetch-compile``
-     - Opt in to or out of overlapping the next multigrid rung's compilation.
-       Sequential compilation is the default and uses less peak memory;
-       numerical results are identical.
+     - Overlap the next multigrid rung's compilation with the current rung's
+       iteration (default: on). ``--no-prefetch-compile`` compiles
+       sequentially and uses less peak memory (about 25% less on
+       ``cth_like_free_bdy``); results are bit-identical.
    * - ``--jacobian-retries N``
      - Retry a stage from its best finite checkpoint after the VMEC2000
        75-Jacobian-reset condition, using a reduced ``DELT`` (default 2).
@@ -178,8 +194,8 @@ Free boundary and restart
 
 An ``LFREEB = T`` deck with a readable ``MGRID_FILE`` (or
 ``MGRID_FILE = 'DIRECT_COILS'`` with ``--coils``) runs the free-boundary
-ladder; a missing mgrid file falls back to a fixed-boundary solve with a
-warning, as in VMEC2000.  See :doc:`/howto/free-boundary`.  ``--restart`` or
+ladder; a missing mgrid file is an input error (exit code 5), as in STELLOPT's
+VMEC.  See :doc:`/howto/free-boundary`.  ``--restart`` or
 the deck key ``RESTART_WOUT`` seeds a fixed- or free-boundary solve from a
 wout file (:doc:`/howto/restart-from-previous-run`).
 
