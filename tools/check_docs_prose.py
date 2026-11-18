@@ -99,6 +99,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_qi.webp",
     "figures/readme_single_stage_fixed_boundary.webp",
     "figures/readme_single_stage_free_boundary.webp",
+    "figures/readme_alfven.webp",
     "figures/readme_turbulence.webp",
     "figures/readme_wall_tracing.webp",
     "figures/cross_code_bars.webp",
