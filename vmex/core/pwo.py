@@ -126,7 +126,7 @@ def _limited_map(a, b, c, eta_min, gamma, iota, nfp, neta, span_margin=.95, jaco
 
 def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
         b_ref=None, bmns_b=None, a=0.3, b=0.0, c=-2.0, eta_min=2.8,
-        ngamma=32, neta=32, weights=None, limit_map=False):
+        ngamma=32, neta=32, weights=None, limit_map=False, nband=0):
     """Mapped-gamma variance divided by the live Boozer mean field squared.
 
     Eta midpoint quadrature covers [eta_min,2*pi-eta_min]. Gamma is uniform
@@ -137,6 +137,15 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     ``limit_map=True`` clips the map on each surface to the closest one-to-one
     map for the live iota, so every parameter value yields a valid map.
     No Fourier periodicity in the cut eta direction is assumed.
+
+    ``nband > 0`` adds ``band_residuals1d``: the spread of B on ``nband``
+    nodes per gamma line across the unmapped band between one period's cut
+    contour and the next. The mapped field has poloidally closed contours and
+    a bounce length 2 D(eta)/nfp independent of the field line, so with a
+    uniform band its collisionless bootstrap geometric factor (the G term of
+    f_s + <u B^2>; two-level limit: Delta = sum_i <chi_i>/(iota - a_i) = 0)
+    vanishes for every (a, b, c, eta_min, iota). The current therefore comes
+    from the band, and a flat band is the sufficient zero-bootstrap condition.
     """
     _integer(ngamma, 4, "ngamma"); _integer(neta, 4, "neta")
     _require(jnp.isfinite(eta_min) & (eta_min > 0) & (eta_min < jnp.pi),
@@ -176,6 +185,15 @@ def mapped_pwo_residual_from_boozer(*, bmnc_b, xm_b, xn_b, iota_b, nfp,
     valid = valid & valid_map[:, 0, 0] & (jacobian_min > 0)
     mean = jnp.mean(B, axis=1, keepdims=True)
     out = _finish((B-mean)/reference, B, valid, weight)
+    if nband:
+        _integer(nband, 2, "nband")
+        # Midpoints from this period's right cut to the next period's left cut.
+        band = ends[:, :, 1:]+(ends[:, :, :1]+2*jnp.pi/nfp-ends[:, :, 1:])*(jnp.arange(nband)+.5)/nband
+        B_band = _evaluate(cosine, sine, m, n, jnp.broadcast_to(gamma, band.shape),
+                           jnp.where(iota[:, None, None] < 0, -1.0, 1.0)*band)
+        spread = (B_band-jnp.mean(B_band, axis=(1, 2), keepdims=True))/reference
+        out["band_residuals1d"] = (spread*jnp.sqrt(weight[:, None, None]/ngamma/nband)).ravel()
+        out.update(B_band=B_band, band_total=jnp.sum(out["band_residuals1d"]**2))
     out.update({"B_mapped": B, "B_mean_gamma": mean, "gamma": gamma[0, :, 0],
                 "B00": mean_field, "field_variance": variance,
                 "mapped_variance": jnp.mean((B-mean)**2, axis=(1, 2)),
@@ -294,34 +312,42 @@ class FreeMapProblem:
     The stage's first residual rows must be ``mapped.spectrum_state``. The map
     does not change the equilibrium, so its Jacobian columns come directly from
     the kernel. Parameters move through a sigmoid inside ``MAP_BOUNDS``, and
-    ``limit_map`` keeps every value valid on every surface.
+    ``limit_map`` keeps every value valid on every surface. ``band_weight > 0``
+    appends the unmapped-band flatness rows (``nband`` nodes per gamma line), the
+    sufficient zero-bootstrap condition of the mapped field; see
+    :func:`mapped_pwo_residual_from_boozer`. The kernel options of ``mapped`` apply
+    to every evaluation. A trial with a non-finite or invalid mapped field returns
+    ``REJECTED`` in every row (and a zero Jacobian), so the optimizer rejects the step.
     """
 
     MAP_BOUNDS = dict(a=(0., .8), b=(-1., 1.), c=(-4., -.5), eta_min=(2.2, 3.1))
+    REJECTED = 1e6
 
-    def __init__(self, stage, mapped, equilibrium, values, free, *, weight=1e3, area_floor=.6):
+    def __init__(self, stage, mapped, equilibrium, values, free, *, weight=1e3, area_floor=.6,
+                 band_weight=0., nband=16):
         booz = boozer_spectrum_state(equilibrium.state, equilibrium.runtime, surfaces=mapped.surfaces,
                                      mboz=mapped.mboz, nboz=mapped.nboz, oversample=mapped.oversample)
         ns, nm = booz["bmnc_b"].shape
         self.stage, self.nx, self.nspec = stage, stage.x0.size, ns*nm+ns
-        names = tuple(values)
+        names = tuple(self.MAP_BOUNDS)
         low, high = (np.array([self.MAP_BOUNDS[k][i] for k in names]) for i in (0, 1))
         fixed = np.array([values[k] for k in names], dtype=float)
         index = np.array([i for i, k in enumerate(names) if k in free], dtype=int)
         self.names, self.index = names, index
         xm, xn, nfp = booz["xm_b"], booz["xn_b"], booz["nfp"]
+        options = dict(mapped.options, limit_map=True, nband=nband if band_weight > 0 else 0)
 
         def parameters(u):
             return jnp.asarray(fixed).at[index].set(low[index]+(high[index]-low[index])*jax.nn.sigmoid(u))
         self._parameters = parameters
 
         def rows(spectrum, u):
-            a, b, c, eta_min = parameters(u)
-            out = mapped_pwo_residual_from_boozer(
+            out = mapped.kernel(
                 bmnc_b=spectrum[:ns*nm].reshape(ns, nm), xm_b=xm, xn_b=xn, iota_b=spectrum[ns*nm:],
-                nfp=nfp, a=a, b=b, c=c, eta_min=eta_min, weights=mapped.weights, limit_map=True)
+                nfp=nfp, weights=mapped.weights, **(options | dict(zip(names, parameters(u)))))
             area = jnp.sqrt(100.)*jnp.maximum(area_floor-out["mapped_area_fraction"], 0.)
-            return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area))
+            band = jnp.sqrt(band_weight)*out["band_residuals1d"] if band_weight > 0 else jnp.zeros(0)
+            return jnp.concatenate((jnp.sqrt(weight)*out["residuals1d"], area, band))
         self._rows = jax.jit(rows)
         self._columns = jax.jit(lambda s, u, v: (
             jax.vmap(lambda d: jax.jvp(lambda q: rows(q, u), (s,), (d,))[1], in_axes=1, out_axes=1)(v),
@@ -333,8 +359,9 @@ class FreeMapProblem:
     def residual(self, z):
         """Return the stage residual with the spectrum rows replaced by the mapped pwO rows."""
         raw = np.asarray(self.stage.residual(z[:self.nx]))
-        return np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
+        rows = np.concatenate((np.asarray(self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))),
                                raw[self.nspec:]))
+        return rows if np.isfinite(rows).all() else np.full_like(rows, self.REJECTED)
 
     def residual_jac(self, z):
         """Return the joint Jacobian over the boundary and the free map variables."""
@@ -343,7 +370,9 @@ class FreeMapProblem:
         boundary, free = (np.asarray(q) for q in self._columns(
             jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]), jnp.asarray(full[:self.nspec])))
         rest = np.hstack((full[self.nspec:], np.zeros((full.shape[0]-self.nspec, free.shape[1]))))
-        return np.vstack((np.hstack((boundary, free)), rest))
+        jacobian = np.vstack((np.hstack((boundary, free)), rest))
+        mapped = self._rows(jnp.asarray(raw[:self.nspec]), jnp.asarray(z[self.nx:]))
+        return jacobian if np.isfinite(jacobian).all() and np.isfinite(mapped).all() else np.zeros_like(jacobian)
 
     def values(self, z):
         """Return the map parameters at ``z`` as a dictionary."""

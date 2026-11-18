@@ -2,13 +2,13 @@
 
 - **Transform parity**: the traceable Boozer ``|B|`` spectrum
   (:func:`vmex.core.omnigenity.boozer_spectrum_state`) matches the host
-  booz_xform_jax route (:func:`vmex.core.optimize.boozer_modes_from_wout`)
+  booz_xform_jax route (:func:`vmex.core.qi.boozer_modes_from_wout`)
   mode-by-mode on a converged 3D deck.
 - **Physics**: the residual is exactly zero on an analytic QI (pure-QP)
   ``|B|`` and large on a QA-like ``|B|``; on solved decks the bundled QI
   configuration (``input.nfp1_QI``) scores far below a circular tokamak.
 - **Consistency**: the deck ordering agrees with the wout-engine QI total
-  (:func:`vmex.core.optimize.quasi_isodynamic_residual_from_wout`).
+  (:func:`vmex.core.qi.quasi_isodynamic_residual_from_wout`).
 - **Differentiability**: ``jax.grad`` w.r.t. the state is finite and nonzero,
   and the residual composes through ``least_squares(..., jac="implicit")``.
 """
