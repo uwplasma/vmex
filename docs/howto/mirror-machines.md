@@ -41,7 +41,7 @@ directly and call {func}`vmex.mirror.solve_fixed_boundary`.
 
 ## Run the shipped examples
 
-Six examples live in the repository's `examples/mirror/` directory (they are
+Seven examples live in the repository's `examples/mirror/` directory (they are
 not part of the installed wheel, so run them from a source checkout). Each has
 editable inputs at its top and takes no command-line arguments:
 
@@ -49,6 +49,7 @@ editable inputs at its top and takes no command-line arguments:
 python examples/mirror/mirror_fixed_boundary_axisymmetric.py      # axisymmetric mirror against the exact field
 python examples/mirror/mirror_fixed_boundary_nonaxisymmetric.py   # rotating-ellipse fixed boundary
 python examples/mirror/mirror_free_boundary_beta_scan.py          # axisymmetric free-boundary beta scan
+python examples/mirror/mirror_exterior_field.py               # plasma field outside the boundary and field lines
 python examples/mirror/stellarator_mirror_hybrid.py               # periodic B-spline racetrack hybrid
 python examples/mirror/qi_mirror_hybrid_fourier_vs_bspline.py     # QI-mirror hybrid: Fourier vs B-spline
 python examples/mirror/pleiades_mirror_reference.py               # Pleiades reference data (external checkout)
@@ -188,3 +189,19 @@ free-boundary lane through the 10% beta ceiling (validated to 1.08e-10
 relative against a reconverged finite difference,
 `benchmarks/mirror_free_boundary_axisymmetric.json`). Scope and validation
 evidence: {doc}`/explanation/mirror-geometry`.
+
+## Field of the plasma outside the boundary
+
+`examples/mirror/mirror_exterior_field.py` closes the boundary of a fixed-boundary
+mirror with its two end planes and evaluates, with
+`virtual_casing_jax.mirror.MirrorExteriorField`, the field of the currents inside
+the surface at points outside it and, with `branch="external"`, the field of the
+sources outside at points inside it. The inputs are the total field on the side
+wall and on the end planes from `solution.mout()`, so the end-plane
+through-flux is part of the data; the script reports the net flux defect, which
+is zero for a solenoidal field. It then traces field lines of the exact vacuum
+field plus the plasma field. At zero pressure the plasma field outside is
+the discretization error of the solve (about 1e-5 T at the default resolution);
+at `PRES_SCALE = 2e4` it is 5e-4 T. Equilibria with anisotropic pressure are not
+covered. The example needs a `virtual-casing-jax` release that includes
+`virtual_casing_jax.mirror`.

@@ -68,6 +68,7 @@ host size.
 | Resource | Default | Set your own with |
 | --- | --- | --- |
 | XLA threads in one solve | CPUs, at most 16 | `NPROC` |
+| Probe threads in one optimization factorization | CPUs, at most 8 | `probe_workers=` of `VmecProblem.from_tuples` and `least_squares` |
 | BLAS threads in one solve | CPUs, at most 16 | `OPENBLAS_NUM_THREADS` |
 | ESSOS CPU devices | CPUs | `ESSOS_CPU_DEVICES` |
 | Ensemble workers | CPUs, at most one per item | `workers=` |
