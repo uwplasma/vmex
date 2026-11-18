@@ -106,7 +106,8 @@ def case_from_input(path: Path) -> str:
         case = name.split("input_", 1)[-1]
     else:
         case = path.stem
-    case = case[: -len(".json")] if case.endswith(".json") else case
+    for suffix in (".json", ".toml"):
+        case = case[: -len(suffix)] if case.endswith(suffix) else case
     return case or path.stem
 
 
