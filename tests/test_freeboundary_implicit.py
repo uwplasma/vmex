@@ -1468,13 +1468,13 @@ def test_edge_response_is_the_exact_linearization_of_nestor():
         mpol=10, ntor=0, ntheta=30, nzeta=4)
     inp = dataclasses.replace(
         base, ns_array=np.array([8]),
-        ftol_array=np.array([1.0e-8]), niter_array=np.array([2500]))
+        ftol_array=np.array([1.0e-8]), niter_array=np.array([6000]))
     field = lasym_free_field()
     params = im.params_from_input(inp)
 
     def configure(solver):
         return make_free_boundary_config(
-            inp, field, ns=8, ftol=1.0e-8, max_iterations=2500,
+            inp, field, ns=8, ftol=1.0e-8, max_iterations=6000,
             adjoint_tol=1.0e-9, adjoint_maxiter=100, adjoint_solver=solver,
             field_from_parameters=lambda current: dataclasses.replace(
                 field, extcur=current),
