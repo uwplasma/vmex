@@ -24,9 +24,7 @@ The console shows the VMEC2000 free-boundary output (`In VACUUM` block,
 `VACUUM PRESSURE TURNED ON` banner), and the wout gains the free-boundary
 metadata (`nextcur`/`extcur`/`curlabel`/`mgrid_mode`) plus the NESTOR
 potential and surface fields (`potsin`/`xmpot`/`xnpot`/`*_sur`). A missing
-mgrid file falls back to a fixed-boundary solve with a warning — retained
-VMEC2000 behavior, so check the banner if a "free-boundary" run looks
-suspiciously fixed. The end-to-end example below reads the CTH-like
+mgrid file is an input error (exit code 5), not a silent fixed-boundary run. The end-to-end example below reads the CTH-like
 `mgrid_cth_like.nc`, which is not stored in git; from a source checkout,
 fetch it first with `python tools/fetch_assets.py --bundle reference-nc`:
 
