@@ -384,3 +384,18 @@ def test_tvolume_matches_the_vmec2000_reference_formula(rfix):
     tol = 2e-3 if rfix else 1e-13
     np.testing.assert_allclose(rbc, rbc_ref, rtol=0.0, atol=tol)
     np.testing.assert_allclose(zbs, zbs_ref, rtol=0.0, atol=tol)
+
+
+def test_tvolume_rejects_a_degenerate_or_unreachable_target(monkeypatch):
+    from vmex.core import setup as setup_mod
+
+    inp = dataclasses.replace(VmecInput.from_file(DATA_DIR / "input.li383_low_res"),
+                              tvolume=4.0, lvolume_rfix=True)
+    args = (inp.rbc, inp.rbs, inp.zbc, inp.zbs, inp)
+    monkeypatch.setattr(setup_mod, "_volume_cubic", lambda *a: (jnp.asarray(1.0), jnp.asarray(-1.0)))
+    with pytest.raises(ValueError, match="zero volume"):
+        rescale_boundary_volume(*args)
+    # V(c) = c^2 - 0.5 c^3 never exceeds 0.6, so TVOLUME = 4 has no root.
+    monkeypatch.setattr(setup_mod, "_volume_cubic", lambda *a: (jnp.asarray(1.0), jnp.asarray(-0.5)))
+    with pytest.raises(ValueError, match="did not converge"):
+        rescale_boundary_volume(*args)

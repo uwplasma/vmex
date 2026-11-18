@@ -65,7 +65,7 @@ def test_transport_screen_preserves_order_and_uses_strict_forward_settings(
     values = neoclassical.screen_transport(wout, [.75, .25], mboz=8, nboz=6, config=config)
     assert calls["wout"] is wout
     assert calls["booz_options"] == dict(verbose=0, mboz=8, nboz=6)
-    assert calls["indices"] == [2, 0] and calls["run_options"] == dict(jit=True)
+    assert calls["indices"] == [2, 0] and calls["run_options"] == {}
     np.testing.assert_array_equal(calls["neo_data"]["s_b"], [.75, .25])
     np.testing.assert_array_equal(values, [3.e-4, 1.e-4])
     options = calls["neo_options"]
