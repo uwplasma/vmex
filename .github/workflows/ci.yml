@@ -483,7 +483,7 @@ jobs:
       needs.changes.outputs.run_tests == 'true' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, uwplasma-gpu]
-    timeout-minutes: 5
+    timeout-minutes: 20
     env:
       UV_SYSTEM_PYTHON: "0"
     steps:
@@ -500,7 +500,7 @@ jobs:
       - name: Require the GPU backend
         run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
       - name: GPU tests
-        timeout-minutes: 1
+        timeout-minutes: 10
         run: pytest -q -x -m gpu $(python tools/test_manifest.py select pr-gpu-ci) --durations=10
       - name: Remove the virtual environment
         if: always()

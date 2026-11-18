@@ -99,7 +99,7 @@ def field_from_parameters(theta):
 
 
 knots = np.linspace(0.0, 1.0, len(PRESSURE))
-DECK = os.path.join(os.path.dirname(vj.__file__), "..", "examples", "data", "input.DIII-D_lasym_false")
+DECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "input.DIII-D_lasym_false")
 inp = replace(
     vj.VmecInput.from_file(DECK), lasym=True, mpol=MPOL, ntor=0, ntheta=48, nzeta=0, ncurr=1, lfreeb=True, mgrid_file="direct ESSOS field", extcur=np.ones(1),
     rbc=np.asarray(RBC[:MPOL])[None, :], rbs=np.asarray(RBS[:MPOL])[None, :], zbc=np.asarray(ZBC[:MPOL])[None, :], zbs=np.asarray(ZBS[:MPOL])[None, :],

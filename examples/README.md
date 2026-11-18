@@ -19,6 +19,15 @@ With its default settings every script finishes in under five minutes on a
 around long compilations and solves). Where a longer run gives a better answer, the script keeps
 that research budget as one commented set of constants next to the default.
 
+- `machine_learning/` introduces design as a learning problem on six boundary
+  coefficients of a vacuum QA seed (target: mean iota 0.45, aspect ratio 5);
+  outputs go to `results/machine_learning/`.
+  - `database_optimization.py` — sample a small equilibrium database, fit a
+    quadratic surrogate with a held-out split, and verify its proposals with
+    true solves.
+  - `differentiable_optimization.py` — `jax.value_and_grad` through the
+    equilibrium solve into L-BFGS-B, checked against finite differences. The
+    compactness target degrades quasi-axisymmetry; the script reports it.
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
