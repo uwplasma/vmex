@@ -783,6 +783,23 @@ OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.17",
 OPTIONAL_NEEDS_PYTHON_311 = ("essos", "gkx", "dkx")
 
 
+def host_eval_context():
+    """Eager evaluation for host work called from inside a JAX transformation.
+
+    ``jax.grad`` of a custom-VJP function runs the forward rule under the
+    transformation's trace on JAX before 0.7, so the jitted kernels the rule's
+    host solver calls were traced into it and returned wrong derivatives.
+    Newer JAX runs the rule eagerly, and gets a no-op context.
+    """
+    import jax
+
+    if jax.__version_info__ >= (0, 7):
+        return contextlib.nullcontext()
+    from jax._src.core import eval_context
+
+    return eval_context()
+
+
 def load_toml(text: str) -> dict:
     """Parse TOML ``text``: the standard library on Python 3.11, ``tomli`` on 3.10."""
     if sys.version_info >= (3, 11):

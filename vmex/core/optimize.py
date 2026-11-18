@@ -77,6 +77,7 @@ from solvax import (
     chunk_map,
 )
 
+from .._compat import host_eval_context
 from .device import AUTO
 from .errors import AdjointSolveError, VmecConvergenceError
 from .input import VmecInput
@@ -3565,7 +3566,8 @@ def _least_squares_implicit(
         """Concrete calls reuse the host lane's executables; traces inline."""
         if isinstance(x, jax.core.Tracer):
             return residual_value_grad_jit(x, problem_data)
-        value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
+        with host_eval_context():
+            value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
         return _place(np.asarray(value)), _place(gradient)
 
     def jax_state_runtime(x: jnp.ndarray):
