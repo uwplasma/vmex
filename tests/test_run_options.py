@@ -280,26 +280,18 @@ def test_solve_file_resolves_mgrid_beside_the_deck(tmp_path, monkeypatch):
     assert driver.call_args.kwargs["mgrid_path"] == "elsewhere.nc"
 
 
-def test_solve_file_missing_mgrid_falls_back_to_fixed_boundary(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from unittest.mock import Mock
-
+def test_solve_file_missing_mgrid_raises(tmp_path, monkeypatch):
     import vmex as vj
-    from vmex.core import multigrid
+    from vmex.core.errors import VmecInputError
 
     source = tmp_path / "input.freeb_missing"
     source.write_text(
         "&INDATA\nLFREEB = T\nMGRID_FILE = 'mgrid_missing.nc'\nMPOL = 3\n"
         "NS_ARRAY = 5\nRBC(0,0) = 1.0\nRBC(0,1) = 0.3\nZBS(0,1) = 0.3\n/\n",
         encoding="utf-8")
-    fixed = Mock(return_value=SimpleNamespace(polish_report=None))
-    free = Mock()
-    monkeypatch.setattr(multigrid, "solve_multigrid", fixed)
-    monkeypatch.setattr(multigrid, "solve_free_boundary_multigrid", free)
-    with pytest.warns(RuntimeWarning, match="FIXED-BOUNDARY"):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(VmecInputError):
         vj.solve_file(source, polish=False, write_wout=False)
-    free.assert_not_called()
-    assert not fixed.call_args.args[0].lfreeb
 
 
 @pytest.mark.full

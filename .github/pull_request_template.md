@@ -22,11 +22,6 @@ python tools/preflight.py
 - [ ] No VMEC physics-schema change (input fields, `wout` variables, or the
       equations a module ports) without a parity test against the VMEC2000
       golden fixtures under `tests/`.
-- [ ] New or changed public behaviour is documented under `docs/`, and
-      `CHANGELOG.md` records it.
+- [ ] New or changed public behaviour is documented under `docs/`.
 - [ ] Claims added to the README or the docs are backed by a committed
       artifact or a test, not by a remembered number.
-
-The contributor guide is `CONTRIBUTING.md` and
-`docs/project/contributing.rst`. Participation is governed by
-`CODE_OF_CONDUCT.md`.

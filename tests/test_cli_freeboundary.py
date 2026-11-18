@@ -4,7 +4,7 @@ the golden turn-on iteration 53) shows the ``In VACUUM`` block and
 activation banner, uses ``LFULL3D1OUT=T`` to write a readable
 ``lfreeb = True`` wout with the mgrid's ``nextcur``/``extcur``, and exits
 2; a
-missing mgrid warns and falls back to fixed boundary (VMEC2000 policy);
+a missing mgrid is an input error (exit code 5);
 direct-coil misuse is a typed input error (exit code 5).
 """
 
@@ -190,22 +190,17 @@ def test_wout_written_with_free_boundary_fields(freeb_cli):
 
 
 # ---------------------------------------------------------------------------
-# missing mgrid -> fixed-boundary fallback (VMEC2000 policy)
+# missing mgrid -> input error
 # ---------------------------------------------------------------------------
 
 
-def test_missing_mgrid_falls_back_to_fixed_boundary_without_wout(tmp_path):
+def test_missing_mgrid_is_an_input_error(tmp_path):
     deck = tmp_path / DECK.name
     shutil.copyfile(DECK, deck)  # mgrid deliberately not copied
     rc, stdout = _run_cli([str(deck), "--max-iter", "5", "--outdir", str(tmp_path)])
-    assert "WARNING: mgrid file not found" in stdout
-    assert "FIXED-BOUNDARY" in stdout
-    assert "VACUUM PRESSURE TURNED ON" not in stdout
-    assert "In VACUUM" not in stdout
-    # The capped fixed-boundary fallback exhausts NITER: ier=2 with the
-    # state kept, as vmec.f/fileout.f do.
-    assert rc == MORE_ITER_FLAG
-    assert (tmp_path / f"wout_{CASE}.nc").exists()
+    assert rc == INPUT_ERROR_FLAG
+    assert "mgrid file not found" in stdout
+    assert not (tmp_path / f"wout_{CASE}.nc").exists()
 
 
 def test_free_boundary_keeps_the_state_on_iteration_exhaustion(monkeypatch, tmp_path):
@@ -233,25 +228,6 @@ def test_free_boundary_keeps_the_state_on_iteration_exhaustion(monkeypatch, tmp_
     assert rc == MORE_ITER_FLAG
     assert WERROR_MESSAGES[MORE_ITER_FLAG] in stdout
     assert not (tmp_path / f"wout_{CASE}.nc").exists()
-
-
-def test_missing_mgrid_forced_wout_has_effective_fixed_metadata(tmp_path):
-    """LFULL3D1OUT retains the fallback state but must not label it free."""
-    deck = tmp_path / DECK.name
-    text, count = re.subn(
-        r"(?m)^\s*/\s*$", "  LFULL3D1OUT = T,\n/", DECK.read_text(), count=1
-    )
-    assert count == 1
-    deck.write_text(text)  # mgrid deliberately absent
-    rc, stdout = _run_cli(
-        [str(deck), "--max-iter", "5", "--outdir", str(tmp_path)]
-    )
-    assert rc == MORE_ITER_FLAG
-    assert "FIXED-BOUNDARY" in stdout
-    wout = read_wout(tmp_path / f"wout_{CASE}.nc")
-    assert bool(wout.lfreeb) is False
-    with netCDF4.Dataset(str(tmp_path / f"wout_{CASE}.nc")) as ds:
-        assert int(ds["lfreeb__logical__"][()]) == 0
 
 
 # ---------------------------------------------------------------------------

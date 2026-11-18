@@ -771,3 +771,10 @@ def test_input_field_rejects_free_boundary_and_invalid_probe_resolutions(monkeyp
     for ns in ((7, 7), (13, 7), (5, 13), (True, 13), (7., 13), (7,), (7, 13, 17)):
         with pytest.raises(ValueError, match="two increasing integer resolutions"):
             axis_field(VmecInput(), probe=True, ns=ns)
+
+
+def test_estimate_axis_field_applies_bloat_like_setup():
+    inp = VmecInput.from_file(DATA / "input.circular_tokamak")
+    base = float(axis_field(inp))
+    assert float(axis_field(dataclasses.replace(inp, bloat=1.25))) == pytest.approx(1.25 * base, rel=1e-12)
+    assert float(axis_field(dataclasses.replace(inp, bloat=0.0))) == pytest.approx(base, rel=1e-12)

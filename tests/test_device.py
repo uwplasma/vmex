@@ -67,14 +67,16 @@ def test_none_leaves_placement_to_jax(monkeypatch):
 
 def test_omitted_device_uses_auto_policy(monkeypatch):
     seen = []
-    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
-    monkeypatch.delenv("JAX_PLATFORM_NAME", raising=False)
+    # A platform or default device another test left in the JAX config would
+    # stand the auto policy down; this test is about the policy itself.
+    monkeypatch.setattr(dev, "_user_selected_placement", lambda: False)
     monkeypatch.setattr(dev, "recommended_device", lambda res: seen.append(res) or "cpu")
     dev.resolve_device(resolution=_res(ns=11, mpol=6, ntor=0))
     assert len(seen) == 1
 
 
-def test_auto_without_resolution_has_a_clear_error():
+def test_auto_without_resolution_has_a_clear_error(monkeypatch):
+    monkeypatch.setattr(dev, "_user_selected_placement", lambda: False)
     with pytest.raises(ValueError, match="resolution is required"):
         dev.resolve_device()
     with pytest.raises(ValueError, match="resolution is required"):
