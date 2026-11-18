@@ -336,37 +336,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Gyrokinetic turbulence with GKX (pip install 'vmex[turbulence]') on one flux "
             "tube of the solved equilibrium or a wout_*.nc: linear ky scan (gamma, omega, "
-            "eigenfunction) plus a short nonlinear ITG run (heat/particle flux, spectra, "
-            "phi(x,y)). Defaults: s=0.5, alpha=0, a/LTi=3, a/Ln=1, adiabatic electrons, "
-            "64x64 grid with 24 points per poloidal turn, npol=3, (Nl,Nm)=(4,8), float32, "
-            "run to saturation (cap t_max=1000). Writes *_turbulence.out.nc (GKX), "
-            "*_turbulence*.png, *_turbulence.json and the GKX decks."
+            "eigenfunction) plus a nonlinear ITG run to saturation (heat/particle flux, spectra, "
+            "phi(x,y)). Defaults: s=0.5, alpha=0, a/LTi=3, a/Ln=1, adiabatic electrons, 96x96 grid, "
+            "three poloidal turns, float32. Writes *_turbulence.out.nc (GKX), *_turbulence*.png, "
+            "*_turbulence.json and the GKX decks; everything else is TurbulenceSettings in Python."
         ),
     )
     p.add_argument("--turbulence-s", type=float, default=0.5,
                    help="Flux-tube surface, normalized toroidal flux (default: 0.5).")
     p.add_argument("--turbulence-alpha", type=float, default=0.0, help="Field-line label alpha (default: 0).")
-    p.add_argument("--turbulence-ky", type=float, nargs=3, default=None,
-                   metavar=("MIN", "MAX", "N"),
-                   help="Linear scan: N values of ky rho_i in [MIN, MAX], on multiples of MIN (default: 0.1 1 8; fast: 0.1 1 4).")
-    p.add_argument("--turbulence-grid", type=int, nargs=3, default=None, metavar=("NX", "NY", "NZ"),
-                   help="Nonlinear grid Nx Ny and Nz per poloidal turn (default: 64 64 24).")
-    p.add_argument("--turbulence-npol", type=float, default=None,
-                   help="Poloidal turns of the flux tube (default: 3; use at least 2 on a tokamak).")
-    p.add_argument("--turbulence-moments", type=int, nargs=2, default=None, metavar=("NL", "NM"),
-                   help="Laguerre and Hermite moments of the nonlinear run (default: 4 8; kinetic electrons raise NM to 16).")
-    p.add_argument("--turbulence-tmax", type=float, default=None,
-                   help="Nonlinear cap in a/v_ti; GKX stops earlier once the heat flux saturates (default: 1000).")
     p.add_argument("--turbulence-gradients", type=float, nargs=2, default=(3.0, 1.0), metavar=("TPRIM", "FPRIM"),
                    help="a/L_T and a/L_n of every species (default: 3 1).")
     p.add_argument("--turbulence-kinetic-electrons", action="store_true",
-                   help="Kinetic electrons (m_e/m_i = 1/3670) instead of adiabatic ones; several times slower.")
-    p.add_argument("--turbulence-precision", choices=("f32", "f64"), default="f32",
-                   help="Floating-point precision of the GKX runs (default: f32).")
-    p.add_argument("--turbulence-out", type=str, default=None,
-                   help="GKX NetCDF output file (default: <outdir>/<case>_turbulence.out.nc).")
-    p.add_argument("--turbulence-fast", action="store_true",
-                   help="Coarse screening preset (32x32x16, npol=1, (Nl,Nm)=(2,4), t_max=250): fast, NOT converged.")
+                   help="Kinetic electrons (m_e/m_i = 1/3670) on a coarser 32x32 grid instead of adiabatic ones; slower.")
+    p.add_argument("--turbulence-tmax", type=float, default=None,
+                   help="Cap on the nonlinear run in a/v_ti; GKX stops earlier once the heat flux saturates (default: 800).")
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout/boozmn/figure output (default: alongside the input).")
     p.add_argument("--quiet", action="store_true", help="Silence the VMEC-style stdout.")
     p.add_argument(
@@ -1287,21 +1271,13 @@ def _run_trace(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> Non
 
 def _run_turbulence(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
     """Gyrokinetic driver for ``--turbulence`` (requires GKX)."""
-    from .gk_run import FAST, TurbulenceSettings, run_turbulence
+    from .gk_run import TurbulenceSettings, run_turbulence
 
-    d = TurbulenceSettings(**FAST) if args.turbulence_fast else TurbulenceSettings()  # unset flags take these
-    ky_min, ky_max, nky = args.turbulence_ky or (d.ky_min, d.ky_max, d.nky)
-    nx, ny, nz = args.turbulence_grid or (d.nx, d.ny, d.nz)
-    nl, nm = args.turbulence_moments or (d.nl, d.nm)
+    extra = {} if args.turbulence_tmax is None else {"t_max": float(args.turbulence_tmax)}
     cfg = TurbulenceSettings(
         s=float(args.turbulence_s), alpha=float(args.turbulence_alpha),
         tprim=float(args.turbulence_gradients[0]), fprim=float(args.turbulence_gradients[1]),
-        ky_min=float(ky_min), ky_max=float(ky_max), nky=int(nky), nx=int(nx), ny=int(ny), nz=int(nz),
-        npol=float(d.npol if args.turbulence_npol is None else args.turbulence_npol), nl=int(nl),
-        nm=max(int(nm), 16 if args.turbulence_kinetic_electrons else 0),
-        t_max=float(d.t_max if args.turbulence_tmax is None else args.turbulence_tmax),
-        kinetic_electrons=bool(args.turbulence_kinetic_electrons),
-        precision=args.turbulence_precision, out=args.turbulence_out,
+        kinetic_electrons=bool(args.turbulence_kinetic_electrons), **extra,
     )
     try:
         run_turbulence(wout_path, outdir, cfg, emit=(lambda *a, **k: None) if quiet else emit)

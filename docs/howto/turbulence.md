@@ -5,7 +5,7 @@
 `turbulence` extra:
 
 ```console
-pip install "vmex[turbulence]"        # gkx>=2.6.0
+pip install "vmex[turbulence]"        # gkx>=2.6.0; saturation_t_min needs a GKX newer than 2.9.0
 vmex input.my_case --turbulence
 vmex wout_my_case.nc --turbulence --outdir turb
 ```
@@ -20,36 +20,49 @@ Three GKX runs follow the equilibrium, each printed with its elapsed time and an
 GKX chooses the solvers. Linear runs integrate in time and fall back to a Krylov eigensolve when the fit
 is not a clean growing mode. Nonlinear runs use the adaptive CFL-controlled RK4 step.
 
-## Defaults
+## Flags and defaults
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--turbulence-s S` | 0.5 | normalized toroidal flux of the flux tube |
 | `--turbulence-alpha A` | 0 | field-line label (`α = θ* − ι ζ`) |
 | `--turbulence-gradients TPRIM FPRIM` | 3 1 | `a/L_T` and `a/L_n` of every species (an ITG drive) |
-| `--turbulence-kinetic-electrons` | off | kinetic electrons (`m_e/m_i = 1/3670`) instead of adiabatic ones |
-| `--turbulence-ky MIN MAX N` | 0.1 1 8 | linear scan: `N` values of `k_y ρ_i` in `[MIN, MAX]`, snapped to multiples of `MIN` |
-| `--turbulence-grid NX NY NZ` | 64 64 24 | nonlinear grid; `NZ` is per poloidal turn; the box is `2π/k_y,min` wide in `y` |
-| `--turbulence-npol N` | 3 | poloidal turns of the flux tube; VMEC field lines need at least 3, a tokamak at least 2 |
-| `--turbulence-moments NL NM` | 4 8 | Laguerre and Hermite moments of the nonlinear run (kinetic electrons raise `NM` to 16) |
-| `--turbulence-tmax T` | 1000 | nonlinear cap in `a/v_ti`; the run normally stops earlier on saturation |
-| `--turbulence-precision f32\|f64` | f32 | floating-point precision of the GKX runs |
-| `--turbulence-out FILE` | `<case>_turbulence.out.nc` | GKX NetCDF output file |
-| `--turbulence-fast` | off | coarse screening preset: 32 x 32 x 16, one turn, `(2, 4)`, `t_max = 250`. Fluxes are not converged |
+| `--turbulence-kinetic-electrons` | off | kinetic electrons (`m_e/m_i = 1/3670`) on a 32 x 32 grid instead of adiabatic ones |
+| `--turbulence-tmax T` | 800 | cap of the nonlinear run in `a/v_ti`; the run normally stops earlier on saturation |
 
-The run opens with the resolved settings (gradients, `α`, `s` and `ρ`, grid, moments, `y0`, time stepping and stop rule, collisions, electrons, hyperdiffusion, precision) and ends with the saturated `Q` and its status.
+Everything else is fixed to the values the GPU study below supports and lives in
+`vmex.core.gk_run.TurbulenceSettings` (Python API): the `k_y` scan (`0.1` to `1`, 8 points), `96 x 96` points in
+`(x, y)`, 24 points per poloidal turn and three turns, `(N_l, N_m) = (4, 8)` for the ions, `float32`, ion
+collisionality `ν = 0.01`, hypercollisions, the `k_⊥` hyperdiffusion `D_hyper = 0.05` and the earliest start of
+the saturation window, `t = 300`. Pass a modified `TurbulenceSettings` to `run_turbulence`, or edit the
+`<case>_gkx_linear.toml` and `<case>_gkx_nonlinear.toml` decks the run writes and rerun them with `gkx run`.
+`D_hyper` has no flag on purpose: it is a fixed default, changed through the API or the deck.
 
-Every species has `n = T = 1` and ion collisionality `ν = 0.01`. The nonlinear run adds GKX's
-hypercollisions and a `k_⊥` hyperdiffusion `D_hyper = 0.05`, as in GKX's stellarator decks, and seeds
-every `(k_x, k_y)` mode at amplitude `10⁻³`. Quantities are in GKX's gyro-Bohm units: `k_y ρ_i`, `γ a/v_ti` and
-`Q/Q_gB`. With adiabatic electrons the ion particle flux is zero by construction.
+The run opens with everything that determines the answer: `s` and `ρ`, `α`, `q`, `ŝ`, the gradients, the
+electron model, the box (`L_x`, `L_y`, `k_y,min`, `jtwist`), the grid and moments, the stepper, the stop rule and
+its cap, collisions and hyperdiffusion, precision, the output path and the expected uncertainty. It ends with the
+saturated `Q`, its standard error and whether it saturated.
 
-The defaults follow GKX resolution studies (Cyclone-like cases need `(N_l, N_m) = (4, 8)` on 64 x 64; coarse
-`(2, 4)` grids overpredict the flux several times). Converged validation of the VMEX defaults on GPU is still
-pending. A transport number for a paper needs resolution and box-size convergence, several field lines or a
-full-surface model, and a longer averaging window. GKX's own documentation describes the audits it
-requires. Each run writes `<case>_gkx_linear.toml` and `<case>_gkx_nonlinear.toml`; edit the
-resolution in them and rerun with `gkx run`.
+Quantities are in GKX's gyro-Bohm units: `k_y ρ_i`, `γ a/v_ti` and `Q/Q_gB`. With adiabatic electrons the ion
+particle flux is zero by construction. Every species has `n = T = 1`. The nonlinear run seeds every `(k_x, k_y)`
+mode at amplitude `10⁻³`.
+
+### What the defaults rest on
+
+A GPU study (RTX A4000, `float32`, Cyclone-like drive `a/L_T = 3`, `a/L_n = 1`, `s = 0.5`) compared the
+shaped tokamak, the circular tokamak and the Landreman-Paul QA stellarator:
+
+| Choice | Result |
+|---|---|
+| `(N_x, N_y)` | stellarator QA: 64 x 64 reads 44% above 128 x 128, 96 x 96 within 7%. Tokamaks: 64, 96 and 128 agree within the seed spread. 96 x 96 is the single default. |
+| `(N_l, N_m)` | `(4, 8)` is adequate; `(6, 12)` lowers `Q` by a further 8 to 14%. |
+| `N_z` per turn, `D_hyper`, precision | 24 points, 0.05 and `float32` were adequate. |
+| Saturation window | starting no earlier than `t = 300` instead of 800 saves 22 to 33% of the run time with the same mean. |
+| Random seed | about 10% spread of `Q` on tokamaks, the largest single error. |
+
+The printed `±` is the statistical error of one run and does not include the seed spread or the moment
+truncation. A transport number for a paper needs several seeds, resolution and box-size convergence, several field
+lines or a full-surface model, and a longer averaging window; GKX's documentation describes the audits.
 
 ## Output
 
@@ -78,11 +91,7 @@ the stella W7-X study of González-Jerez et al. (2022, *J. Plasma Phys.*).
 
 ## Cost
 
-The converged defaults (64 x 64 x 72, `(N_l, N_m) = (4, 8)`, run to saturation) are a GPU job: GKX's Cyclone
-runs at this resolution take a few minutes on an RTX A4000 in float32. On a CPU a single step costs about
-1 s on a busy laptop, and the CFL step at this resolution is near 0.03, so a run to `t = 1000` takes hours. `--turbulence-fast` runs the same pipeline on a
-32 x 32 x 16 grid with `(2, 4)` moments and one poloidal turn in a few minutes on a laptop. Use it to
-check a case runs and to compare equilibria, and expect fluxes several times too high.
-
-With adiabatic electrons the ion particle flux is zero by construction. Kinetic electrons need
-`N_m = 16` and a 32 x 32 x 16 grid is the largest that fits a 16 GB GPU.
+On an RTX A4000 in `float32` the default 96 x 96 run saturated after `t ≈ 540` to `620` in the study; at 96 x 96 a run to `t = 400` took 1 to 1.3 hours
+on a shared GPU, so expect one to two hours. On a CPU one step at this resolution costs seconds and the CFL step is near 0.03, so the run takes many
+hours. Kinetic electrons add 48 Hermite moments for the electrons and run on a 32 x 32 grid, the largest that
+fits a 16 GB GPU; the result is a coarse survey, not a converged flux.
