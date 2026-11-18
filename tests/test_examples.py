@@ -488,9 +488,9 @@ def test_epsilon_effective_example(tmp_path):
     assert values is not None, out
     profile = np.array([float(v) for v in values.group(1).split()])
     assert profile.size == 5 and np.all(np.isfinite(profile))
-    # a QA ripple is small but nonzero, and rises toward the boundary
-    assert np.all(profile > 0) and np.all(profile < 1e-2)
-    assert profile[-1] > profile[0], f"eps_eff should rise outward: {profile}"
+    # a QA ripple is small but nonzero: about 1e-8 here, within 10% when the NEO
+    # steps per period and step budget are doubled, and not monotonic in s
+    assert np.all(profile > 0) and np.all(profile < 1e-6), profile
     assert (tmp_path / "epsilon_effective.png").stat().st_size > 10_000
 
 
