@@ -1599,6 +1599,12 @@ def evaluate_forces(
     if cache is None:
         cache = _zero_cache(runtime)
         iter_last_reset = iteration  # force refresh
+    # A state solved on the host while the runtime sits on the default device
+    # (GPU) must not mix devices inside the jitted pass.
+    anchor = runtime.setup.s_full
+    if not (isinstance(state.R_cos, jax.core.Tracer)
+            or isinstance(anchor, jax.core.Tracer)):
+        state = jax.device_put(state, anchor.sharding)
     result = _evaluate_lane(
         state, cache, jnp.asarray(iteration), jnp.asarray(iter_last_reset),
         jnp.asarray(fsqz_previous), runtime, collect_health=True,
@@ -2511,8 +2517,10 @@ def _run_loop(state0: SpectralState, rt: SolverRuntime, *, mode: str,
             try:
                 with placement_neutral((carry, rt)):
                     executable = lane.executable(carry, rt)
-            except Exception:
-                pass
+            except Exception as error:
+                if "RESOURCE_EXHAUSTED" in str(error):
+                    raise  # out of memory: the on-demand lane would only fail the same way
+                # Any other lowering failure: the on-demand jitted lane below recompiles.
     # Committed arguments already fix placement, so keep the caller's
     # default-device context out of the lane's jit key: a construction solve
     # and trial solves run inside a device context then share one executable.
@@ -2837,6 +2845,7 @@ def solve(
     polish: bool | str | None = None,
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
+    raise_on_max_iterations: bool = True,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
@@ -2859,7 +2868,9 @@ def solve(
     (after one ``guess_axis`` retry — the ``eqsolve.f`` ``ijacob == 0`` path)
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
     when ``max_iterations`` is exhausted (``more_iter_flag``); both carry the
-    final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.
+    final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.  With
+    ``raise_on_max_iterations=False`` an exhausted budget returns the last
+    state with ``converged=False`` instead, as :func:`solve_multigrid` does.
 
     ``m1_gauge`` optionally prescribes ONLY the released interior m=1 Z
     family from a same-resolution reference state. It holds that family
@@ -2987,7 +2998,10 @@ def solve(
             use_fft=use_fft_resolved,
             jacobian_retries=jacobian_retries,
         )
-        result = _finalize(carry, rt)
+        if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
+            result = _result_from_carry(carry, rt)
+        else:
+            result = _finalize(carry, rt)
         return _polish_solve_result(
             source,
             rt.resolution,

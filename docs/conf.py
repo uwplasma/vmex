@@ -121,7 +121,6 @@ rediraffe_redirects = {
     "reference/mout-file": "reference/wout-file",
     "howto/parameter-scans": "howto/restart-from-previous-run",
     "scaling": "howto/scale-a-configuration",
-    "contributing": "project/contributing",
     "references": "project/references",
     "api/index": "reference/api/basic",
 }

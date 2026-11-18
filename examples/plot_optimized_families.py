@@ -40,7 +40,7 @@ BLUE = "#2a78d6"
 CUT_COLORS = ("#a8cff7", "#6ba7e8", "#367fd0", "#174f9b")
 QS_CASES = (
     ("QA", "QA  ·  nfp 2", 1, 0),
-    ("QH", "QH  ·  nfp 4", 1, -1),
+    ("QH", "QH  ·  nfp 3", 1, -1),
     ("QP", "QP  ·  nfp 2", 0, 1),
 )
 QI_CASES = (
@@ -224,7 +224,7 @@ def _draw(cases, output, *, qi=False):
         boozer = figure.add_subplot(grid[2, column]); _boozer(figure, boozer, equilibrium.wout, title.replace(" ", "_"))
         if column == 0:
             boozer.set_ylabel(r"Boozer poloidal angle / $2\pi$", fontsize=8)
-    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output, dpi=PLOT_DPI, bbox_inches="tight", pad_inches=0.05, pil_kwargs={"quality": 55})
     plt.close(figure); print(f"wrote {output}")
 
 

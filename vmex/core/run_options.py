@@ -218,10 +218,10 @@ def read_input_request(path: str | Path) -> InputRequest:
     :class:`~vmex.core.errors.VmecInputError` here rather than silently
     running with defaults.
     """
-    from .input import VmecInput
+    from .input import VmecInput, toml_as_json
 
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = toml_as_json(path, path.read_text(encoding="utf-8"))
     if path.suffix.lower() == ".json" or text.lstrip()[:1] == "{":
         import json
 

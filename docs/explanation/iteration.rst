@@ -364,8 +364,8 @@ Each distinct stage structure compiles once; repeated
 ladders with the same structures reuse those executables. A single
 maximum-resolution masked executable is future work, not current behavior.
 ``--prefetch-compile`` controls whether upcoming stage executables are
-compiled ahead of time or on first use (the CLI defaults to the
-lower-memory on-demand path).
+compiled ahead of time or on first use (the CLI defaults to ahead of time; the
+library functions default to the lower-memory on-demand path).
 
 Carried module state
 ~~~~~~~~~~~~~~~~~~~~
