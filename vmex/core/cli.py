@@ -106,7 +106,8 @@ def case_from_input(path: Path) -> str:
         case = name.split("input_", 1)[-1]
     else:
         case = path.stem
-    case = case[: -len(".json")] if case.endswith(".json") else case
+    for suffix in (".json", ".toml"):
+        case = case[: -len(suffix)] if case.endswith(suffix) else case
     return case or path.stem
 
 
@@ -164,6 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  vmex --trace wout_*.nc — trace alpha particles (ESSOS), plot losses\n"
             "  vmex --turbulence input.X — solve, then GKX linear + nonlinear turbulence\n"
             "  vmex --neoclassical wout_*.nc — DKX neoclassical transport, plot panels\n"
+            "  vmex --alfven wout_*.nc — FAX Alfven continuum gaps and a gap mode\n"
             "  vmex --scale input.X [B R] — scale an input or WOUT\n"
             "  vmex --to-input wout_*.nc — reconstruct input.* from a WOUT\n"
             "  vmex --doctor          — installation and JAX backend diagnostics\n"
@@ -336,28 +338,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Gyrokinetic turbulence with GKX (pip install 'vmex[turbulence]') on one flux "
             "tube of the solved equilibrium or a wout_*.nc: linear ky scan (gamma, omega, "
-            "eigenfunction) plus a short nonlinear ITG run (heat/particle flux, spectra, "
-            "phi(x,y)). Defaults: s=0.5, alpha=0, a/LTi=3, a/Ln=1, adiabatic electrons, "
-            "32x32x32 grid, (Nl,Nm)=(2,6), t_max=250; about 5 min on a laptop. Writes "
-            "*_turbulence*.png, *_turbulence.json and the GKX decks."
+            "eigenfunction) plus a nonlinear ITG run to saturation (heat/particle flux, spectra, "
+            "phi(x,y)). Defaults: s=0.5, alpha=0, a/LTi=3, a/Ln=1, adiabatic electrons, 96x96 grid, "
+            "three poloidal turns, float32. Writes *_turbulence.out.nc (GKX), *_turbulence*.png, "
+            "*_turbulence.json and the GKX decks; everything else is TurbulenceSettings in Python."
         ),
     )
     p.add_argument("--turbulence-s", type=float, default=0.5,
                    help="Flux-tube surface, normalized toroidal flux (default: 0.5).")
     p.add_argument("--turbulence-alpha", type=float, default=0.0, help="Field-line label alpha (default: 0).")
-    p.add_argument("--turbulence-ky", type=float, nargs=3, default=(0.1, 1.0, 8),
-                   metavar=("MIN", "MAX", "N"),
-                   help="Linear scan: N values of ky rho_i in [MIN, MAX], on multiples of MIN (default: 0.1 1 8).")
-    p.add_argument("--turbulence-grid", type=int, nargs=3, default=(32, 32, 32), metavar=("NX", "NY", "NZ"),
-                   help="Nonlinear grid Nx Ny Nz (default: 32 32 32).")
-    p.add_argument("--turbulence-moments", type=int, nargs=2, default=(2, 6), metavar=("NL", "NM"),
-                   help="Laguerre and Hermite moments of the nonlinear run (default: 2 6; the linear runs use at least 4 8).")
-    p.add_argument("--turbulence-tmax", type=float, default=250.0,
-                   help="Nonlinear horizon in a/v_ti; GKX stops earlier once the heat flux saturates (default: 250).")
     p.add_argument("--turbulence-gradients", type=float, nargs=2, default=(3.0, 1.0), metavar=("TPRIM", "FPRIM"),
                    help="a/L_T and a/L_n of every species (default: 3 1).")
     p.add_argument("--turbulence-kinetic-electrons", action="store_true",
-                   help="Kinetic electrons (m_e/m_i = 1/3670) instead of adiabatic ones; several times slower.")
+                   help="Kinetic electrons (m_e/m_i = 1/3670) on a coarse 16x16 grid instead of adiabatic ones; slower.")
+    p.add_argument("--turbulence-tmax", type=float, default=None,
+                   help="Cap on the nonlinear run in a/v_ti; GKX stops earlier once the heat flux saturates (default: 800).")
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout/boozmn/figure output (default: alongside the input).")
     p.add_argument("--quiet", action="store_true", help="Silence the VMEC-style stdout.")
     p.add_argument(
@@ -486,6 +481,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--nc-er", type=float, default=None, metavar="KV_PER_M",
         help="--neoclassical radial electric field [kV/m] (default: the ambipolar root).",
     )
+    p.add_argument(
+        "--alfven", action="store_true",
+        help=(
+            "Shear-Alfven continuum with FAX (pip install 'vmex[alfven]') after solving an input "
+            "file, or from a wout_*.nc: local gaps per mode family (TAE, EAE, MAE, HAE, BAE) and a gap "
+            "mode clear of the continuum. Writes *_alfven.png and *_alfven.json. Frequencies scale as the density^(-1/2)."
+        ),
+    )
+    p.add_argument("--alfven-config", metavar="TOML", default=None,
+                   help="--alfven harmonics, grid and plasma from a `fax run` case file (unknown keys are rejected).")
+    p.add_argument("--alfven-density", type=float, default=None, metavar="M3",
+                   help="--alfven ion number density [m^-3] (default: 1e19).")
+    p.add_argument("--alfven-ion-mass", type=float, default=None, metavar="AMU",
+                   help="--alfven ion mass [amu] (default: 2).")
     p.add_argument(
         "--doctor",
         action="store_true",
@@ -1013,6 +1022,8 @@ def _solve_input_file(args, input_path: Path, outdir: Path | None, *, emit) -> i
         _run_turbulence(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if bool(args.neoclassical):
         _run_neoclassical(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
+    if bool(args.alfven):
+        _run_alfven(wout_path, args, plot_dir, emit=emit, quiet=bool(args.quiet))
     if not bool(result.converged):  # NITER exhaustion: wout kept, distinct code
         return int(result.ier_flag) or 1
     return 0
@@ -1280,19 +1291,29 @@ def _run_turbulence(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -
     """Gyrokinetic driver for ``--turbulence`` (requires GKX)."""
     from .gk_run import TurbulenceSettings, run_turbulence
 
-    ky_min, ky_max, nky = args.turbulence_ky
+    extra = {} if args.turbulence_tmax is None else {"t_max": float(args.turbulence_tmax)}
     cfg = TurbulenceSettings(
         s=float(args.turbulence_s), alpha=float(args.turbulence_alpha),
         tprim=float(args.turbulence_gradients[0]), fprim=float(args.turbulence_gradients[1]),
-        ky_min=float(ky_min), ky_max=float(ky_max), nky=int(nky),
-        nx=int(args.turbulence_grid[0]), ny=int(args.turbulence_grid[1]), nz=int(args.turbulence_grid[2]),
-        nl=int(args.turbulence_moments[0]), nm=int(args.turbulence_moments[1]),
-        t_max=float(args.turbulence_tmax), kinetic_electrons=bool(args.turbulence_kinetic_electrons),
+        kinetic_electrons=bool(args.turbulence_kinetic_electrons), **extra,
     )
     try:
         run_turbulence(wout_path, outdir, cfg, emit=(lambda *a, **k: None) if quiet else emit)
     except ImportError as exc:
         raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
+
+
+def _run_alfven(wout_path: Path, args, outdir: Path, *, emit, quiet: bool) -> None:
+    """``--alfven`` driver (requires FAX)."""
+    from .alfven_run import run_alfven
+
+    try:
+        run_alfven(wout_path, outdir, config=args.alfven_config, density=args.alfven_density,
+                   ion_mass=args.alfven_ion_mass, emit=(lambda *a, **k: None) if quiet else emit)
+    except ImportError as exc:
+        raise VmecInputError("MISSING OR OUTDATED OPTIONAL DEPENDENCY", hint=str(exc)) from exc
+    except ValueError as exc:  # a case file with unknown keys
+        raise VmecInputError(WERROR_MESSAGES[INPUT_ERROR_FLAG], hint=f"--alfven-config: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1583,9 +1604,10 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
         return 0
 
     if _is_wout_path(input_path):
-        if not (plot_requested or args.booz or args.trace or args.turbulence or args.neoclassical):
+        if not (plot_requested or args.booz or args.trace or args.turbulence or args.neoclassical
+                or args.alfven):
             parser.error("wout_*.nc inputs require --plot, --booz, --trace, --turbulence, "
-                         "and/or --neoclassical")
+                         "--neoclassical, and/or --alfven")
         if plot_requested:
             _plot_wout_file(input_path, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.booz):
@@ -1596,6 +1618,8 @@ def _dispatch(args, parser: argparse.ArgumentParser, *, emit) -> int:
             _run_turbulence(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         if bool(args.neoclassical):
             _run_neoclassical(input_path, args, plot_outdir, emit=emit, quiet=quiet)
+        if bool(args.alfven):
+            _run_alfven(input_path, args, plot_outdir, emit=emit, quiet=quiet)
         return 0
 
     from vmex.mirror.free_boundary import is_mirror_input
