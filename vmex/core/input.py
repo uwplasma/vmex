@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import warnings
 from dataclasses import dataclass, fields, replace
 from itertools import product
@@ -696,6 +697,17 @@ _JSON_DEFAULT_ONLY: Dict[str, Any] = {
 _JSON_ANY_VALUE = ("backup_evaluated_state", "return_outputs_even_if_not_converged")
 
 
+def toml_as_json(path: Path, text: str) -> str:
+    """``text`` as JSON when ``path`` is a ``.toml`` file, else unchanged."""
+    if path.suffix.lower() != ".toml":
+        return text
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:  # pragma: no cover - Python 3.10
+        import tomli as tomllib
+    return json.dumps(tomllib.loads(text))
+
+
 def _json_is_default(data: Dict[str, Any], key: str, default: Any) -> bool:
     value = data[key]
     if isinstance(default, str):
@@ -1009,10 +1021,11 @@ class VmecInput:
 
         Files whose first non-whitespace character is ``{`` (or with a
         ``.json`` suffix) are parsed as structured JSON; everything else as
-        a classic ``&INDATA`` Fortran namelist (VMEC2000 ``readin.f``).
+        a classic ``&INDATA`` Fortran namelist (VMEC2000 ``readin.f``).  A
+        ``.toml`` file holds the same keys as the JSON form.
         """
         path = Path(path)
-        text = path.read_text()
+        text = toml_as_json(path, path.read_text())
         if path.suffix.lower() == ".json" or text.lstrip()[:1] == "{":
             return cls.from_json_text(text)
         return cls.from_indata_text(text)

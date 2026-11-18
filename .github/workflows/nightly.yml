@@ -143,6 +143,7 @@ jobs:
             tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates \
             tests/test_neoclassical.py::test_diagnostic_config_matches_converged_neo_on_the_qi_deck \
             tests/test_turbulence.py::test_drive_gradients_reach_gkx_as_a_over_l \
+            tests/test_turbulence_cli.py::test_turbulence_smoke \
             tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences \
             tests/test_examples.py::test_coil_examples_need_only_the_pinned_essos_release
       - name: Run the QA optimization example at the oldest stack
@@ -171,11 +172,11 @@ jobs:
         # to skip in every lane -- which is how #354's aliased effective ripple
         # shipped.  This is the one job that exercises the released extras.
         run: |
-          python -m pip install ".[coils,turbulence,freeb,neoclassical,optimizers]" \
+          python -m pip install ".[alfven,coils,turbulence,freeb,neoclassical,optimizers]" \
             simsopt pytest pytest-xdist
       - name: Verify imports
         run: |
-          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax"
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax, fax"
           python -c "import simsopt"
       - name: Fetch reference assets
         run: python tools/fetch_assets.py --bundle reference-nc
@@ -199,8 +200,8 @@ jobs:
       # executed anywhere -- ``pip install vmex[neoclassical]`` plus RUN_FULL=1
       # was the documented on-demand recipe and nothing automated it.  The
       # example takes about 90 s at its shipped settings; it has no cheaper
-      # smoke path, because coarsening the NEO controls returns a profile that
-      # no longer rises outward, which is the result it exists to show.
+      # smoke path, because coarsening the NEO controls returns a profile
+      # several times too large.
       - name: Run effective-ripple smoke
         env:
           RUN_FULL: "1"
