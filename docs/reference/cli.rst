@@ -99,7 +99,8 @@ Options
        the poloidal plane) and ``*_alfven.json`` (requires
        ``pip install "vmex[alfven]"``). Defaults pick the harmonics from
        ``nfp`` and the rotational transform; frequencies scale as the inverse
-       square root of the density.
+       square root of the density. The WOUT needs about 32 radial surfaces
+       or more; VMEX warns below that.
    * - ``--alfven-config TOML`` / ``--alfven-density M3`` / ``--alfven-ion-mass AMU``
      - A ``fax run`` case file (unknown keys are rejected; ``[plasma]
        density_profile`` gives polynomial coefficients in ``s``), the central
