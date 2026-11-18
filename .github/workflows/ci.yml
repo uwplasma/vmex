@@ -95,11 +95,16 @@ jobs:
           ALL: '[{"lane":"c2-mirror-eq","selector":"pr-parity-c2","parallel":"-n 4","serial":"pr-mirror-equilibrium","serial_parallel":""},{"lane":"misc-a-core","selector":"pr-examples pr-external pr-full-only pr-gradient-fd pr-parity-a2 pr-parity-b","parallel":"-n 4"},{"lane":"c6-gradient","selector":"pr-parity-c6 pr-gradient","parallel":"-n 4"},{"lane":"c3-c7","selector":"pr-parity-c3 pr-parity-c7","parallel":"-n 4"},{"lane":"a-free-c5","selector":"pr-parity-c5 pr-parity-e","parallel":"-n 4","serial":"pr-parity-a1","serial_parallel":"-n 2"},{"lane":"c4-mirror-spline","selector":"pr-parity-c4 pr-parity-f","parallel":"-n 4","serial":"pr-mirror-spline","serial_parallel":""},{"lane":"c1-d-mirror-field","selector":"pr-parity-c1 pr-parity-d","parallel":"-n 4","serial":"pr-mirror-field","serial_parallel":""}]'
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
-              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' >> "$GITHUB_OUTPUT"
+            matrix=$(git diff --name-only -z "origin/${GITHUB_BASE_REF}...HEAD" |
+              python tools/ci_scope.py --null --matrix "$ALL" | grep '^matrix=' | cut -d= -f2-)
           else
-            python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' >> "$GITHUB_OUTPUT"
+            matrix=$(python tools/ci_scope.py --all --matrix "$ALL" </dev/null | grep '^matrix=' | cut -d= -f2-)
           fi
+          # Nightly and on demand, every lane also runs on Python 3.10.
+          if [[ "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            matrix=$(jq -c '. + map(. + {python: "3.10", lane: (.lane + "-py310")})' <<< "$matrix")
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   quality:
     name: Quality, package, and docs
@@ -247,7 +252,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python || '3.12' }}
           enable-cache: false
           activate-environment: true
           venv-path: ${{ runner.temp }}/venv
