@@ -239,3 +239,15 @@ def test_worker_start_applies_its_slot_in_process(monkeypatch, tmp_path):
     assert pinned == [[5]] and slots.value == 2
     assert os.environ["VMEX_COMPILATION_CACHE_DIR"] == str(tmp_path)
     assert parallel._call_worker(None) == "3"
+
+
+def test_solve_ensemble_flags_an_exhausted_member_instead_of_raising():
+    """A member out of iterations comes back unconverged; the scan keeps going."""
+    from vmex.core.errors import VmecConvergenceError
+
+    inp = dataclasses.replace(_small("solovev"), niter_array=[20])
+    (result,) = parallel.solve_ensemble([inp], workers=1, multigrid=False)
+    assert not bool(result.converged) and 0 < int(result.iterations) <= 20
+    with pytest.raises(VmecConvergenceError):
+        parallel.solve_ensemble(
+            [inp], workers=1, multigrid=False, raise_on_max_iterations=True)
