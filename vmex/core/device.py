@@ -139,7 +139,8 @@ def resolve_device(device: Any = AUTO, resolution: Any = None):
     )
 
 
-def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
+def resolve_implicit_device(device: Any = AUTO, resolution: Any = None, *,
+                            block_jacobian: bool = False):
     """Device for the implicit-gradient Jacobian / adjoint GMRES (or ``None``).
 
     Unlike the forward solve, the ``jac="implicit"`` path builds a per-dof
@@ -160,6 +161,12 @@ def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
 
     ``resolution`` is accepted for signature parity with :func:`resolve_device`
     (and in case a size-dependent rule is wanted later); it is unused today.
+
+    ``block_jacobian=True`` (the least-squares problem's block-tridiagonal
+    Jacobian and its anchor) keeps ``"auto"`` on a GPU backend: there the
+    route is one factorization and batched column solves, not per-dof
+    GMRES, and on an A4000 it took ``QA_optimization.py`` from 140 s to 84 s
+    warm and from 518 to 109 CPU seconds, with the same result.
     """
     if device is None:
         return None
@@ -169,6 +176,8 @@ def resolve_implicit_device(device: Any = AUTO, resolution: Any = None):
         return None
     if jax.default_backend() == "cpu":
         return None
+    if block_jacobian and jax.default_backend() == "gpu":
+        return jax.devices("gpu")[0]
     try:
         return jax.devices("cpu")[0]
     except RuntimeError:  # pragma: no cover - CPU device always present

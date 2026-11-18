@@ -771,3 +771,15 @@ def test_free_boundary_backward_traces_like_the_forward_solve(monkeypatch):
         fbi._solve_bwd(cfg, saved, state_bar)
     assert seen["mesh"] == forward
     assert seen["committed"]
+
+
+def test_block_jacobian_stays_on_the_gpu_backend(monkeypatch):
+    """``block_jacobian`` keeps "auto" on a GPU backend; every other case is unchanged."""
+    res = _res(ns=35, mpol=6, ntor=6, nfp=4)
+    gpu, cpu = object(), object()
+    monkeypatch.setattr(dev, "_user_selected_placement", lambda: False)
+    monkeypatch.setattr(dev.jax, "devices", lambda kind=None: [gpu if kind == "gpu" else cpu])
+    for backend, want, want_block in (("gpu", cpu, gpu), ("cpu", None, None)):
+        monkeypatch.setattr(dev.jax, "default_backend", lambda b=backend: b)
+        assert dev.resolve_implicit_device(dev.AUTO, res) is want
+        assert dev.resolve_implicit_device(dev.AUTO, res, block_jacobian=True) is want_block
