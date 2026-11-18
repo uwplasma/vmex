@@ -15,6 +15,7 @@ cli
 vmec2000-compatibility
 mirror-input
 wout-file
+exterior-field
 ```
 
 ## Contracts

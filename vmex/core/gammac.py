@@ -646,6 +646,15 @@ def _gamma_c_smooth_rows(
         max_wells=max_wells, temperature=temperature)
 
 
+def _default_max_wells(num_transit, points_per_transit) -> int:
+    """Well slots per pitch level: 32 per transit, the most a rippled outer surface fills.
+
+    16 per transit overflowed (NaN rows) on high-ripple surfaces of the bundled
+    QI and omnigenity decks; 32 resolves them at unchanged values and a fifth more time.
+    """
+    return min(32 * int(num_transit), int(points_per_transit) * int(num_transit))
+
+
 def _validate_settings(nalpha, num_transit, points_per_transit, num_pitch):
     if nalpha < 2:
         raise ValueError("nalpha must be >= 2")
@@ -691,7 +700,7 @@ def gamma_c_from_wout(
         nalpha=int(nalpha), num_transit=int(num_transit),
         points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
         quadrature_order=int(quadrature_order),
-        max_wells=16 * int(num_transit) if max_wells is None else int(max_wells))
+        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells))
     return {**out, "surface_rows": rows}
 
 
@@ -720,7 +729,7 @@ def gamma_c_state(
     range ``[1/B_max, 1/B_min]`` of the sampled lines.  Differentiation holds
     the normalized grid shape fixed while retaining its common field scale
     (see the node construction).  ``max_wells``
-    defaults to ``16 * num_transit`` slots per pitch level;
+    defaults to ``32 * num_transit`` slots per pitch level;
     ``overflow_fraction`` reports any spill, which makes that surface's
     ``gamma_c`` NaN. Returns per-surface arrays led by ``gamma_c``.
 
@@ -736,7 +745,7 @@ def gamma_c_state(
         num_transit=int(num_transit),
         points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
         quadrature_order=int(quadrature_order),
-        max_wells=16 * int(num_transit) if max_wells is None else int(max_wells))
+        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells))
     return {**out, "surface_rows": rows}
 
 
@@ -770,7 +779,7 @@ def gamma_c_smooth_state(
         num_transit=int(num_transit),
         points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
         quadrature_order=int(quadrature_order),
-        max_wells=16 * int(num_transit) if max_wells is None else int(max_wells),
+        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells),
         temperature=float(temperature))
     return {**out, "surface_rows": rows}
 

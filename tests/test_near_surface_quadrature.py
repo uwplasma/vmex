@@ -125,21 +125,48 @@ def test_auto_resolves_identically_eager_and_traced_and_pulls_back_the_returned_
                                          _torus_points(0.15, count=1, seed=6)]))
     parameters = jnp.array([1.0])
     original = VmecExtender.from_parameterized_surface_data(
-        scaled, parameters, accuracy_check="off", graded_nodes=(24, 48))
+        scaled, parameters, accuracy_check="off")
     field = original.set_points(points)
     copied = copy.copy(field)
     for order, name in enumerate(("B", "gradB", "gradgradB", "gradgradgradB")):
         eager = getattr(field, name)()
+        # one map: the grading centre is a Newton iterate, so compilations agree
+        # to the rule's own error (1e-9 at third order), not to rounding
         np.testing.assert_allclose(jax.jit(getattr(field, name))(points), eager,
-                                   rtol=1e-10, atol=1e-12)
-        np.testing.assert_allclose(getattr(copied, name)(), eager, rtol=1e-10, atol=1e-12)
+                                   rtol=1e-8, atol=1e-10)
+        np.testing.assert_allclose(getattr(copied, name)(), eager, rtol=1e-8, atol=1e-10)
         weights = jnp.cos(jnp.arange(eager.size)).reshape(eager.shape)
         pullback = np.asarray(getattr(field, name + "_vjp")(weights)).ravel()[0]
 
         def scalar(p, name=name, weights=weights):
             rebuilt = VmecExtender.from_surface_data(
-                scaled(p), accuracy_check="off", graded_nodes=(24, 48)).set_points(points)
+                scaled(p), accuracy_check="off").set_points(points)
             return float(jnp.vdot(getattr(rebuilt, name)(), weights))
-        step = 1e-5
+        step = 1e-3  # the field is linear in the parameter; a small step only adds round-off
         numeric = (scalar(parameters + step) - scalar(parameters - step)) / (2 * step)
         assert abs(pullback - numeric) <= 1e-6 * max(abs(numeric), 1.0), (order, pullback, numeric)
+
+
+def test_a_copy_pulls_back_its_own_quadrature_not_the_original_s():
+    """A copied field whose ``near_surface`` changes differentiates that map, with its own points."""
+    surface = _two_source_torus(16, 16)
+    scaled = lambda params: replace(surface, B_total=params[0] * surface.B_total)  # noqa: E731
+    points = jnp.asarray(_torus_points(0.01, count=2, seed=5))
+    original = VmecExtender.from_parameterized_surface_data(
+        scaled, jnp.array([1.0]), accuracy_check="off").set_points(points)
+    weights = jnp.cos(jnp.arange(6.0)).reshape(2, 3)
+    graded = float(original.B_vjp(weights)[0])
+    copied = copy.copy(original)
+    copied.near_surface = "direct"
+    # the direct rule is off by order one this close; the field is linear in the scale
+    direct = float(jnp.vdot(VmecExtender.from_surface_data(
+        surface, accuracy_check="off", near_surface="direct").B(points), weights))
+    assert abs(float(copied.B_vjp(weights)[0]) - direct) <= 1e-9 * abs(direct)
+    assert abs(float(original.B_vjp(weights)[0]) - graded) <= 1e-12 * abs(graded)
+    assert abs(graded - direct) > 1e-2 * abs(graded)
+
+
+def test_direct_tier_stays_the_plain_schedule_whatever_the_virtual_casing_routing():
+    """Newer virtual-casing-jax routes ``B_plasma_xyz`` near the surface; ``auto`` must not see that."""
+    field = VmecExtender.from_surface_data(_two_source_torus(16, 16), digits=4)
+    assert getattr(field.plasma_field.config, "near_surface", False) is False

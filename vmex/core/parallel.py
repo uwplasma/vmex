@@ -233,7 +233,10 @@ def solve_ensemble(
 
     Extra ``**solve_kwargs`` (e.g. ``verbose``, ``ftol``, ``initial_state``)
     are forwarded unchanged to every solve.  ``workers`` and
-    ``return_exceptions`` behave as in :func:`map_ensemble`.
+    ``return_exceptions`` behave as in :func:`map_ensemble`.  A member that
+    exhausts its iteration budget returns its last state with
+    ``converged=False`` rather than ending the scan; pass
+    ``raise_on_max_iterations=True`` to raise instead.
 
     Best speedup comes from a *balanced* ensemble — a parameter scan at fixed
     resolution, where the members share a compiled executable and take a
@@ -246,6 +249,7 @@ def solve_ensemble(
     from .solver import solve
 
     runner = solve_multigrid if multigrid else solve
+    solve_kwargs.setdefault("raise_on_max_iterations", False)
 
     def _one(inp: Any) -> Any:
         return runner(inp, **solve_kwargs)
