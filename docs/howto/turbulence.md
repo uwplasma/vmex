@@ -27,7 +27,7 @@ is not a clean growing mode. Nonlinear runs use the adaptive CFL-controlled RK4 
 | `--turbulence-s S` | 0.5 | normalized toroidal flux of the flux tube |
 | `--turbulence-alpha A` | 0 | field-line label (`α = θ* − ι ζ`) |
 | `--turbulence-gradients TPRIM FPRIM` | 3 1 | `a/L_T` and `a/L_n` of every species (an ITG drive) |
-| `--turbulence-kinetic-electrons` | off | kinetic electrons (`m_e/m_i = 1/3670`) on a 32 x 32 grid instead of adiabatic ones |
+| `--turbulence-kinetic-electrons` | off | kinetic electrons (`m_e/m_i = 1/3670`) on a 16 x 16 grid instead of adiabatic ones |
 | `--turbulence-tmax T` | 800 | cap of the nonlinear run in `a/v_ti`; the run normally stops earlier on saturation |
 
 Everything else is fixed to the values the GPU study below supports and lives in
@@ -93,5 +93,6 @@ the stella W7-X study of González-Jerez et al. (2022, *J. Plasma Phys.*).
 
 On an RTX A4000 in `float32` the default 96 x 96 run saturated after `t ≈ 540` to `620` in the study; at 96 x 96 a run to `t = 400` took 1 to 1.3 hours
 on a shared GPU, so expect one to two hours. On a CPU one step at this resolution costs seconds and the CFL step is near 0.03, so the run takes many
-hours. Kinetic electrons add 48 Hermite moments for the electrons and run on a 32 x 32 grid, the largest that
-fits a 16 GB GPU; the result is a coarse survey, not a converged flux.
+hours. Kinetic electrons add 48 Hermite moments for the electrons, so they run on GKX's 16 x 16 example grid: a
+32 x 32 grid exhausted host memory while compiling the IMEX stepper. The linear scan and the nonlinear run take
+hours on a GPU, and the result is a coarse survey, not a converged flux.

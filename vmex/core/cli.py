@@ -348,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--turbulence-gradients", type=float, nargs=2, default=(3.0, 1.0), metavar=("TPRIM", "FPRIM"),
                    help="a/L_T and a/L_n of every species (default: 3 1).")
     p.add_argument("--turbulence-kinetic-electrons", action="store_true",
-                   help="Kinetic electrons (m_e/m_i = 1/3670) on a coarser 32x32 grid instead of adiabatic ones; slower.")
+                   help="Kinetic electrons (m_e/m_i = 1/3670) on a coarse 16x16 grid instead of adiabatic ones; slower.")
     p.add_argument("--turbulence-tmax", type=float, default=None,
                    help="Cap on the nonlinear run in a/v_ti; GKX stops earlier once the heat flux saturates (default: 800).")
     p.add_argument("--outdir", type=str, default=None, help="Directory for wout/boozmn/figure output (default: alongside the input).")

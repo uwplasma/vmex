@@ -65,7 +65,7 @@ class TurbulenceSettings:
     out: str | None = None  # GKX NetCDF bundle; default <outdir>/<case>_turbulence.out.nc
 
     def __post_init__(self) -> None:
-        nx, ny, nz = (96, 96, 24) if not self.kinetic_electrons else (32, 32, 16)
+        nx, ny, nz = (96, 96, 24) if not self.kinetic_electrons else (16, 16, 16)
         for name, value in (("nx", nx), ("ny", ny), ("nz", nz)):
             if getattr(self, name) is None:
                 object.__setattr__(self, name, value)
@@ -84,7 +84,7 @@ _BETA_KINETIC = 1e-4  # small finite beta with A_par: GKX's kinetic-electron ste
 _ELECTRON_MOMENTS = (4, 48)  # (Nl, Nm), GKX's nonlinear kinetic-electron default
 _M_ELECTRON = 0.00027  # m_e / m_i = 1 / 3670
 # The linear time route's measured CFL step (0.9 of the bound) diverges with kinetic electrons on VMEC
-# lines (non-finite fields at the 32 x 32 x 48 QA and shaped-tokamak decks, f32 and f64); 0.2 is finite and
+# lines (non-finite fields on the 32 x 32 x 48 QA and shaped-tokamak decks, f32 and f64); 0.2 is finite and
 # gives the same rate as 0.1.
 _LINEAR_CFL_KINETIC = 0.2
 

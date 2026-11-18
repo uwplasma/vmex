@@ -71,7 +71,7 @@ def test_defaults_deck_and_settings_block(tmp_path):
 
 def test_kinetic_electron_deck_follows_gkx_example(tmp_path):
     cfg = gk_run.TurbulenceSettings(kinetic_electrons=True)
-    assert (cfg.nx, cfg.ny, cfg.nz) == (32, 32, 16)
+    assert (cfg.nx, cfg.ny, cfg.nz) == (16, 16, 16)
     for nonlinear in (False, True):
         deck = tomllib.loads(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", cfg,
                                                nonlinear=nonlinear).read_text())
