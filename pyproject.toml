@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vmex"
-version = "0.14.0"
+version = "0.15.0"
 description = "JAX implementation of VMEC2000 with differentiable fixed-boundary and branch-local free-boundary research paths."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -81,7 +81,7 @@ neoclassical = [
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
-    "virtual-casing-jax>=0.0.16",
+    "virtual-casing-jax>=0.0.17",
 ]
 #
 # Gyrokinetic turbulence-proxy objectives (``vmex.core.turbulence``) via GKX,
@@ -99,6 +99,12 @@ turbulence = [
   "jax>=0.10.1",
   "jaxlib>=0.10.1",
 ]
+# Shear-Alfven continuum and global modes (``vmex --alfven``) via FAX (PyPI name
+# ``alfvex``). 1.2.0 has the local-gap ``fax.summary`` and ``fax.plot_summary``.
+alfven = [
+  "alfvex>=1.2.0",
+  "matplotlib",
+]
 # Coil geometry and VMEC/Boozer tracing, including fixed-step solver options.
 # 0.20.1: per-pair Coulomb logarithms in the collision rates that collisional
 # `vmex --trace` uses (ESSOS #128); needs Python 3.11 and diffrax 0.7.2.
@@ -112,7 +118,7 @@ coils = [
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.
 all = [
-  "vmex[coils,freeb,neoclassical,optimizers,turbulence]",
+  "vmex[alfven,coils,freeb,neoclassical,optimizers,turbulence]",
 ]
 docs = [
   "sphinx",
@@ -158,17 +164,18 @@ markers = [
 # Coverage files from different runners (Linux and macOS paths) combine only
 # when the recorded paths are relative to the repository root.
 relative_files = true
-# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.16
+# virtual_casing.py requires the optional virtual-casing-jax >= 0.0.17
 # extra (see [project.optional-dependencies]). Its FD-validated gradient
 # tests are importorskip-gated and skip in the dependency-minimal core CI,
 # so the module is excluded from the core >=95% coverage gate. It is
 # exercised by the optional-integrations CI lane. turbulence.py is
 # likewise gated on the optional ``turbulence`` extra (gkx), as is gk_run.py
-# (the ``vmex --turbulence`` driver).
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+# (the ``vmex --turbulence`` driver); alfven_run.py (``vmex --alfven``) likewise
+# needs the ``alfven`` extra.
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/alfven_run.py"]
 
 [tool.coverage.report]
-omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py"]
+omit = ["*/virtual_casing.py", "*/turbulence.py", "*/gk_run.py", "*/alfven_run.py"]
 
 [tool.ruff]
 line-length = 120

@@ -10,6 +10,7 @@ exactly, so the batched path is a pure efficiency win with identical gradients.
 from __future__ import annotations
 
 import dataclasses
+import sys
 import types
 from pathlib import Path
 
@@ -342,12 +343,24 @@ def test_probe_workers_default_to_the_cpus_of_a_cpu_device_and_validate(monkeypa
     im.set_probe_workers(cfg, 1)
     assert im._probe_responses(cfg, arguments) is None
     im.set_probe_workers(cfg, None)
+    monkeypatch.setattr(im, "_traced", lambda: False)  # this suite may itself run under coverage
     monkeypatch.setattr(im, "available_cpus", lambda: 1)
     assert im._probe_responses(cfg, arguments) is None
     monkeypatch.setattr(im, "available_cpus", lambda: 64)
     assert len(im._probe_responses(cfg, arguments)) == im._MAX_PROBE_WORKERS
     accelerator = dataclasses.replace(cfg, device=types.SimpleNamespace(platform="gpu"))
     assert im._probe_responses(accelerator, arguments) is None
+    monkeypatch.setattr(im, "_traced", lambda: True)  # coverage or a debugger: the probe threads would deadlock
+    assert im.probe_workers(cfg) == 1
+
+
+def test_traced_sees_a_trace_function():
+    previous = sys.gettrace()
+    sys.settrace(lambda *a: None)
+    try:
+        assert im._traced()
+    finally:
+        sys.settrace(previous)
 
 
 def _jaxpr_array_sizes(jaxpr):

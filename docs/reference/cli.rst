@@ -90,6 +90,21 @@ Options
        order first), optional ``helicity_n``. Adds the Redl ``<j.B>`` curve.
    * - ``--nc-er X``
      - ``E_r`` [kV/m] for ``--neoclassical`` (default: the ambipolar root).
+   * - ``--alfven``
+     - Shear-Alfven continuum with FAX on a ``wout_*.nc`` input or after
+       solving an input file: the local gaps of each mode family (TAE, EAE,
+       MAE, HAE, and BAE when the WOUT has pressure) and a gap mode that stays
+       clear of the continuum. Writes ``*_alfven.png`` (continuum against
+       ``r/a`` coloured by dominant ``m``, the mode harmonics and the mode in
+       the poloidal plane) and ``*_alfven.json`` (requires
+       ``pip install "vmex[alfven]"``). Defaults pick the harmonics from
+       ``nfp`` and the rotational transform; frequencies scale as the inverse
+       square root of the density. The WOUT needs about 32 radial surfaces
+       or more; VMEX warns below that.
+   * - ``--alfven-config TOML`` / ``--alfven-density M3`` / ``--alfven-ion-mass AMU``
+     - A ``fax run`` case file (unknown keys are rejected; ``[plasma]
+       density_profile`` gives polynomial coefficients in ``s``), the central
+       ion number density (default ``1e19`` m^-3) and the ion mass (default 2 amu).
    * - ``--trace-no-scale``
      - Trace the equilibrium as given.
    * - ``--trace-no-resolution-check``

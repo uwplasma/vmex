@@ -141,6 +141,8 @@ UNTESTED_EXAMPLES = {
 #: their symmetric namesakes: none of them had ever run, and
 #: ``QH_optimization.py`` exited non-zero when it finally did.
 EXECUTED_EXAMPLES = {
+    "examples/machine_learning/database_optimization.py",
+    "examples/machine_learning/differentiable_optimization.py",
     "examples/epsilon_effective.py",
     "examples/finite_beta_scan.py",
     "examples/fixed_boundary_run.py",
@@ -486,9 +488,9 @@ def test_epsilon_effective_example(tmp_path):
     assert values is not None, out
     profile = np.array([float(v) for v in values.group(1).split()])
     assert profile.size == 5 and np.all(np.isfinite(profile))
-    # a QA ripple is small but nonzero, and rises toward the boundary
-    assert np.all(profile > 0) and np.all(profile < 1e-2)
-    assert profile[-1] > profile[0], f"eps_eff should rise outward: {profile}"
+    # a QA ripple is small but nonzero: about 1e-8 here, within 10% when the NEO
+    # steps per period and step budget are doubled, and not monotonic in s
+    assert np.all(profile > 0) and np.all(profile < 1e-6), profile
     assert (tmp_path / "epsilon_effective.png").stat().st_size > 10_000
 
 
@@ -1685,3 +1687,21 @@ def test_vmex_mrx_comparison_example(tmp_path):
     assert "force residual" in out and "|B| difference" in out
     figure = tmp_path / "output_vmex_mrx_comparison" / "vmex_mrx_comparison.png"
     assert figure.stat().st_size > 10_000
+
+
+@pytest.mark.parametrize("name", ["database", "differentiable"])
+def test_machine_learning_examples(name, tmp_path):
+    """Both design examples write their database or history and a figure."""
+    _run_example(EXAMPLES / "machine_learning" / f"{name}_optimization.py", tmp_path, timeout=600)
+    output = tmp_path / "results" / "machine_learning"
+    if name == "database":
+        with np.load(output / "database.npz", allow_pickle=False) as data:
+            assert data["X"].shape[1] == 6 and np.abs(data["selected"]).max() <= 1.0
+            assert np.isfinite(data["Y"][0]).all() and data["Y"].shape[1] == 4
+        assert (output / "input.database_selected").is_file()
+        assert (output / "database.png").is_file()
+    else:
+        with np.load(output / "differentiation.npz", allow_pickle=False) as data:
+            assert np.abs(data["x_history"]).max() <= 1.0
+            assert data["loss_history"][-1] < data["loss_history"][0]
+        assert (output / "differentiation.png").is_file()
