@@ -14,7 +14,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
 
@@ -67,15 +66,6 @@ mpol = max(MAX_MODE + 2, MINIMUM_MPOL)
 inp = replace(inp, delt=0.5).change_resolution(
     mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 ### Set up the objective ######################################################
 
 
@@ -83,7 +73,8 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    # A limit instead of a target: a mean could hide a near-zero iota surface.
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
 ]
 problem = opt.VmecProblem.from_tuples(inp, objective_function_terms, max_mode=MAX_MODE,
                                       vary_major_radius=VARY_MAJOR_RADIUS, use_ess=True, progress=True, evaluation_progress=True)
