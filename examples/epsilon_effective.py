@@ -6,9 +6,9 @@ ripple drives in the 1/nu regime. VMEX computes it straight from a solved
 equilibrium through NEO_JAX, with the Boozer transform done internally, so no
 ``boozmn`` file is written.
 
-The radial trend is the result worth reading: a quasi-axisymmetric field has a
-small ripple that rises toward the boundary. Raise the NEO controls for
-anything beyond that trend.
+A quasi-axisymmetric field has a very small ripple (about 1e-8 for this deck),
+at the level where the profile is not monotonic in s. Raise the NEO controls
+for anything beyond an order-of-magnitude statement.
 
 Needs the optional ``neoclassical`` extra: ``pip install "vmex[neoclassical]"``.
 """
@@ -28,13 +28,13 @@ INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.LandremanPaul2021
 # Flux surfaces the effective ripple is evaluated on:
 SURFACES = np.linspace(0.15, 0.95, 5)
 
-# NEO controls.  This compact set keeps the example responsive while retaining
-# the radial trend; raise them for a publication calculation.  Setting
-# max_rational_field_periods to 0 asks for an unlimited exact rational
-# correction, which on a near-rational surface does not finish in an example's
-# budget, so it is bounded here:
-NEO_CONFIG_ARGS = dict(theta_n=24, phi_n=24, npart=12, multra=1, no_bins=20,
-                       nstep_per=6, nstep_min=30, nstep_max=60, acc_req=0.1,
+# NEO controls: the resolution of vmex.core.neoclassical.diagnostic_neo_config,
+# about 2.5 % from a much finer reference on optimized equilibria; raise them
+# for a publication calculation.  Setting max_rational_field_periods to 0 asks
+# for an unlimited exact rational correction, which on a near-rational surface
+# does not finish in an example's budget, so it is bounded here:
+NEO_CONFIG_ARGS = dict(theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
+                       nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
                        max_rational_field_periods=100000)
 
 # Figure written to the working directory:
@@ -42,10 +42,10 @@ FIGURE_PATH = Path("epsilon_effective.png")
 
 # This example has no VMEX_EXAMPLES_CI smoke path, deliberately.  Coarsening
 # the NEO controls enough to matter destroys the result: at theta_n/phi_n 12,
-# npart 6 and acc_req 0.3 the profile came back about four times too large and
-# no longer rose outward, for a saving of 91 s to 54 s.  Its test is gated on
+# npart 6 and acc_req 0.3 the profile came back about four times too large, for
+# a saving of 91 s to 54 s.  Its test is gated on
 # the optional neoclassical extra rather than on runtime, so a cheaper lane
-# would buy nothing and cost the radial trend this example exists to show.
+# would buy nothing and degrade the value this example exists to show.
 
 ###############################################################################
 # End of input parameters.
