@@ -16,6 +16,10 @@ on the finer VALIDATION_OPTIONS, so an optimum that only exists at the
 optimizer's grid resolution is visible as a gap between the two numbers.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

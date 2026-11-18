@@ -23,6 +23,10 @@ optimization costs. The final equilibrium is judged by the rms difference
 between its own <j.B> and the DKX one, quoted at the end.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks; dkx does not install on Python 3.10")
+
 import os
 from dataclasses import replace
 from pathlib import Path

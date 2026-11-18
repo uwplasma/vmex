@@ -90,7 +90,7 @@ def test_coil_examples_need_only_the_pinned_essos_release() -> None:
 
     pyproject = tomllib.loads((REPO / "pyproject.toml").read_text())
     coils = pyproject["project"]["optional-dependencies"]["coils"]
-    assert coils == ["essos>=0.22.0"], coils
+    assert coils == ["essos>=0.22.0; python_version >= '3.11'"], coils
 
     for script in ESSOS_COIL_EXAMPLES:
         text = script.read_text()
@@ -218,6 +218,7 @@ EXECUTED_EXAMPLES = {
     "examples/plot_and_boozer.py",
     "examples/profiles_power_and_spline.py",
     "examples/run_from_json.py",
+    "examples/run_from_toml.py",
     "examples/take_fixed_boundary_gradients.py",
     "examples/take_free_boundary_gradients.py",
     "examples/vmex_essos_workflow.py",
@@ -400,6 +401,10 @@ def _run_example(script: Path, cwd: Path, timeout: int = 2400,
         assert str(script.relative_to(REPO)) in EXECUTED_EXAMPLES, (
             f"{script.relative_to(REPO)} is run by a test but is not listed in "
             "EXECUTED_EXAMPLES")
+    # The example refuses to start below its floor, with the reason in its message.
+    needs = re.search(r'require_python\(\(3, 11\), "([^"]+)"\)', script.read_text())
+    if needs and sys.version_info < (3, 11):
+        pytest.skip(f"needs Python 3.11 or newer ({needs.group(1)})")
     env = dict(os.environ, VMEX_EXAMPLES_CI="1", **extra_env)
     env.pop("JAX_DISABLE_JIT", None)
     proc = subprocess.run(
@@ -459,6 +464,22 @@ def test_run_from_json(tmp_path):
     assert match is not None and float(match.group(1)) < 1e-6
     assert (tmp_path / "output_run_from_json" / "circular_tokamak.json").exists()
     assert (tmp_path / "output_run_from_json" / "wout_circular_tokamak.nc").exists()
+
+
+def test_run_from_toml(tmp_path):
+    out = _run_example(EXAMPLES / "run_from_toml.py", tmp_path, timeout=900)
+    # A circular cross section of R0 = 6 and a = 2 has aspect ratio 3.
+    match = re.search(r"converged=True\s+aspect=([0-9.]+)", out)
+    assert match is not None and abs(float(match.group(1)) - 3.0) < 1e-3
+    assert (tmp_path / "output_run_from_toml" / "wout_circular_tokamak.nc").exists()
+
+
+@pytest.mark.skipif(sys.version_info >= (3, 11), reason="Python 3.10 only")
+def test_example_needing_python_311_says_so(tmp_path):
+    proc = subprocess.run([sys.executable, str(EXAMPLES / "vmex_essos_workflow.py")], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert proc.returncode != 0
+    assert "This needs Python 3.11 or newer (essos does not install on Python 3.10)" in proc.stderr
 
 
 def test_epsilon_effective_example_bounds_the_neo_controls() -> None:

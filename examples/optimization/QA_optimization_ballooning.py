@@ -15,6 +15,10 @@ DESC's example; beta, aspect ratio and Mercier stability are held by their own
 rows, so ballooning cannot be bought by lowering beta or by changing the device.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

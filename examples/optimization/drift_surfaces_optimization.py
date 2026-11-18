@@ -12,6 +12,10 @@ surface reaches toward the LCFS. The weighted mean reach is reported as
 ``Gamma_W``. No symmetry is imposed. VMEX supplies the exact Jacobian.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

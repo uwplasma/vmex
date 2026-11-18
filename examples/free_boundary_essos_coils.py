@@ -21,6 +21,10 @@ directory as lossless WebP; copying it over the committed one in
 ``docs/_static/figures`` reproduces those bytes.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import os
 from dataclasses import replace
 from pathlib import Path

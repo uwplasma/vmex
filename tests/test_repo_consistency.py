@@ -123,8 +123,8 @@ def test_declared_floors_match_every_copy() -> None:
 
 
 @pytest.mark.parametrize("found, message", [
-    (None, 'essos>=0.22.0; run: pip install "essos>=0.22.0"'),
-    ("0.19.2", 'essos>=0.22.0 (found 0.19.2); run: pip install -U "essos>=0.22.0"'),
+    (None, 'neo-jax>=1.1.1; run: pip install "neo-jax>=1.1.1"'),
+    ("1.0.1", 'neo-jax>=1.1.1 (found 1.0.1); run: pip install -U "neo-jax>=1.1.1"'),
 ])
 def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
     from vmex import _compat
@@ -135,8 +135,34 @@ def test_require_optional_names_the_fix(monkeypatch, found, message) -> None:
         return found
 
     monkeypatch.setattr(_compat.importlib_metadata, "version", version)
-    with pytest.raises(ImportError, match=re.escape("alpha-particle tracing needs " + message)):
-        _compat.require_optional("essos", "alpha-particle tracing")
+    with pytest.raises(ImportError, match=re.escape("effective ripple needs " + message)):
+        _compat.require_optional("neo-jax", "effective ripple")
+
+
+def test_python_floor_message_is_plain(monkeypatch) -> None:
+    import platform
+
+    from vmex import _compat
+
+    _compat.require_python((3, 10), "anything")
+    with pytest.raises(ImportError, match=re.escape(
+            f"This needs Python 99.0 or newer (gkx); you are running Python {platform.python_version()}.")):
+        _compat.require_python((99, 0), "gkx")
+
+    def missing(name):
+        raise _compat.importlib_metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(_compat.importlib_metadata, "version", missing)
+    expected = ("Python 3.11 or newer (vmex --turbulence uses gkx, which does not install on Python 3.10)"
+                if sys.version_info < (3, 11) else 'vmex --turbulence needs gkx>=2.6.0; run: pip install "gkx>=2.6.0"')
+    with pytest.raises(ImportError, match=re.escape(expected)):
+        _compat.require_optional("gkx", "vmex --turbulence")
+
+
+def test_load_toml_reads_one_table() -> None:
+    from vmex._compat import load_toml
+
+    assert load_toml('a = [1, 2]\n[b]\nc = "d"') == {"a": [1, 2], "b": {"c": "d"}}
 
 
 def test_import_guard_names_the_fix_and_skips_unknown_metadata(monkeypatch) -> None:

@@ -13,6 +13,10 @@ A cold free-boundary solve and NEO check the design, including the transport of
 the equilibrium the coils hold. Requires vmex[neoclassical].
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import gc
 import os
 from dataclasses import replace

@@ -31,6 +31,10 @@ OPENBLAS_NUM_THREADS=1: there threaded LAPACK took 67 s for the dense
 eigenvalue solve that one thread does in 5 s.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 import time
 from dataclasses import replace

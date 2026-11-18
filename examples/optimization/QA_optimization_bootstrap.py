@@ -14,6 +14,10 @@ and Te = Ti = T0 (1 - s); one seed solve calibrates their amplitude to the
 requested volume-average beta for this field scale.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

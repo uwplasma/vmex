@@ -10,6 +10,10 @@ LCFS and comes back, or strikes the wall.  The table is checked against the
 direct exterior field between the LCFS and the wall.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 from dataclasses import replace
 import os
 from pathlib import Path

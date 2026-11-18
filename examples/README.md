@@ -5,7 +5,7 @@ a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
 stellarator-symmetric first-order QA example; it does not constrain the
 converged equilibrium to the near-axis expansion or differentiate the generator.
 
-All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16); the package itself supports Python 3.10. The coil and
+All runnable examples live under this single `examples/` tree. The package and every example not listed here run on Python 3.10. The examples that use ESSOS, GKX or DKX, or pass `callback=` to SciPy's `least_squares` (new in SciPy 1.16), need Python 3.11 or newer and stop at the top with a message that says so. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
 
@@ -40,6 +40,8 @@ that research budget as one commented set of constants next to the default.
     cubic-spline pressure/iota profiles (they agree); `NCURR=0` vs `NCURR=1`.
   - `run_from_json.py` — read/convert structured JSON (`to_json` /
     `from_file`); the JSON and `&INDATA` forms describe one equilibrium.
+  - `run_from_toml.py` — solve a circular tokamak from a `.toml` deck (the
+    JSON keys written as TOML); `vmex deck.toml` does the same.
   - `hot_restart_scan.py` — seed each scan point from the previous converged
     state; warm restarts converge in ~1 iteration and recompile nothing.
   - `finite_beta_scan.py` — ramp the pressure (hot-restarted) and read beta,

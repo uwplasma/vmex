@@ -779,6 +779,27 @@ OPTIONAL_MINIMUMS = {"essos": "0.22.0", "virtual-casing-jax": "0.0.17",
                      "dkx": "2.14.0", "alfvex": "1.2.0"}
 
 
+# Optional packages that do not install on Python 3.10.
+OPTIONAL_NEEDS_PYTHON_311 = ("essos", "gkx", "dkx")
+
+
+def load_toml(text: str) -> dict:
+    """Parse TOML ``text``: the standard library on Python 3.11, ``tomli`` on 3.10."""
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:  # pragma: no cover - Python 3.10
+        import tomli as tomllib
+    return tomllib.loads(text)
+
+
+def require_python(minimum: tuple[int, int], because: str) -> None:
+    """Raise ImportError saying plainly that this needs Python ``minimum`` or newer."""
+    if sys.version_info[:2] < minimum:
+        need = ".".join(map(str, minimum))
+        raise ImportError(f"This needs Python {need} or newer ({because}); you are running Python "
+                          f"{platform.python_version()}. Install a newer Python.")
+
+
 def require_optional(name: str, feature: str) -> None:
     """Raise ImportError naming the fix if ``name`` is missing or below its floor."""
     from packaging.version import Version
@@ -787,6 +808,8 @@ def require_optional(name: str, feature: str) -> None:
     try:
         found = importlib_metadata.version(name)
     except importlib_metadata.PackageNotFoundError:
+        if name in OPTIONAL_NEEDS_PYTHON_311:
+            require_python((3, 11), f"{feature} uses {name}, which does not install on Python 3.10")
         raise ImportError(f'{feature} needs {name}>={minimum}; run: pip install "{name}>={minimum}"') from None
     if Version(found) < Version(minimum):
         raise ImportError(f'{feature} needs {name}>={minimum} (found {found}); '

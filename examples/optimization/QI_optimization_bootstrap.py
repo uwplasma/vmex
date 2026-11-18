@@ -47,6 +47,10 @@ and Te = Ti = T0 (1 - s); the amplitude is recalibrated at each stage to the
 stage's volume-average beta for this field scale.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks; dkx does not install on Python 3.10")
+
 import os
 from dataclasses import replace
 from pathlib import Path

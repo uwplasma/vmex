@@ -46,6 +46,10 @@ Run it with ``VMEX_EXAMPLES_CI=1`` for a short smoke pass that reports and
 exits 0. Otherwise a run that misses a target says which and exits 1.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import json
 import os
 from dataclasses import replace
