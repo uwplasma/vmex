@@ -2987,6 +2987,11 @@ def _least_squares_implicit(
         raise ValueError(
             "jac_solver must be 'auto', 'block', 'gmres', or 'reverse', "
             f"got {jac_solver!r}")
+    if jax.__version_info__ < (0, 7):
+        # JAX 0.6, the last release for Python 3.10, differentiates the
+        # Mercier, Glasser and J.B terms wrongly in forward mode; reverse mode
+        # agrees with finite differences.
+        jac_solver = "reverse"
     if jac_solver in ("auto", "block"):
         jac_impl = jacobian_rows_block
     else:
