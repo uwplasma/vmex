@@ -905,7 +905,9 @@ class VmecProblem(FunctionProblem):
             ``target`` is the value the term is driven toward, coerced with
             :func:`float`, so it must be scalar even when ``function``
             returns a vector — the same target is then subtracted from
-            every row.
+            every row.  Pass ``opt.at_least(x)``, ``opt.at_most(x)`` or
+            ``opt.between(a, b)`` instead for a one-sided or two-sided limit:
+            the rows are the distance outside the limit, zero while it holds.
 
             ``weight`` is a non-negative scalar, or a one-dimensional array
             with one entry per residual row of that term.  Under the
