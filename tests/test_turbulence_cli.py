@@ -49,11 +49,11 @@ def test_defaults_deck_and_settings_block(tmp_path):
     assert (cfg.nx, cfg.ny, cfg.nz, cfg.npol, cfg.nl, cfg.nm, cfg.t_max, cfg.t_sat_min) == (
         96, 96, 24, 3.0, 4, 8, 800.0, 300.0)
     out = tmp_path / "x.out.nc"
-    deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
+    deck = load_toml(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
                                            nonlinear=True).read_text())
     assert deck["grid"]["Nz"] == deck["grid"]["ntheta"] == 72 and deck["geometry"]["npol"] == 3.0
     assert deck["grid"]["boundary"] == "fix aspect" and deck["time"]["saturation_t_min"] == 300.0
-    old = tomllib.loads(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
+    old = load_toml(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
                                           saturation=False).read_text())
     assert "saturation_t_min" not in old["time"]
     text = "\n".join(gk_run.settings_block(Path("wout_x.nc"), cfg, backend="GKX test, cpu", out=out, geom=GEOM,
@@ -70,7 +70,7 @@ def test_kinetic_electron_deck_follows_gkx_example(tmp_path):
     cfg = gk_run.TurbulenceSettings(kinetic_electrons=True)
     assert (cfg.nx, cfg.ny, cfg.nz) == (16, 16, 16)
     for nonlinear in (False, True):
-        deck = tomllib.loads(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", cfg,
+        deck = load_toml(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", cfg,
                                                nonlinear=nonlinear).read_text())
         assert ("cfl" in deck["time"]) is (not nonlinear)  # linear time route: 0.2 of the CFL step
         ion, ele = deck["species"]
