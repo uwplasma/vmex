@@ -483,13 +483,15 @@ compilation included.
 
 ## Turbulence
 
-`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.6.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
-[GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
-and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
-stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a
-summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`, `-ky`, `-grid`,
-`-moments`, `-tmax`, `-gradients` and `--turbulence-kinetic-electrons` change the run
-([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
+`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.6.0) samples a flux tube at `s = 0.5`, `α = 0` (three poloidal turns)
+and runs [GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing
+`k_y`, and a nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons, 96 x 96 x 24 per turn,
+`(N_l, N_m) = (4, 8)`, float32) that GKX stops once the heat flux saturates, or at `t_max = 800`. The terminal
+starts with everything that determines the answer (geometry, box, resolution, stop rule, collisions, expected
+uncertainty) and ends with the saturated heat flux, its standard error and whether it saturated. The run also writes a
+NetCDF output file, a summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`,
+`-gradients`, `-tmax` and `--turbulence-kinetic-electrons` change the run; the rest is `TurbulenceSettings` in Python
+([guide](docs/howto/turbulence.md)). The seed alone moves the flux by about 10%.
 
 ![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
 
