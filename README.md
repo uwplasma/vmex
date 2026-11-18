@@ -495,6 +495,30 @@ summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `
 
 ![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
 
+## Shear-Alfvén eigenmodes
+
+Fast ions drive Alfvén eigenmodes in the gaps of the shear-Alfvén continuum. Toroidicity, shaping and the field
+periods open those gaps. `vmex --alfven` (needs `vmex[alfven]`) runs [FAX](https://github.com/uwplasma/FAX) on a solved
+equilibrium or a WOUT:
+- the continuum of each coupled mode family (each `n` in a tokamak, `n mod nfp` in a stellarator), with both signs
+  of `n` around the resonances `n ≈ m ι`;
+- the local gaps, each opened where two counter-propagating branches cross, typed TAE, EAE, NAE, MAE or HAE, and BAE
+  when the WOUT has pressure;
+- one global eigenmode inside a gap. It is kept only if it is carried by both gap harmonics, smooth, peaked near the
+  gap and clear of the continuum. Otherwise the JSON says why.
+
+```console
+vmex examples/data/input.NuhrenbergZille_1988_QHS --alfven
+```
+
+It writes `*_alfven.png` and `*_alfven.json`. Frequencies scale as `n_i^(-1/2)`: `--alfven-density`,
+`--alfven-ion-mass` and a `[plasma] density_profile` in `--alfven-config` set the ions (1e19 m⁻³ deuterium by
+default). On the Nührenberg–Zille quasi-helical deck, the widest gap is a helical `(Δm, Δn/nfp) = (2, 1)` gap. The
+mode in it couples `(9, -11)` and `(11, -17)`. Runtime: about 30 s on a laptop after the solve. The WOUT needs about 32
+radial surfaces or more, and VMEX warns below that.
+
+![vmex --alfven: continuum of one mode family coloured by dominant m with the gaps over their radial range, the mode harmonics, and the mode in the poloidal plane](docs/_static/figures/readme_alfven.webp)
+
 ## How VMEX works
 
 1. **Energy principle.** VMEX finds a stationary point of `W = ∫ (B²/2μ₀ + p/(γ−1)) dV` over
