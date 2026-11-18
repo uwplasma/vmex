@@ -693,10 +693,18 @@ def _tl_stable(
         jnp.where(use_bwd, 0.0, cma), jnp.where(use_bwd, 2.0, sqrtc),
         jnp.where(use_bwd, 2.0, sqrta), jnp.where(use_bwd, one, t0), lmax,
     )
-    t_bwd = _tl_backward(
-        jnp.where(use_bwd, A, 1.0), jnp.where(use_bwd, B, 3.0),
-        jnp.where(use_bwd, cma, 0.0), jnp.where(use_bwd, sqrtc, 2.0),
-        jnp.where(use_bwd, sqrta, 2.0), jnp.where(use_bwd, t0, one), lmax,
+    # The Miller pass is a ``lmax + tail``-step sequential scan, the most
+    # expensive part of a skip-step NESTOR update on CPU, and most boundaries
+    # never select it: run it only when some point does.  (Under ``vmap`` the
+    # cond becomes a select and both branches run, as before.)
+    t_bwd = jax.lax.cond(
+        jnp.any(use_bwd),
+        lambda: _tl_backward(
+            jnp.where(use_bwd, A, 1.0), jnp.where(use_bwd, B, 3.0),
+            jnp.where(use_bwd, cma, 0.0), jnp.where(use_bwd, sqrtc, 2.0),
+            jnp.where(use_bwd, sqrta, 2.0), jnp.where(use_bwd, t0, one), lmax,
+        ),
+        lambda: jnp.zeros_like(t_fwd),
     )
     return jnp.where(use_bwd[None], t_bwd, t_fwd)
 
