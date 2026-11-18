@@ -6,9 +6,9 @@ ripple drives in the 1/nu regime. VMEX computes it straight from a solved
 equilibrium through NEO_JAX, with the Boozer transform done internally, so no
 ``boozmn`` file is written.
 
-The radial trend is the result worth reading: a quasi-axisymmetric field has a
-small ripple that rises toward the boundary. Raise the NEO controls for
-anything beyond that trend.
+A quasi-axisymmetric field has a very small ripple (about 1e-8 for this deck),
+at the level where the profile is not monotonic in s. Raise the NEO controls
+for anything beyond an order-of-magnitude statement.
 
 Needs the optional ``neoclassical`` extra: ``pip install "vmex[neoclassical]"``.
 """
@@ -42,10 +42,10 @@ FIGURE_PATH = Path("epsilon_effective.png")
 
 # This example has no VMEX_EXAMPLES_CI smoke path, deliberately.  Coarsening
 # the NEO controls enough to matter destroys the result: at theta_n/phi_n 12,
-# npart 6 and acc_req 0.3 the profile came back about four times too large and
-# no longer rose outward, for a saving of 91 s to 54 s.  Its test is gated on
+# npart 6 and acc_req 0.3 the profile came back about four times too large, for
+# a saving of 91 s to 54 s.  Its test is gated on
 # the optional neoclassical extra rather than on runtime, so a cheaper lane
-# would buy nothing and cost the radial trend this example exists to show.
+# would buy nothing and degrade the value this example exists to show.
 
 ###############################################################################
 # End of input parameters.

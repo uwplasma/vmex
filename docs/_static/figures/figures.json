@@ -754,6 +754,25 @@
       "note": "The 40 mT deficit case of the same sweep against iteration: axis radius, feedback vertical field and force residual. 32-color lossless WebP written to the working directory; copy it over the committed one to reproduce."
     },
     {
+      "path": "docs/_static/figures/readme_alfven.webp",
+      "bytes": 49454,
+      "sha256": "09b353708115dc0660783993fd0ec2a56982f0e9e235a205f41e793b730bfe03",
+      "generator": "vmex/core/alfven_run.py",
+      "command": "vmex examples/data/input.NuhrenbergZille_1988_QHS --alfven",
+      "inputs": [
+        "examples/data/input.NuhrenbergZille_1988_QHS"
+      ],
+      "record": null,
+      "generated": "2026-11-18",
+      "hardware": "Apple M-series laptop (arm64), macOS, CPU",
+      "reproducible": "manual",
+      "bytes_verified": false,
+      "used_in": [
+        "README.md"
+      ],
+      "note": "The *_alfven.png of fax.plot_summary (alfvex 1.2.0) for the default vmex --alfven run, converted to WebP (quality 80) with Pillow."
+    },
+    {
       "path": "docs/_static/figures/readme_ballooning.webp",
       "bytes": 23592,
       "sha256": "162a01b88294269d69d03f8e4e508b24ccf747c5cb3eee7f18abc9ad771c88d7",
