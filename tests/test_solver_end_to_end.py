@@ -175,3 +175,27 @@ def test_evaluate_forces_api(case):
     assert not bool(diagnostics.jacobian_sign_changed)
     # gc matches the state pytree structure (momentum-update ready).
     assert jax.tree.structure(gc) == jax.tree.structure(state)
+
+
+class _Lane:
+    """Stand-in for ``_block_lane`` whose ahead-of-time compile fails."""
+
+    def __init__(self, real, error):
+        self.real, self.error = real, error
+
+    def executable(self, *args, **kwargs):
+        raise self.error
+
+    def __call__(self, *args, **kwargs):
+        return self.real(*args, **kwargs)
+
+
+def test_lane_compile_failure_falls_back_but_out_of_memory_raises(monkeypatch):
+    inp = VmecInput.from_file(str(DATA_DIR / "input.solovev"))
+    monkeypatch.setattr(solver, "_LANE_EXECUTABLES", {})
+    monkeypatch.setattr(solver, "_block_lane", _Lane(solver._block_lane, ValueError("lowering")))
+    assert solver.solve(inp, ftol=1e-10, mode="cli").converged
+    monkeypatch.setattr(solver, "_block_lane",
+                        _Lane(solver._block_lane.real, RuntimeError("RESOURCE_EXHAUSTED: out of memory")))
+    with pytest.raises(RuntimeError, match="RESOURCE_EXHAUSTED"):
+        solver.solve(inp, ftol=1e-10, mode="cli")

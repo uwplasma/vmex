@@ -7,20 +7,9 @@
 [![Coverage](https://codecov.io/gh/uwplasma/vmex/branch/main/graph/badge.svg)](https://codecov.io/gh/uwplasma/vmex)
 [![Docs](https://img.shields.io/readthedocs/vmex/latest?label=docs)](https://vmex.readthedocs.io/en/latest/)
 
-VMEX is a JAX reimplementation of VMEC2000, the standard code for
-three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads
-VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum
-field driven by an MGRID table or coils), reproduces VMEC2000's iteration
-and writes standard `wout_*.nc` files. Because the solver is written in JAX,
-VMEX also differentiates the converged equilibrium through the implicit
-function theorem, so boundary, profile and coil parameters can be optimized
-with derivatives of the discrete equilibrium equations.
+VMEX is a JAX reimplementation of VMEC2000, the standard code for three-dimensional ideal-MHD equilibria of stellarators and tokamaks. It reads VMEC input decks, solves fixed- and free-boundary equilibria (NESTOR vacuum field driven by an MGRID table or coils), reproduces VMEC2000's iteration and writes standard `wout_*.nc` files. Because the solver is written in JAX, VMEX also differentiates the converged equilibrium through the implicit function theorem, so boundary, profile and coil parameters can be optimized with derivatives of the discrete equilibrium equations.
 
-The goal is fast, differentiable and VMEC2000-compatible equilibria for
-stellarator optimization, including single-stage design, in which the plasma
-boundary and the coils are optimized together. VMEX also computes Boozer
-transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity
-and stability diagnostics, and has a separate lane for open mirrors.
+The goal is fast, differentiable and VMEC2000-compatible equilibria for stellarator optimization, including single-stage design, in which the plasma boundary and the coils are optimized together. VMEX also computes Boozer transforms, fields and their derivatives, quasisymmetry, quasi-isodynamicity and stability diagnostics, and has a separate lane for open mirrors.
 
 - **Use existing workflows:** VMEC2000 `&INDATA` decks, VMEC++-style JSON inputs and `wout_*.nc` output, `NS_ARRAY` multigrid
   continuation, hot restart from a saved WOUT, and DESC inputs and outputs read without DESC.
@@ -74,9 +63,10 @@ or pick what you need:
 | Install | Adds | Enables |
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
-| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.12` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.13.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.17` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
+| `pip install "vmex[alfven]"` | `alfvex>=1.2.0`, `matplotlib` | shear-Alfven continuum gaps and a gap eigenmode with `vmex --alfven` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
 | `pip install "vmex[all]"` | all of the above | every example and documented workflow |
 
@@ -84,13 +74,14 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 
 | Package | Minimum | Installed by | Command |
 |---|---|---|---|
-| `solvax` | 0.35.1 | `pip install vmex` | `pip install "solvax>=0.35.1"` |
-| `booz_xform_jax` | 0.5.1 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.1"` |
+| `solvax` | 0.36.2 | `pip install vmex` | `pip install "solvax>=0.36.2"` |
+| `booz_xform_jax` | 0.5.2 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.2"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
-| `virtual-casing-jax` | 0.0.12 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.12"` |
+| `virtual-casing-jax` | 0.0.17 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.17"` |
 | `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
-| `dkx` | 2.13.0 | `vmex[neoclassical]` | `pip install "dkx>=2.13.0"` |
+| `dkx` | 2.14.0 | `vmex[neoclassical]` | `pip install "dkx>=2.14.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
+| `alfvex` | 1.2.0 | `vmex[alfven]` | `pip install "alfvex>=1.2.0"` |
 | `jaxopt`, `optax` | none | `vmex[optimizers]` | `pip install jaxopt optax` |
 
 ### Existing environments
@@ -266,7 +257,7 @@ Every figure below has a generator beside it, using repository decks or retained
 
 ### Quasisymmetric and quasi-isodynamic boundaries
 
-![QA at nfp 2, QH at nfp 4 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
+![QA at nfp 2, QH at nfp 3 and QP at nfp 2](docs/_static/figures/readme_optimization.webp)
 
 Boundary optimization for quasi-axisymmetry, quasi-helical symmetry and quasi-poloidal symmetry, each at its own
 field-period count, from `examples/optimization/QA_optimization.py` and its QH and QP siblings.
@@ -278,13 +269,38 @@ Quasi-isodynamic designs at four field-period counts: the `|B|` contours close p
 rises. The QI scripts in `examples/optimization/` cover vacuum, finite-beta, bootstrap-consistent and
 maximum-`J` variants, with scalar-adjoint, SciPy, JAXopt and Optax drivers.
 
+### Quasi-isodynamic design with a self-consistent bootstrap current
+
+![Boundary and Boozer |B| before and after the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_shape.webp) ![Ambipolar E_r, bootstrap current and objective history of the QI optimization](docs/_static/figures/readme_qi_bootstrap_er_current.webp)
+
+The bootstrap current of a quasi-isodynamic field depends strongly on the radial electric field, and the Redl formula, which assumes quasi-axisymmetry, does not describe it (13 to 16 MA T/m² here against 0.3 to 1.7 from DKX). `QI_optimization_bootstrap_er.py` alternates a Picard update of the applied current profile to the [DKX](https://github.com/uwplasma/DKX) `<j·B>` at each surface's ambipolar ion-root `E_r` with QI shape stages at that fixed current (`max_mode` 1 then 3). It starts from the vacuum QI boundary `input.QI_nfp2_initial` at `β = 1.5 %` (needs `vmex[neoclassical]`; see the [neoclassical guide](docs/howto/neoclassical-transport.md)):
+
+```console
+python examples/optimization/QI_optimization_bootstrap_er.py
+```
+
+| | seed (consistent current) | optimized |
+|---|---|---|
+| constructed-QI residual | 5.6e-3 | 2.0e-3 |
+| mirror ratio (limit 0.21) | 0.240 | 0.208 |
+| aspect ratio (limit 10) | 10.0 | 9.9 |
+| min \|ι\| (floor 0.5) | 0.56 | 0.59 |
+| β (target 1.5 %) | 1.50 % | 1.50 % |
+| rms(`<j·B>` equilibrium − DKX) / rms(DKX) | 1.8 % | 1.7 % |
+
+The consistency error is taken on four kinetic surfaces, between which the profile is a monotone cubic through the DKX values; the script asserts it stays below 5 %. The final toroidal current is 269 kA. A full run takes 10 to 12 min on 8 CPU cores of a shared workstation, compilation included, and the CI smoke pass about 5 min ([figure script](docs/_static/figures/sources/make_qi_bootstrap_er_figure.py)).
+
 ### Piecewise omnigenity
 
-[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared hinge constraints on aspect ratio, rotational transform, mirror ratio, axis excursion and edge Jacobian.
+[`pwO_optimization.py`](examples/optimization/pwO_optimization.py) minimizes the mapped pwO residual, the variance of |B| along contours of a squeezed coordinate map ([Liu et al.](https://arxiv.org/abs/2603.12139v1)) whose parameters a, b, c and eta_min are optimized together with the boundary, under shared one-sided limits on aspect ratio, rotational transform, mirror ratio, axis excursion, elongation and edge Jacobian.
 
 ![Near-circular seed and pwO boundary at nfp 3: cross sections, |B| on the boundary, Boozer contours, effective ripple and iota](docs/_static/figures/readme_pwo.webp)
 
-From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 96% (6.4e-3 to 2.5e-4), at aspect ratio 6.04 and min |ι| = 0.82. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) and [single-stage](examples/optimization/single_stage_optimization_pwO.py) examples continue from it; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
+From a near-circular seed, modes 1–3 and no magnetic well, the NFP 3 vacuum run lowers the pwO residual from 1.0e-2 to 1.3e-4 and the mean NEO effective ripple ε<sub>eff</sub><sup>3/2</sup> by 95% (6.4e-3 to 3.2e-4), at aspect ratio 7.03 and min |ι| = 0.64. The elongation ceiling of 5 and the |ι| ceiling of 0.9 keep the alpha losses (`vmex --trace`, 1000 alphas born at s = 0.3, 5 ms, ARIES-CS size) at 0.0%, 0.2% and 0.3% for seed amplitudes 0.05, 0.03 and 0.08, against 5.3% with a ceiling of 9 and no |ι| ceiling. The [finite-beta](examples/optimization/pwO_optimization_finite_beta.py) example runs the same ladder from the plain seed and ramps beta with magnetic-well and Mercier limits; the [single-stage](examples/optimization/single_stage_optimization_pwO.py) example continues from the vacuum run; the [docs](docs/explanation/confinement.rst) hold the equations and the workflow.
+
+The mapped target field carries zero bootstrap current; the current lives in the unmapped B<sub>max</sub> band, and `BOOTSTRAP_TERM = "band"` flattens |B| across that band. The [docs](docs/explanation/confinement.rst#bootstrap-current-of-a-pwo-field) give the equations.
+
+![pwO with and without the bootstrap band term: |B| in Boozer coordinates and on the boundary, DKX bootstrap current and alpha losses](docs/_static/figures/readme_pwo_bootstrap.webp)
 
 ### Free boundary with coils
 
@@ -310,8 +326,7 @@ coupled plasma-vacuum residual, where its gradient is exact.
 
 ## Open mirrors and stellarator-mirror hybrids
 
-VMEX solves the same scalar-pressure force balance, `J x B = grad p` on nested flux surfaces, by
-minimizing the MHD energy. Only the coordinates change.
+VMEX minimizes the same MHD energy, with `J x B = grad p` on nested flux surfaces; only the coordinates change.
 
 | | Tokamak or stellarator | Open mirror |
 |---|---|---|
@@ -320,15 +335,13 @@ minimizing the MHD energy. Only the coordinates change.
 | Periodic angle | two | one (`theta`, Fourier modes) |
 | Axial basis | toroidal Fourier modes | clamped cubic B-splines in `xi` |
 
-- The end cuts `xi = ±1` are boundary conditions: their nested surfaces are prescribed and flux
-  passes through them.
+- The end cuts `xi = ±1` are boundary conditions: their nested surfaces are prescribed and flux passes through them.
 - The free boundary couples the side surface `s = 1` to an open exterior vacuum problem.
 - The field is divergence-free by construction, `sqrt(g) B^theta = I'(s) - d(lambda)/d(xi)`,
   `sqrt(g) B^xi = Psi'(s) + d(lambda)/d(theta)`, `B^s = 0`. This is the Clebsch form
   `B = grad Psi x grad alpha` with `alpha = theta + lambda/Psi' - (I'/Psi') xi`
   ([mirror geometry](https://vmex.readthedocs.io/en/latest/explanation/mirror-geometry.html)).
-- A stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns and
-  uses a periodic spline along its length.
+- A stellarator-mirror hybrid closes two straight mirror legs with curved stellarator returns on a periodic spline.
 
 ```console
 vmex examples/data/input.mirror_two_coil_free_boundary --plot   # a &MIRROR deck, writes mout_*.nc
@@ -339,8 +352,7 @@ from vmex.mirror import MirrorInput, solve_mirror
 solution = solve_mirror(MirrorInput.from_file("examples/data/input.mirror_two_coil_free_boundary"))
 ```
 
-You give the boundary (or the coils), flux and pressure; `solve_mirror` builds the spline grid,
-initial state and exterior grid.
+`solve_mirror` builds the spline grid, initial state and exterior grid from the boundary (or coils), flux and pressure.
 
 ![VMEX against Pleiades on a two-coil free-boundary mirror](docs/_static/figures/readme_mirror_pleiades.webp)
 
@@ -372,6 +384,10 @@ outside the plasma: an island chain about 0.9 cm wide opens from the LCFS, close
 surround it to 2.9 cm, and the lines open beyond. The figure is built by VMEX from `examples/data` alone
 (`docs/_static/figures/sources/make_extender_islands_figure.py`). The vacuum case and the method
 are in the [fields and coils guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+
+![Exterior-field accuracy against distance, the plasma field around a QA boundary, its shape derivative against re-solved equilibria, and the plasma field outside a mirror](docs/_static/figures/readme_exterior_field.webp)
+
+`near_surface="auto"` (the default) switches to a target-graded rule within a few node spacings of the boundary, for `B` and its derivatives. (a) Error against an exact axis-filament field on the QA boundary at 32, 64 and 96 source samples per period (the estimate flags the first); the direct rule alone fails within 10% of a minor radius. (b) The plasma field at phi = 0. (c) `B_vjp` against central differences of re-solved equilibria. (d) A mirror (`examples/mirror/mirror_exterior_field.py`). Script: `docs/_static/figures/sources/make_exterior_field_figure.py`; parameters: [reference](https://vmex.readthedocs.io/en/latest/reference/exterior-field.html), [tutorial](https://vmex.readthedocs.io/en/latest/tutorials/exterior-field.html).
 
 ### Opt-in solver options
 
@@ -465,15 +481,22 @@ compilation included.
 
 ## Turbulence
 
-`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.6.0) samples the flux tube at `s = 0.5`, `α = 0` and runs
-[GKX](https://github.com/uwplasma/GKX) on it: a linear `k_y` scan, the eigenfunction at the fastest-growing `k_y`,
-and a short nonlinear ITG simulation (`a/L_T = 3`, `a/L_n = 1`, adiabatic electrons). The terminal shows each
-stage with an estimate of the time left. The run writes the saturated heat flux with its standard error, a
-summary figure, the field-line geometry and the flux traces. `--turbulence-s`, `-alpha`, `-ky`, `-grid`,
-`-moments`, `-tmax`, `-gradients` and `--turbulence-kinetic-electrons` change the run
-([guide](docs/howto/turbulence.md)). The defaults are a few-minute survey and are not converged.
+`--turbulence` (needs `vmex[turbulence]`, GKX >= 2.6.0) runs [GKX](https://github.com/uwplasma/GKX) on a flux tube
+at `s = 0.5`, `α = 0`: a linear `k_y` scan, the fastest-growing eigenfunction and a nonlinear adiabatic-electron ITG
+run (`a/L_T = 3`, `a/L_n = 1`, float32) that stops when the heat flux saturates or at `t_max = 800`. It prints the
+settings that determine the answer and the saturated heat flux with its standard error, and writes NetCDF output, a
+summary figure, the geometry and the flux traces; the seed alone moves the flux by about 10%. Options and
+`TurbulenceSettings`: [guide](docs/howto/turbulence.md).
 
 ![vmex --turbulence summary: heat flux, growth-rate and flux spectra, phi(x,y), eigenfunction, zonal energy](docs/_static/figures/readme_turbulence.webp)
+
+## Shear-Alfvén eigenmodes
+
+`vmex --alfven` (needs `vmex[alfven]`) runs [FAX](https://github.com/uwplasma/FAX) on a solved equilibrium or a WOUT:
+the continuum of each mode family, its gaps (TAE, EAE, NAE, MAE, HAE, and BAE with pressure) and one gap eigenmode
+clear of the continuum ([options](docs/reference/cli.rst)), in about 30 s after the solve.
+
+![vmex --alfven: continuum of one mode family coloured by dominant m with the gaps over their radial range, the mode harmonics, and the mode in the poloidal plane](docs/_static/figures/readme_alfven.webp)
 
 ## How VMEX works
 
@@ -653,20 +676,18 @@ python examples/take_fixed_boundary_gradients.py
 | QA, QH, QP or QI boundary design | [examples/optimization](examples/optimization/), including bootstrap, ballooning, Mercier and maximum-`J` variants | core |
 | JAXopt and Optax drivers | `QI_optimization_jaxopt.py`, `QI_optimization_optax.py` | `vmex[optimizers]` |
 | Asymmetric boundary design | [stellarator_asymmetry](examples/optimization/stellarator_asymmetry/) vacuum and finite-beta scripts | core |
-| Single-stage plasma and coils | `single_stage_optimization.py`, `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
-| Fields and spatial derivatives | `python examples/vmex_get_B_gradB.py` | core |
-| Exterior field from coils and plasma | `python examples/vmex_get_B_outside_plasma.py` | `vmex[coils,freeb]` |
+| Single-stage plasma and coils | `single_stage_optimization_QA_QH_QI.py` (set `FAMILY`), `single_stage_free_boundary_optimization.py` | `vmex[coils]` |
+| Fields inside and outside the plasma | `vmex_get_B_gradB.py`, `vmex_get_B_outside_plasma.py` | core; outside needs `vmex[coils,freeb]` |
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
 | Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
 | Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
 | Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
-| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py` | core; the beta scan needs `vmex[coils]` |
+| Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py`, `mirror/mirror_exterior_field.py` | core; the beta scan needs `vmex[coils]`; the exterior field needs a `virtual-casing-jax` with `virtual_casing_jax.mirror` |
 | Research force-balance polishing | `python examples/force_balance_polishing.py` | core |
 
-The optimization scripts expose resolutions, objective weights and iteration budgets near the top.
-Inspect those settings before a research run; advanced coil examples need the optional dependencies
-and versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
+The optimization scripts set resolutions, weights and iteration budgets near the top; check them before a research run.
+Coil examples need the versions in the [ESSOS guide](https://vmex.readthedocs.io/en/latest/howto/use-essos-fields-and-coils.html).
 ## Documentation, development and citation
 
 Start with [your first equilibrium](https://vmex.readthedocs.io/en/latest/tutorials/first-equilibrium.html)
@@ -675,5 +696,5 @@ then the [API](https://vmex.readthedocs.io/en/latest/reference/api/basic.html),
 [VMEC compatibility](https://vmex.readthedocs.io/en/latest/reference/vmec2000-compatibility.html) and
 [troubleshooting](https://vmex.readthedocs.io/en/latest/howto/troubleshoot.html) pages. For development,
 `pip install -e ".[dev]"` and `python tools/preflight.py --static`. Report issues with the input deck
-and `vmex --doctor` output. See [contributing](CONTRIBUTING.md), [citation](CITATION.cff),
+and `vmex --doctor` output. See [citation](CITATION.cff),
 [license](LICENSE) and the [archived plan](https://github.com/uwplasma/vmex/blob/35a5158f47bfb9d17bd4092ff518facda54cb0af/plan.md).

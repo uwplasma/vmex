@@ -11,6 +11,7 @@ Both formats route through the same {class}`~vmex.core.input.VmecInput`:
 ```console
 vmex input.circular_tokamak      # classic &INDATA namelist
 vmex circular_tokamak.json       # structured JSON deck
+vmex circular_tokamak.toml       # the JSON keys written as TOML
 ```
 
 `examples/run_from_json.py` converts a deck to JSON, reads it back, and

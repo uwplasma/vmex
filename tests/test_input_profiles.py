@@ -84,6 +84,24 @@ def test_indata_round_trip(deck: Path, tmp_path: Path) -> None:
     assert reread == original
 
 
+def test_toml_reads_the_json_schema(tmp_path: Path) -> None:
+    """A ``.toml`` deck with the JSON keys gives the same input as the JSON file."""
+    (tmp_path / "input.solovev.toml").write_text(
+        "mpol = 6\nntor = 0\ndelt = 0.9\nncurr = 0\nnstep = 250\n"
+        "ns_array = [5, 11, 55]\nniter_array = [1000, 2000, 2000]\n"
+        "ftol_array = [1.0e-16, 1.0e-16, 1.0e-16]\n"
+        "am = [0.125, -0.125]\nai = [1.0]\nraxis_c = [4.0]\nzaxis_s = [0.0]\n"
+        "rbc = [{n = 0, m = 0, value = 3.999}, {n = 0, m = 1, value = 1.026},\n"
+        "       {n = 0, m = 2, value = -0.068}]\n"
+        "zbs = [{n = 0, m = 0, value = 0.0}, {n = 0, m = 1, value = 1.58},\n"
+        "       {n = 0, m = 2, value = 0.01}]\n")
+    from vmex.core.run_options import read_input_request
+
+    expected = VmecInput.from_file(FIXTURES / "solovev.json")
+    assert VmecInput.from_file(tmp_path / "input.solovev.toml") == expected
+    assert read_input_request(tmp_path / "input.solovev.toml").input == expected
+
+
 def test_structured_json_example() -> None:
     """The solovev.json example parses with structured-JSON schema semantics."""
     new = VmecInput.from_file(FIXTURES / "solovev.json")

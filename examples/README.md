@@ -5,7 +5,7 @@ a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
 stellarator-symmetric first-order QA example; it does not constrain the
 converged equilibrium to the near-axis expansion or differentiate the generator.
 
-All runnable examples live under this single `examples/` tree. The coil and
+All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16); the package itself supports Python 3.10. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
 
@@ -19,6 +19,15 @@ With its default settings every script finishes in under five minutes on a
 around long compilations and solves). Where a longer run gives a better answer, the script keeps
 that research budget as one commented set of constants next to the default.
 
+- `machine_learning/` introduces design as a learning problem on six boundary
+  coefficients of a vacuum QA seed (target: mean iota 0.45, aspect ratio 5);
+  outputs go to `results/machine_learning/`.
+  - `database_optimization.py` — sample a small equilibrium database, fit a
+    quadratic surrogate with a held-out split, and verify its proposals with
+    true solves.
+  - `differentiable_optimization.py` — `jax.value_and_grad` through the
+    equilibrium solve into L-BFGS-B, checked against finite differences. The
+    compactness target degrades quasi-axisymmetry; the script reports it.
 - Top-level scripts demonstrate common workflows (start with
   `fixed_boundary_run.py`):
   - `fixed_boundary_run.py` — read `&INDATA`, converge, write/plot the wout.
@@ -60,6 +69,10 @@ that research budget as one commented set of constants next to the default.
     `vj.PositionControl`: the uncontrolled axis drifts (and fails to converge
     for a field deficit) while the controlled one is held and reports the
     missing `B_Z`.
+  - `free_boundary_tokamak_pf_response.py` — a shaped finite-beta tokamak held by
+    eight circular ESSOS PF loops plus a toroidal field: implicit derivatives of volume, aspect
+    and rotational transform with respect to a loop current, height and radius, checked against
+    reconverged central differences.
   - `free_boundary_phiedge.py` — find the PHIEDGE whose free-boundary LCFS
     passes through a target outboard-midplane radius (`vj.solve_phiedge`), for
     comparing with codes pinned by an edge point instead of a flux.
@@ -111,12 +124,16 @@ that research budget as one commented set of constants next to the default.
   | QP | `QP_optimization_scalar.py` | `QP_optimization_finite_beta_scalar.py` |
   | QI | `QI_optimization_scalar.py` | `QI_optimization_finite_beta_scalar.py` |
 
+  `QI_optimization.py` starts from the circular NFP 2 torus with a rotating ellipse and spends
+  about 100 residual evaluations in four stages, so it runs longer than the five-minute budget
+  above (15 to 30 min on a 36-core workstation, depending on its load); `VMEX_EXAMPLES_CI=1` runs one 5-evaluation stage.
+
   `pwO_optimization.py` shapes the existing NFP4 near-circular seed in modes
   1 and 2, with 15 iterations per stage. It combines a mapped-field proxy with
   aspect/iota constraints and screens proposals with NEO. Run
-  `pwO_optimization_finite_beta.py` next for pressure continuation, or
+  `pwO_optimization_finite_beta.py` to optimize at 3% beta from the plain seed, or
   `single_stage_optimization_pwO.py` to optimize coils and boundary together;
-  both read the vacuum script's `input.` and `wout_` files.
+  the latter reads the vacuum script's `input.` and `wout_` files.
   A lower proxy does not establish confinement; particle checks remain separate.
   See [the settings](../docs/reference/optimization.rst#low-transport-optimization).
 
@@ -127,14 +144,28 @@ that research budget as one commented set of constants next to the default.
   target aspect ratio, brings beta to within 0.05 % (relative) of the target.
   The beta and aspect-ratio targets then agree, which a pressure calibrated at
   the seed's own aspect ratio does not. They include radially weighted Mercier
-  and resistive-interchange terms, and `QA_optimization_finite_beta.py` is the
-  least-squares counterpart of the QA one. Each of the eight scalar scripts is
+  and resistive-interchange terms. `QA_optimization_finite_beta.py` is the least-squares counterpart
+  (its `FAMILY` selects QA, QH or QP; QP is a symmetry demonstration that does not confine alphas):
+  `USE_WELL` and `USE_MERCIER` switch a magnetic-well floor and Mercier and
+  resistive-interchange hinges on the dimensionless PHIEDGE^2 DMerc and
+  PHIEDGE^2 D_R, and `STABILITY_SCALE` brings the stability rows in after the
+  quasisymmetric basin exists (from the first stage they overwhelm the
+  quasisymmetry rows). Each of the eight scalar scripts is
   self-contained: the scalarized loss, the L-BFGS-B call and the monitor wiring
   are in the file beside its physical targets, resolution and save names, so a
   reader never has to open a second file to follow one run.
   The scalar lane trades objective progress per evaluation (measured: QA
   final QS 2.7x above least squares with 40 mode-2 iterations; QI on an equal seed, weights and solve count ends 0.7x the least-squares value) for a cheaper cold start and
   lower peak memory; `QA_optimization.py` remains the default.
+  `QA_optimization.py`, `QH_optimization.py` and `QP_optimization.py` share one
+  ladder (`MAX_MODES = [1, 2, 3]`) and one-sided `opt.Hinge` rows for the
+  rotational-transform floor and, in QA and QH, the magnetic well, so a row
+  costs nothing once its floor holds. The seed is the circular deck plus a
+  rotating-ellipse amplitude. From amplitudes of about 0.5 to 1.4 times the
+  default, and with an added m = 2 mode, QA ends at QS 5e-5 to 9e-5 with
+  `epsilon_eff^(3/2)` below 3e-7, and QH (`NFP = 3`) at 5e-4 to 1.3e-3 with
+  `epsilon_eff^(3/2)` below 2e-5. QP is limited by its shape limits (see the
+  script docstring).
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
@@ -145,10 +176,24 @@ that research budget as one commented set of constants next to the default.
   All three vary a prescribed boundary and coil Fourier coefficients and none
   calls a free-boundary solve. Each is self-contained, so one file can be read
   and modified without opening another.
-  `QA_optimization_bootstrap.py`, `QH_optimization_bootstrap.py` and
-  `QI_optimization_bootstrap.py` also vary
+  `single_stage_optimization_QA_QH_QI.py` *(preview)* runs the full pipeline from a seed
+  deck for the family set in `FAMILY`: a plasma-only mode ladder, a coil fit to the
+  frozen boundary, then one joint solve in which the quasisymmetry (or constructed QI)
+  residual is the objective and the transform floor, aspect limit, B.n/|B| and
+  |B_coil|^2/|B|^2 limits sit in an augmented Lagrangian, so no weight is tuned per
+  seed. It ends with a finer fixed-boundary solve and a cold free-boundary solve in
+  the coil field, and reports every limit. It shares `vmex.core.single_stage`; set
+  `STAGE_ONE_INPUT` to start from an `input.*_optimized` file instead.
+  `QA_optimization_bootstrap.py` and `QH_optimization_bootstrap.py` also vary
   a stage-refined current spline against self-consistent Redl, DMerc, and DR
-  targets. `QA_optimization_low_bootstrap.py` keeps the QA current
+  targets. `QI_optimization_bootstrap.py` continues the vacuum design that `QI_optimization.py`
+  writes up a beta ladder (1, 2 and 5 %): each stage recalibrates the pressure,
+  re-solves the equilibrium and holds the vacuum design's aspect ratio, minimum
+  iota and mirror ratio. Four options act independently: `BOOTSTRAP` (`"none"`,
+  `"redl"`, or `"dkx"` for DKX's current in the last stages), `MAGNETIC_WELL_FLOOR`
+  (a lower limit; `None` drops it), `MERCIER` and `GAMMA_C_STAGES`.
+  `QI_optimization_finite_beta_scalar.py` has the well and Mercier options.
+  `QA_optimization_low_bootstrap.py` keeps the QA current
   self-consistent and also drives the Redl `<j.B>` toward zero (a flag swaps in
   DKX's drift-kinetic `<j.B>` row). `optimize_bootstrap_current.py` targets only
   an iota floor, a small self-consistent bootstrap current and the aspect
@@ -156,9 +201,12 @@ that research budget as one commented set of constants next to the default.
   and QH ratios and Boozer `|B|` before and after, to ask whether a
   low-current optimum drifts toward QI; at its default budget it leaves
   quasisymmetry (QA and QH ratios up fivefold) without becoming QI.
-  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.8.0"`) is the QI
+  `QI_optimization_bootstrap_dkx.py` (`pip install "dkx>=2.12.0"`) is the QI
   bootstrap example with DKX's kinetic mismatch row in place of Redl's after a
-  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side. `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
+  Redl Picard seed, and prints Redl and DKX `<j.B>` side by side.
+  `QI_optimization_bootstrap_er.py` (`pip install "dkx>=2.12.0"`) evaluates the
+  DKX row at each surface's ambipolar `E_r`, found inside the objective.
+  `single_stage_optimization_finite_beta.py` *(preview)* adds virtual
   casing and coil derivatives. The free-boundary single-stage previews leave
   the LCFS implicit and vary only the coil shapes, through the coupled NESTOR
   adjoint. Each single-stage script runs in 2.1-4.6 min end to end on a laptop,
@@ -211,7 +259,9 @@ that research budget as one commented set of constants next to the default.
 - `mirror/mirror_fixed_boundary_nonaxisymmetric.py` compares axisymmetric and
   rotating-ellipse fixed-boundary mirrors; `mirror/mirror_free_boundary_beta_scan.py`
   continues a solved ESSOS-coil free boundary through 80% central beta and
-  compares its on-axis field with `sqrt(1-beta)`.
+  compares its on-axis field with `sqrt(1-beta)`; `mirror/mirror_exterior_field.py`
+  evaluates the plasma field outside a fixed-boundary mirror from its boundary
+  and end-plane field (needs `virtual_casing_jax.mirror`) and traces field lines.
 - `data/`: bundled input decks and small checked-in fixtures.
 - `data/single_grid/`: fixed-boundary single-grid benchmark inputs and optional
   fetched reference assets.

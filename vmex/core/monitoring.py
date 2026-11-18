@@ -744,4 +744,48 @@ class OptimizationMonitor:
         )
 
 
-__all__ = ["EquilibriumReporter", "OptimizationMonitor", "OptimizationRecord"]
+class StallStop:
+    """SciPy callback that ends a stage whose cost has stopped falling.
+
+    After every accepted iteration the cost is compared with the cost
+    ``patience`` iterations earlier; if it fell by less than the fraction
+    ``threshold`` of that earlier cost, the callback raises ``StopIteration``,
+    which ``scipy.optimize.least_squares`` and ``minimize`` treat as a normal
+    termination. A stage that is still descending keeps its full ``max_nfev``.
+    Create one instance per stage; the cost history is not shared.
+
+    Parameters
+    ----------
+    callback:
+        Optional callback (for example an :class:`OptimizationMonitor`) called
+        first with every ``intermediate_result``.
+    patience:
+        Number of accepted iterations over which progress is measured.
+    threshold:
+        Smallest relative cost decrease over ``patience`` iterations that
+        counts as progress; 0.02 is two per cent.
+    min_iterations:
+        No stop before this many accepted iterations (never fewer than
+        ``patience + 1``).
+    """
+
+    def __init__(self, callback: Callable | None = None, *, patience: int = 3,
+                 threshold: float = 0.02, min_iterations: int = 0) -> None:
+        if patience < 1 or threshold < 0:
+            raise ValueError("patience must be at least 1 and threshold non-negative")
+        self.callback, self.patience, self.threshold = callback, int(patience), float(threshold)
+        self.min_iterations = max(int(min_iterations), self.patience + 1)
+        self.costs: list[float] = []
+
+    def __call__(self, intermediate_result: Any) -> None:
+        """Record the accepted cost and stop when it has stalled."""
+        if self.callback is not None:
+            self.callback(intermediate_result)
+        self.costs.append(float(intermediate_result.cost))
+        if len(self.costs) >= self.min_iterations:
+            earlier = self.costs[-1 - self.patience]
+            if earlier - self.costs[-1] < self.threshold * earlier:
+                raise StopIteration
+
+
+__all__ = ["EquilibriumReporter", "OptimizationMonitor", "OptimizationRecord", "StallStop"]
