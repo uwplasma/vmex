@@ -17,9 +17,11 @@ optimizer's grid resolution is visible as a gap between the two numbers.
 """
 
 import os
+import platform
 from dataclasses import replace
 from pathlib import Path
 
+import jax
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -39,10 +41,11 @@ SEED_MODES = {("rbc", -1, 1): -0.05, ("zbs", -1, 1): 0.05}
 INPUT_FILE = Path(__file__).resolve().parents[1] / "data" / f"input.minimal_seed_nfp{NFP}"
 
 # Radial grid every optimizer trial is solved on. Each trial is Newton-refined to a
-# force residual below 1e-10 before it is scored, so a tighter FTOL only adds solver
-# iterations (1e-12 took 2.8x as many for the same refined state):
+# force residual below 1e-10 before it is scored, so a looser FTOL trades serial solver
+# iterations for threaded refinement and Jacobian work: 18-21% faster on x86 CPUs and
+# the GPU, 15% more CPU time on Apple silicon, which keeps 1e-12.
 STAGE_NS = 31
-STAGE_FTOL = 1.0e-10
+STAGE_FTOL = 1.0e-12 if (platform.machine() == "arm64" and jax.default_backend() == "cpu") else 1.0e-10
 STAGE_NITER = 5500
 
 # Flux surfaces the QI residual is evaluated on:
