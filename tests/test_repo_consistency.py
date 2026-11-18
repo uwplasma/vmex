@@ -113,7 +113,7 @@ def test_declared_floors_match_every_copy() -> None:
     assert {"solvax", "booz_xform_jax", "essos", "virtual-casing-jax", "gkx", "dkx"} <= set(quoted)
     # Optional integrations can require a newer version than the core install.
     assert all(core.get(n, everything[n]) == f for n, f in quoted.items() if n not in {"jax", "jaxlib"})
-    for extra in ("all", "coils", "freeb", "neoclassical", "turbulence", "optimizers"):
+    for extra in ("all", "alfven", "coils", "freeb", "neoclassical", "turbulence", "optimizers"):
         assert f'pip install "vmex[{extra}]"' in readme, extra
     nightly = WORKFLOWS["nightly.yml"]
     lane = nightly[nightly.index("if: matrix.install == 'floors'"):]
