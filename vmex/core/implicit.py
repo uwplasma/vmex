@@ -1917,9 +1917,19 @@ def set_probe_workers(cfg: ImplicitConfig, workers: int | None) -> None:
     _PROBE_WORKERS[cfg] = None if workers is None else int(workers)
 
 
+def _traced() -> bool:
+    """A Python trace or monitoring tool (coverage, a debugger) is active: the probe threads deadlock under one."""
+    monitoring = getattr(sys, "monitoring", None)
+    tools = (monitoring.COVERAGE_ID, monitoring.DEBUGGER_ID, monitoring.PROFILER_ID) if monitoring else ()
+    return sys.gettrace() is not None or any(monitoring.get_tool(tool) for tool in tools)
+
+
 def probe_workers(cfg: ImplicitConfig) -> int:
-    """Threads the probes and Jacobian columns of ``cfg`` are split over (:func:`set_probe_workers`)."""
+    """Threads the probes and Jacobian columns of ``cfg`` are split over (:func:`set_probe_workers`); one while a
+    trace function is active."""
     workers = _PROBE_WORKERS.get(cfg)
+    if workers is None and _traced():
+        return 1
     if workers is None:
         cpu = getattr(cfg.device, "platform", jax.default_backend()) == "cpu"
         workers = min(available_cpus(), _MAX_PROBE_WORKERS) if cpu else 1
