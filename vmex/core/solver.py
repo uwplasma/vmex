@@ -2791,6 +2791,7 @@ def solve(
     polish: bool | str | None = None,
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
+    raise_on_max_iterations: bool = True,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
@@ -2813,7 +2814,9 @@ def solve(
     (after one ``guess_axis`` retry — the ``eqsolve.f`` ``ijacob == 0`` path)
     or at ``ijacob >= 75`` (``jac75_flag``), and :class:`VmecConvergenceError`
     when ``max_iterations`` is exhausted (``more_iter_flag``); both carry the
-    final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.
+    final iteration and ``(fsqr, fsqz, fsql)`` diagnostics.  With
+    ``raise_on_max_iterations=False`` an exhausted budget returns the last
+    state with ``converged=False`` instead, as :func:`solve_multigrid` does.
 
     ``initial_state`` hot-restarts the solve from a previous
     :class:`SpectralState` at the *same* resolution (e.g. ``result.state`` of
@@ -2931,7 +2934,10 @@ def solve(
             use_fft=use_fft_resolved,
             jacobian_retries=jacobian_retries,
         )
-        result = _finalize(carry, rt)
+        if int(carry.ier) == MORE_ITER_FLAG and not raise_on_max_iterations:
+            result = _result_from_carry(carry, rt)
+        else:
+            result = _finalize(carry, rt)
         return _polish_solve_result(
             source,
             rt.resolution,
