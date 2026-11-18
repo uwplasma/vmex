@@ -274,9 +274,9 @@ class StrongForceCertificationError(VmecNumericalError):
 class MgridNotFoundError(VmecError):
     """A free-boundary run referenced an mgrid file that cannot be read.
 
-    The solver catches this and falls back to a fixed-boundary solve with a
-    warning (behavior VMEC2000 has and VMEC++ dropped — §2.5); it is
-    re-raised only when the caller explicitly requires free-boundary.
+    The CLI and :func:`~vmex.core.multigrid.solve_multigrid` turn a missing
+    file into a :class:`VmecInputError`; a free-boundary deck never silently
+    runs as a fixed-boundary one.
 
     Raised by :func:`vmex.core.mgrid.read_mgrid` in two cases: the resolved
     path is not an existing file, or the file exists but netCDF4 cannot open

@@ -30,7 +30,8 @@ you intend to modify.
 
 Measured end to end at commit 2072cadaa on an Apple M3 Max laptop, with a cold
 JAX cache and a load average near 10: 129 s, of which 65 s is JAX compilation.
-It takes 12 L-BFGS-B iterations and 21 trials, and every target is met. The coil
+It takes 12 L-BFGS-B iterations and 15 trials (one rejected by the equilibrium
+solve), and every target is met. The coil
 pre-fit moves the coils up to 0.46 m from their circles. The joint optimization
 then raises the minimum |iota| from 0.404 to 0.429, and moves the boundary by up
 to 9 mm and the coils by up to 7 mm.
@@ -116,10 +117,12 @@ CONSTRAINT_WEIGHT = 1.0e3
 # the seed solve converges on; L-BFGS-B rather than BFGS because BFGS cannot
 # represent a bound.
 PARAMETER_BOUND = 3.0
+# Cost of a trial without a certified equilibrium, in units of the seed cost:
+REJECTED_TRIAL_COST = 10.0
 
 # Budgets. One trial is one equilibrium solve plus one adjoint. The script's
 # own end-of-run check passes at iterations 6, 8, 10, 12, 15 and 20 (measured),
-# and 12 iterations took 21 trials. Past that point the run only trades a little
+# and 12 iterations took 15 trials. Past that point the run only trades a little
 # quasisymmetry, so raise MAXITER to go further. The trial cap only stops a run
 # whose line searches go astray.
 MAXITER = 12
@@ -267,20 +270,37 @@ coil_value_and_grad = jax.jit(jax.value_and_grad(coil_objective, has_aux=True))
 # The monitor prints one row per evaluation and records the history for the
 # plot and the movie at the end.
 monitor = opt.OptimizationMonitor(plasma_problem)
-counts, cached = {"trials": 0}, {}
+counts, cached = {"trials": 0, "rejected": 0}, {}
 COIL_TERMS = ("coil length", "coil curvature", "coil separation", "coil-surface separation")
 
 
 def value_and_grad(u):
-    """What SciPy calls: the two halves evaluated once and added."""
+    """What SciPy calls: the two halves evaluated once and added.
+
+    A trial without a certified equilibrium comes back with zero residual rows,
+    and its built-in rejection cost is sized for the quasisymmetry terms alone,
+    far below the seed cost, so a line search would accept it. It gets
+    REJECTED_TRIAL_COST * seed cost * (1 + |u|)^2 instead, with its exact
+    gradient: above every accepted value, so it is never accepted.
+    """
     u = np.asarray(u, dtype=float)
     if cached.get("key") == u.tobytes():          # SciPy re-asks at the same point
         return cached["value"], cached["gradient"].copy()
     counts["trials"] += 1
     (plasma_value, (qs_rows, plasma_penalty)), plasma_gradient = \
         plasma_value_and_grad(jnp.asarray(u))
-    (coil_value, coil_costs), coil_gradient = coil_value_and_grad(jnp.asarray(u))
     qs_rows = np.asarray(qs_rows)
+    if not np.any(qs_rows) and "seed cost" in cached:
+        counts["rejected"] += 1
+        distance = float(np.linalg.norm(u))
+        value = REJECTED_TRIAL_COST * cached["seed cost"] * (1.0 + distance) ** 2
+        gradient = 2.0 * REJECTED_TRIAL_COST * cached["seed cost"] * (1.0 + distance) \
+            * u / max(distance, 1e-300)
+        print(f"  trial {counts['trials']}: no certified equilibrium, rejected", flush=True)
+        cached.update(key=u.tobytes(), value=value, gradient=gradient)
+        return value, gradient.copy()
+    (coil_value, coil_costs), coil_gradient = coil_value_and_grad(jnp.asarray(u))
+    cached.setdefault("seed cost", float(plasma_value + coil_value))
     terms = {"quasisymmetry": 0.5 * float(qs_rows @ qs_rows),
              "iota and aspect penalty": float(np.asarray(plasma_penalty)[0])}
     terms.update(zip(COIL_TERMS, map(float, np.asarray(coil_costs))))
@@ -330,8 +350,8 @@ result = minimize(value_and_grad, u, jac=True, method="L-BFGS-B", callback=monit
                   options={"maxiter": MAXITER, "maxfun": MAX_TRIALS, "maxcor": 20,
                            "maxls": 20, "ftol": 1e-12, "gtol": 1e-8})
 u, final_value = result.x, float(result.fun)
-print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials, "
-      f"status {result.status}: {result.message}", flush=True)
+print(f"[solve] {result.nit} L-BFGS-B iterations, {counts['trials']} trials "
+      f"({counts['rejected']} rejected), status {result.status}: {result.message}", flush=True)
 optimization_seconds = time.perf_counter() - started
 
 ###############################################################################

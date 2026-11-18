@@ -594,3 +594,10 @@ def test_wout_row_map_preserves_values_and_directional_derivatives(lasym):
         for name in original:
             np.testing.assert_array_equal(np.isnan(original[name]), np.isnan(mapped[name]))
             np.testing.assert_allclose(original[name], mapped[name], rtol=2e-10, atol=2e-11)
+
+
+def test_default_well_slots_cover_rippled_surfaces():
+    """32 slots per transit, never above the interval count; 16 overflowed on the QI seed deck's outer surfaces."""
+    assert gammac._default_max_wells(4, 64) == 128
+    assert gammac._default_max_wells(4, 16) == 64
+    assert gammac._default_max_wells(1, 16) == 16

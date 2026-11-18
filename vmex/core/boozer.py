@@ -103,7 +103,6 @@ def run_booz_xform(
     *,
     output_path: str | Path | None = None,
     outdir: str | Path | None = None,
-    jit: bool = False,
     verbose: bool = False,
 ) -> Path:
     """Run ``booz_xform_jax`` on a WOUT file and write ``boozmn_*.nc``.
@@ -121,8 +120,6 @@ def run_booz_xform(
     output_path, outdir:
         Explicit output file, or directory for the default
         ``boozmn_<case>.nc`` name (default: alongside the WOUT file).
-    jit:
-        Forwarded to ``Booz_xform.run`` (JIT-compiled transform kernels).
     verbose:
         Emit booz_xform progress output.
 
@@ -150,6 +147,6 @@ def run_booz_xform(
     bx = Booz_xform(verbose=1 if verbose else 0, mboz=int(mbooz), nboz=int(nbooz))
     bx.read_wout(str(wout), flux=False)
     bx.compute_surfs = _surface_indices(bx, tuple_surfaces)
-    bx.run(jit=bool(jit))
+    bx.run()
     bx.write_boozmn(str(out))
     return out

@@ -93,6 +93,7 @@ beta_at_unit_pressure = float(opt.solve_equilibrium(inp).wout.betatotal)
 if not np.isfinite(beta_at_unit_pressure) or beta_at_unit_pressure <= 0:
     raise ValueError("The unit-pressure seed must have finite positive beta")
 inp = replace(inp, pres_scale=TARGET_BETA / beta_at_unit_pressure)
+inp = replace(inp, tvolume=vj.boundary_volume(inp), lvolume_rfix=True)  # hold the seed plasma volume
 
 
 def relative_beta(state, runtime):

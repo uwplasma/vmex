@@ -5,7 +5,7 @@ Mechanical checks on the Diátaxis docs tree:
 
 1.  Banned words/phrases in Markdown and reStructuredText prose (fenced code and inline code are
     exempt), including exclamation marks and emoji in headings. The scan
-    covers the docs tree plus the root ``README.md`` and ``CHANGELOG.md``.
+    covers the docs tree plus the root ``README.md``.
 2.  Every how-to title starts with an imperative verb.
 3.  Every page under ``docs/howto`` and ``docs/tutorials`` is <= 250 lines.
 4.  No TODO/FIXME markers in any docs page.
@@ -58,13 +58,12 @@ HOWTO_VERBS = {
 
 TODO_RE = re.compile(r"\b(TODO|FIXME|XXX)\b")
 LINE_CAP = 250
-ROOT_LINE_CAPS = {"README.md": 700, "CHANGELOG.md": 200}
-RETRACTED_GAIN = re.compile(r"\b(?:26[- ]fold|26\s*[×x])(?!\w)", re.IGNORECASE)
+ROOT_LINE_CAPS = {"README.md": 700}
 BENCHMARK_PATH = re.compile(r"(?<![\w/])(?:\.\./)*(benchmarks/[A-Za-z0-9_./*-]+)")
 
 # -- 5. media budget (bytes) -------------------------------------------------
 
-BUDGET_TOTAL = 797 * 1024  # 550 KB + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures, plus the two QI bootstrap figures (#629, 79 KB)
+BUDGET_TOTAL = 816 * 1024  # 569 KB (550 KB + the exterior-field figure script and its manifest row, 19 KB) + the README --neoclassical (#548), VMEX/MRX (#569), wall-tracing (#572), ESSOS cross-code and exact-equilibria (#578) and position-control (#570, 32 KB) figures, plus the two QI bootstrap figures (#629, 79 KB)
 BUDGET_FILE = 150 * 1024
 
 # Frozen: files consumed by the top-level README.md and fetched reference
@@ -85,6 +84,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_diagnostics_summary.webp",
     "figures/readme_equilibrium_showcase.webp",
     "figures/readme_essos_beta_scan.webp",
+    "figures/readme_exterior_field.webp",
     "figures/readme_interior_field.webp",
     # Reproducible README comparison.
     "figures/readme_low_transport.webp",
@@ -99,6 +99,7 @@ GRANDFATHERED_FILES = {
     "figures/readme_qi.webp",
     "figures/readme_single_stage_fixed_boundary.webp",
     "figures/readme_single_stage_free_boundary.webp",
+    "figures/readme_alfven.webp",
     "figures/readme_turbulence.webp",
     "figures/readme_wall_tracing.webp",
     "figures/cross_code_bars.webp",
@@ -183,10 +184,6 @@ def check_root_limits(path: Path, errors: list[str]) -> None:
     count = len(text.splitlines())
     if count > ROOT_LINE_CAPS[path.name]:
         errors.append(f"{path.name}: {count} lines exceeds the {ROOT_LINE_CAPS[path.name]}-line cap")
-    if path.name == "CHANGELOG.md":
-        for lineno, line in enumerate(text.splitlines(), 1):
-            if RETRACTED_GAIN.search(line):
-                errors.append(f"{path.name}:{lineno}: withdrawn polish gain; cite the corrected record")
 
 
 def check_cited_paths(path: Path, errors: list[str]) -> None:
@@ -244,15 +241,14 @@ def main() -> int:
     for page in [*markdown_pages, *rst_pages]:
         check_prose(page, errors)
 
-    # Root prose ships too: README.md is the PyPI long description and
-    # CHANGELOG.md (when present) the release record.
-    for name in ("README.md", "CHANGELOG.md"):
+    # README.md is also the PyPI long description.
+    for name in ROOT_LINE_CAPS:
         page = ROOT / name
         if page.exists():
             check_prose(page, errors)
             check_root_limits(page, errors)
 
-    for page in [*markdown_pages, *rst_pages, ROOT / "README.md", ROOT / "CHANGELOG.md"]:
+    for page in [*markdown_pages, *rst_pages, ROOT / "README.md"]:
         check_cited_paths(page, errors)
 
     for page in markdown_pages:

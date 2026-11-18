@@ -850,6 +850,19 @@ def test_least_squares_current_dofs_implicit():
                                    err_msg=f"implicit Jacobian column {col}")
 
 
+def test_decision_vector_layout_with_current_block():
+    """One layout object packs, unpacks, names and scales boundary + current dofs."""
+    inp = opt.resample_current_profile(_tokamak_ncurr1(), 4)
+    dofs = opt._Dofs(inp, 1, True, 2)
+    x = dofs.pack()
+    assert x.size == dofs.ndof == dofs.nboundary + 3
+    assert dofs.names()[-3:] == ["AC_AUX_F(0)/1", "AC_AUX_F(1)/1", "CURTOR/1e6"]
+    scales = dofs.ess_scales(1.2)
+    assert scales.size == dofs.ndof and np.all(scales[-3:] == 1.0)
+    np.testing.assert_array_equal(dofs.pack(dofs.unpack(x + 1e-3)), x + 1e-3)
+    assert len(dofs.boundary_arrays(x)) == 2
+
+
 # ---------------------------------------------------------------------------
 # nyquist.filter_bsubuv_lasym, directly
 # ---------------------------------------------------------------------------
