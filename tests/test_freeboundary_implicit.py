@@ -1016,7 +1016,10 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         if j:
             blocks[j, j - 1], blocks[j - 1, j] = lower[j], upper[j - 1]
     dense = np.moveaxis(blocks, 2, 1).reshape(row_scale.size, -1)
-    rhs = np.random.default_rng(0).standard_normal((2,) + row_scale.shape)
+    # The axisymmetric edge leaves ``dense`` one near-null direction, so the
+    # right-hand side is drawn from its range: ``solved`` is then recoverable.
+    rhs = (np.random.default_rng(0).standard_normal((2, row_scale.size))
+           @ dense).reshape((2,) + row_scale.shape)
     solved = fbi._banded_bulk_transpose_solver(
         lower, diagonal, upper, row_scale, column_scale)(rhs).reshape(2, -1)
     np.testing.assert_allclose(solved @ dense, rhs.reshape(2, -1),
