@@ -739,3 +739,65 @@ def _lgradb_state_tables(state: SpectralState, rt: SolverRuntime) -> dict:
         rmnc=rmnc, zmns=zmns, bsupumnc=bsupumnc, bsupvmnc=bsupvmnc,
         ns=ns, nfp=nfp,
     )
+
+
+def wout_tables_from_state(state: SpectralState, rt: SolverRuntime) -> dict:
+    """Traceable wout-convention field tables from ``(state, rt)``, all in jnp.
+
+    The differentiable counterpart of :func:`vmex.core.wout.wout_from_state`
+    for the arrays a kinetic code (e.g. ESSOS ``Vmec.from_arrays``) reads, so
+    gradients flow from the tables to the boundary through
+    :func:`~vmex.core.implicit.solve_implicit`.
+
+    Parameters
+    ----------
+    state : SpectralState
+        Equilibrium state (symmetric, ``lasym = False``).
+    rt : SolverRuntime
+        Runtime the state was solved with.
+
+    Returns
+    -------
+    dict
+        ``rmnc``, ``zmns`` on the ``(m, n)`` set and ``bmnc``, ``gmnc``,
+        ``bsupumnc``, ``bsupvmnc``, ``bsubumnc``, ``bsubvmnc``, ``bsubsmns`` on
+        the Nyquist set, each ``(ns, mn)`` jnp arrays in wout units; ``xm``,
+        ``xn``, ``xm_nyq``, ``xn_nyq`` (NumPy, ``xn`` including ``nfp``); and
+        ``nfp``, ``ns``.  ``bsubumnc``/``bsubvmnc`` are not band-limited as in
+        ``jxbforce`` (agreement with the wout is ~1e-3 for ``bsubumnc`` and
+        ``bsubsmns``); ``bsubs`` follows ``bss.f`` with the ``wrout`` full-mesh
+        average.
+    """
+    out = _lgradb_state_tables(state, rt)
+    geometry, jac, _, fields, _ = _field_chain(state, rt)
+    _, consts = _nyquist_analysis_constants(rt.resolution)
+    s, ns = jnp.asarray(rt.setup.s_full), int(np.shape(state.R_cos)[0])
+    def cos(f):
+        return _wrout_cos_coeffs_state(jnp.asarray(f).at[0].set(0.0), consts)
+
+    # |B| from the total pressure; the axis row is masked so its derivative stays finite.
+    b2 = 2.0 * jnp.abs(fields.total_pressure - jnp.asarray(fields.pressure)[:, None, None])
+    bmag = jnp.sqrt(jnp.where((jnp.arange(ns) == 0)[:, None, None], 1.0, b2))
+    # B_s = B^u g_su + B^v g_sv on the half mesh (bss.f), then the wrout full-mesh average.
+    sh = jnp.sqrt(jnp.concatenate([0.5 * (s[1:2] + s[:1]), 0.5 * (s[1:] + s[:-1])]))[:, None, None]
+    def half(e, o):
+        return jnp.zeros_like(jac.dR_ds).at[1:].set(0.5 * (e[1:] + e[:-1] + sh[1:] * (o[1:] + o[:-1])))
+
+    rv = half(geometry.dR_dzeta_even, geometry.dR_dzeta_odd)
+    zv = half(geometry.dZ_dzeta_even, geometry.dZ_dzeta_odd)
+    rs = jnp.asarray(jac.dR_ds).at[1:].add(0.25 * (geometry.R_odd[1:] + geometry.R_odd[:-1]) / sh[1:])
+    zs = jnp.asarray(jac.dZ_ds).at[1:].add(0.25 * (geometry.Z_odd[1:] + geometry.Z_odd[:-1]) / sh[1:])
+    rv, zv, rs, zs = (a.at[0].set(a[1]) for a in (rv, zv, rs, zs))
+    bs = (fields.bsupu * (rs * jac.ru12 + zs * jac.zu12) + fields.bsupv * (rs * rv + zs * zv)).at[0].set(0.0)
+    full = bs.at[1:-1].set(0.5 * (bs[1:-1] + bs[2:]))
+    full = full.at[0].set(2.0 * full[1] - full[2]).at[-1].set(2.0 * bs[-1] - bs[-2])
+    cosmui, sinmui, cosnv, sinnv, m_idx, n_idx, sgn, dmult, nt2 = consts
+    f = full[:, :nt2]
+    ft_sin, ft_cos = jnp.einsum("sik,im->smk", f, sinmui), jnp.einsum("sik,im->smk", f, cosmui)
+    bsubsmns = (jnp.einsum("smk,kn->smn", ft_sin, cosnv)[:, m_idx, n_idx]
+                - sgn * jnp.einsum("smk,kn->smn", ft_cos, sinnv)[:, m_idx, n_idx]) * dmult
+    out.update(bmnc=cos(bmag), gmnc=cos(jac.sqrt_g), bsubumnc=cos(fields.bsubu),
+               bsubvmnc=cos(fields.bsubv), bsubsmns=bsubsmns)
+    for k in ("xm", "xn", "xm_nyq", "xn_nyq"):
+        out[k] = np.asarray(out[k])
+    return out

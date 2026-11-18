@@ -255,6 +255,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "write_wout": (".core.wout", "write_wout"),
     "wout_from_state": (".core.wout", "wout_from_state"),
     "wout_from_result": (".core.wout", "wout_from_result"),
+    "wout_tables_from_state": (".core.statephysics", "wout_tables_from_state"),
     "gk_fieldline_geometry_from_wout": (
         ".core.turbulence", "gk_fieldline_geometry_from_wout"),
     # hot restart
