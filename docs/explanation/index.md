@@ -38,6 +38,7 @@ adjoint-gradients
 :maxdepth: 1
 
 confinement
+finite-n-stability
 ```
 
 ## Mirrors and the code base

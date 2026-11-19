@@ -78,15 +78,15 @@ def test_pest_root_and_jacobian_sign(mapped):
     sqrtg = np.asarray(eq.sqrtg)
     assert np.all(sqrtg * sqrtg[0] > 0.0)
     assert np.all(np.asarray(eq.g_sup_rr) > 0.0)
-    assert float(eq.a) > 0.0 and np.isfinite(float(eq.Psi))
+    assert float(eq.a) > 0.0 and np.all(np.isfinite(eq.psi_rr))
 
 
 def test_flux_and_field_representations(deck, mapped):
     inp, _, runtime, _, _ = deck
     eq, extras = mapped
     rho = extras["points"][:, 0]
-    Psi = float(eq.Psi)
-    assert Psi == pytest.approx(float(inp.phiedge), rel=1e-14)
+    Psi = float(inp.phiedge)
+    np.testing.assert_allclose(eq.psi_rr, Psi / np.pi, rtol=1e-14)
     psi_r = np.asarray(eq.psi_r)
     np.testing.assert_allclose(psi_r, rho * Psi / np.pi, rtol=1e-14)
     sqrtg = np.asarray(eq.sqrtg)
