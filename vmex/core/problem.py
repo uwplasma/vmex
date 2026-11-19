@@ -434,7 +434,10 @@ class FunctionProblem:
             if self._residual_and_jac is not None:
                 residual, jacobian = self._residual_and_jac(xh)
             elif self._residual is not None and self._residual_jac is not None:
-                residual, jacobian = self._residual(xh), self._residual_jac(xh)
+                # Jacobian first: a residual that defers work the Jacobian does
+                # (the VMEC fixed-point anchor) then reads the same point.
+                jacobian = self._residual_jac(xh)
+                residual = self._residual(xh)
             else:
                 raise AttributeError("this problem does not provide a residual Jacobian")
             pair = (np.asarray(residual, dtype=float).ravel(),
