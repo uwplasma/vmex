@@ -78,6 +78,11 @@ their shared commit/hash helpers. Figure generators live in
   controls and numerical values for local use with non-confidential decks only:
   `python tools/diagnose_input.py path/to/input.case`.
 
+- `rewrite_history.py`: one-off maintainer tool for slimming the git history
+  of a bare clone (drops old media/data blob versions, keeps code history and
+  the current tree). It never pushes; the procedure is in the pull request
+  that added it. Delete it once the rewrite has shipped.
+
 Tools may write to ignored `outputs/` or a user-selected scratch directory.
 They should not write tracked artifacts unless the command is explicitly a
 documentation or release-artifact promotion step.
