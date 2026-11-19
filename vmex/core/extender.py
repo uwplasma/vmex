@@ -1343,19 +1343,36 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
     ``nfp = 1``) lands on the 32 floor, so its grid is unchanged and only
     high-aspect boundaries -- where a fixed 32 missed the requested accuracy by
     four orders -- are refined.
+
+    The grid also has to sample the surface field data without aliasing: the
+    Cartesian field is a Nyquist series of the contravariant field times the
+    geometry tangents, band-limited to ``band = mnyq + mpol - 1`` poloidally and
+    ``nnyq + ntor`` per period, so at least ``2 band + 1`` samples are taken
+    (rounded up to a multiple of 4).  The measured spectra reach these bands:
+    on the finite-beta QA deck (band 16) 32 samples leave a 3e-7 relative field
+    error that no quadrature removes and 36 are converged to 1e-13; on DIII-D
+    (band 35) the field at m = 16 is still 2e-3 of its peak.
     """
+    band = 0
     try:
         nfp = max(int(boundary.nfp), 1)
         if hasattr(boundary, "rmnc"):
             # A wout: the last full-mesh surface, with its own mode table.
             coefficients = np.asarray(boundary.rmnc)[-1]
             poloidal = np.asarray(boundary.xm)
+            if hasattr(boundary, "xm_nyq"):
+                band = int(max(poloidal.max() + np.max(boundary.xm_nyq),
+                               (np.abs(boundary.xn).max() + np.abs(boundary.xn_nyq).max()) / nfp))
         else:
             # A VmecInput: rbc is indexed [n + ntor, m], and the outboard point
             # R(theta = 0, phi = 0) sums every n, so reduce the toroidal axis
             # first and keep one coefficient per poloidal mode.
             coefficients = np.asarray(boundary.rbc).sum(axis=0)
             poloidal = np.arange(coefficients.size, dtype=float)
+            from .solver import resolution_from_input
+
+            res = resolution_from_input(boundary)
+            band = max(res.ntheta1 // 2 + res.mpol - 1, res.nzeta // 2 + res.ntor)
         outboard = float(coefficients.sum())
         inboard = float((coefficients * np.cos(poloidal * np.pi)).sum())
         minor = 0.5 * (outboard - inboard)
@@ -1375,7 +1392,7 @@ def _source_nphi_for_digits(boundary: Any, digits: int) -> int:
     # keep it inside a range whose cost is measured (0.6 s to 0.8 s per call on
     # the shipped QA wout, both dominated by fixed overhead).
     power = max(_DEFAULT_SOURCE_NPHI, 1 << max(0, math.ceil(math.log2(max(needed, 1.0)))))
-    return int(min(power, _MAX_SOURCE_NPHI))
+    return int(min(max(power, 4 * math.ceil((2 * band + 1) / 4)), _MAX_SOURCE_NPHI))
 
 
 class VmecExtender(MagneticField):
