@@ -27,6 +27,7 @@ from vmex.core.freeboundary_implicit import (
     solve_free_boundary_implicit_status,
 )
 from vmex.core import freeboundary_implicit as fbi
+from vmex.core.freeboundary import solve_free_boundary
 from vmex.core.errors import (
     AdjointSolveError, VmecConvergenceError, VmecJacobianError)
 
@@ -62,6 +63,50 @@ def test_free_boundary_status_callback_turns_trial_error_into_status(monkeypatch
                             RuntimeError("implementation bug")))
     with pytest.raises(RuntimeError, match="implementation bug"):
         fbi._host_solve_and_mask_status(cfg, im.params_from_input(inp), field.extcur)
+
+
+def test_axisymmetric_table_runs_on_one_toroidal_plane():
+    """``NTOR = 0`` over a one-plane table solves on one plane, whatever NZETA.
+
+    Every plane of the table holds the same field, and NESTOR resolves the
+    toroidal images of the surface only on the single plane: at ``nzeta`` 2 to
+    4 its kernel is unresolved, and the cold solve either warned of a wrong
+    toroidal current or wandered with the rounding of the machine.
+    """
+    from vmex.core.freeboundary import free_boundary_resolution
+
+    base = lasym_free_input(DATA).change_resolution(
+        mpol=4, ntor=0, ntheta=12, nzeta=4)
+    assert int(base.nzeta) == 4
+    field = lasym_free_field()
+    assert field.br.shape[1] == 1
+    assert free_boundary_resolution(base, field, ns=8).nzeta == 1
+    assert make_free_boundary_config(base, field, ns=8).resolution.nzeta == 1
+
+    class _Analytic:
+        def b_cyl(self, r, phi, z):  # pragma: no cover - never called
+            return r, phi, z
+
+    assert free_boundary_resolution(base, _Analytic(), ns=8).nzeta == 4
+
+
+@pytest.mark.full
+def test_axisymmetric_cold_solve_converges_at_any_nzeta():
+    """The cold LASYM solve of the adjoint fixtures converges in a few hundred
+    iterations at ``NZETA = 4``, as it does at 1, 6 and 8.
+
+    Before the single-plane rule the iteration count depended on the rounding
+    of the host CPU: 101 iterations after a 2343-iteration ladder on one
+    machine, the whole budget without convergence on another.
+    """
+    base = lasym_free_input(DATA).change_resolution(
+        mpol=10, ntor=0, ntheta=30, nzeta=4)
+    inp = dataclasses.replace(
+        base, ns_array=np.array([8]),
+        ftol_array=np.array([1.0e-8]), niter_array=np.array([2500]))
+    field = lasym_free_field()
+    result = solve_free_boundary(inp, external_field=field, device="cpu")
+    assert result.converged and result.iterations < 600
 
 
 def test_free_boundary_config_rejects_fixed_boundary_input():
@@ -971,7 +1016,10 @@ def test_anchor_linear_solve_is_a_newton_correction_of_the_coupled_residual():
         if j:
             blocks[j, j - 1], blocks[j - 1, j] = lower[j], upper[j - 1]
     dense = np.moveaxis(blocks, 2, 1).reshape(row_scale.size, -1)
-    rhs = np.random.default_rng(0).standard_normal((2,) + row_scale.shape)
+    # The axisymmetric edge leaves ``dense`` one near-null direction, so the
+    # right-hand side is drawn from its range: ``solved`` is then recoverable.
+    rhs = (np.random.default_rng(0).standard_normal((2, row_scale.size))
+           @ dense).reshape((2,) + row_scale.shape)
     solved = fbi._banded_bulk_transpose_solver(
         lower, diagonal, upper, row_scale, column_scale)(rhs).reshape(2, -1)
     np.testing.assert_allclose(solved @ dense, rhs.reshape(2, -1),
