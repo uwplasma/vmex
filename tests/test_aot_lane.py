@@ -158,3 +158,16 @@ def test_target_device_follows_jit_placement():
     assert aot._device([jax.device_put(jnp.ones(2), cpu)]) == cpu
     with jax.default_device(cpu):
         assert aot._device([np.ones(2)]) == cpu
+
+
+def test_results_of_a_loaded_executable_are_differentiable(tmp_path, monkeypatch):
+    """A blob unpickled ``Layout.AUTO`` as a second object, which JAX's cotangent check rejects."""
+    monkeypatch.setattr(aot, "_directory", lambda: tmp_path / "aot")
+
+    def fn(x):
+        return jnp.cos(x)
+
+    x = jnp.arange(6.0).reshape(2, 3)
+    aot.AotLane(fn)(x)  # builds and stores the blob
+    loaded = aot.AotLane(fn)(x)  # a fresh lane loads it from disk
+    np.testing.assert_array_equal(jax.grad(lambda z: jnp.sum(jnp.sin(z)))(loaded), jnp.cos(loaded))

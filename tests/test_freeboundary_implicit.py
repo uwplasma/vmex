@@ -1684,8 +1684,12 @@ def test_presf_ns_scale_is_differentiated_in_the_adjoint_lanes():
     assert np.max(np.abs(finite)) > 1e-6, f"probe is degenerate: {finite}"
     np.testing.assert_allclose(analytic, finite, rtol=1e-3, atol=0.0)
 
-    # pres_scale cancels in the ratio, so its derivative is genuinely zero.
-    assert float(np.asarray(grad.pres_scale)) == 0.0
+    # pres_scale cancels in the ratio, so its derivative is zero.  The quotient
+    # rule evaluates it as the difference of two rounded terms that both equal
+    # ratio / pres_scale, so the computed value is zero to a few ulp of that.
+    ratio = float(_presf_ns_scale_traceable(params, inp, ns))
+    bound = 4.0 * np.finfo(float).eps * abs(ratio) / abs(float(params.pres_scale))
+    assert abs(float(np.asarray(grad.pres_scale))) <= bound
 
 
 def _flat(tree):

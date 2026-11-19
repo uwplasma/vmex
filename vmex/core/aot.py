@@ -18,6 +18,7 @@ directory is kept to ``MAX_FILES`` executables, oldest first.
 
 from __future__ import annotations
 
+import copyreg
 import hashlib
 import os
 import pickle
@@ -30,9 +31,27 @@ from typing import Any, Callable
 import jax
 import jaxlib
 import numpy as np
+from jax.experimental import layout as _layout
 from jax.experimental import serialize_executable as _se
 
-_LANES: list = []               #: every AotLane, for :func:`release`
+_AUTO_LAYOUT = getattr(_layout.Layout, "AUTO", None)
+
+
+def _auto_layout() -> Any:
+    """The ``Layout.AUTO`` singleton, unpickled by reference.
+
+    A blob pickles the executable's argument and result avals.  Plain
+    unpickling makes a second ``AUTO`` object, JAX compares layouts by
+    identity, and a gradient through arrays a loaded executable returned then
+    fails with "Expected cotangent type float64[...] but got float64[...]".
+    """
+    return _AUTO_LAYOUT
+
+
+if _AUTO_LAYOUT is not None:
+    copyreg.pickle(type(_AUTO_LAYOUT), lambda _: (_auto_layout, ()))
+
+_LANES: list = []             #: every AotLane, for :func:`release`
 MAX_FILES = 64                  #: executables kept per cache directory
 _SOURCE_HASH: str | None = None
 _BUILD_LOCK = threading.Lock()
