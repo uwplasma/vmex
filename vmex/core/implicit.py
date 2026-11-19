@@ -3083,10 +3083,9 @@ def _raw_block_system(
             for name in _STATE_FIELDS
         })
 
-    def operator(tangent):
-        return jax.jvp(
-            lambda z: residual(z, params), (z_star,), (tangent,)
-        )[1]
+    # Linearized once: every probe, matvec and residual check of this system then
+    # applies the stored linear map instead of retracing and recomputing F.
+    operator = jax.linearize(lambda z: residual(z, params), z_star)[1]
 
     # Linearized where it is applied: only the transposed solves use it, and building
     # it for every system traced a full extra residual linearization (seconds).
