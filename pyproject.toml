@@ -47,7 +47,7 @@ dependencies = [
   "matplotlib",
   "packaging",
   # tomllib is in the standard library from Python 3.11.
-  "tomli; python_version < '3.11'",
+  "tomli>=1.1; python_version < '3.11'",
   # JAX's persistent compilation cache uses file locks across processes.
   "filelock",
   # Boozer spectra and differentiable geometry, including asymmetric fields.
@@ -77,7 +77,7 @@ optimizers = [
 # 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
 neoclassical = [
   "neo-jax>=1.1.1",
-  "dkx>=2.14.0",
+  "dkx>=2.14.0; python_version >= '3.11'",
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.
 freeb = [
@@ -94,10 +94,10 @@ freeb = [
 # eigen-objectives in forward mode (the implicit least-squares Jacobian);
 # 2.5.0 is the release `vmex --turbulence` is built and timed against.
 turbulence = [
-  "gkx>=2.6.0",
+  "gkx>=2.6.0; python_version >= '3.11'",
   # gkx's own jax floor.
-  "jax>=0.10.1",
-  "jaxlib>=0.10.1",
+  "jax>=0.10.1; python_version >= '3.11'",
+  "jaxlib>=0.10.1; python_version >= '3.11'",
 ]
 # Shear-Alfven continuum and global modes (``vmex --alfven``) via FAX (PyPI name
 # ``alfvex``). 1.2.0 has the local-gap ``fax.summary`` and ``fax.plot_summary``.
@@ -113,7 +113,7 @@ alfven = [
 # 0.21.0: Boozer |B| from an angle table and stopped particles dropped across
 # devices, which `vmex --trace` relies on for its speed (ESSOS #165).
 coils = [
-  "essos>=0.22.0",
+  "essos>=0.22.0; python_version >= '3.11'",
 ]
 # Everything the examples and the documented workflows need, so a reader does
 # not have to assemble the list themselves.

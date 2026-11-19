@@ -13,6 +13,10 @@ asymmetric boundary norm printed at the end is what shows the optimizer stayed
 off the symmetric subspace.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

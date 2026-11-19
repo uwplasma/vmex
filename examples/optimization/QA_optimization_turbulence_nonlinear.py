@@ -32,6 +32,10 @@ of that finite-window step. Independent cold-start ensembles and resolution
 checks are required to establish a transport reduction.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "gkx does not install on Python 3.10")
+
 import os
 import time
 from dataclasses import replace

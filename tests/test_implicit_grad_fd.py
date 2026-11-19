@@ -162,6 +162,7 @@ def test_li383_resolve_fd_matches_the_implicit_derivative():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(jax.__version_info__ < (0, 7), reason="JAX 0.6 chains the callback error")
 def test_typed_error_through_pure_callback():
     """A failing host solve raises the SHORT typed exception, not callback
     noise: the ``_HOST_ERROR`` relay stashes the typed exception in the host

@@ -17,6 +17,10 @@ falls by a third while both QS ratios rise about fivefold, but it stays near
 by targeting it: the optimum leaves quasisymmetry without becoming QI.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

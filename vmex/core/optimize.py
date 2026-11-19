@@ -77,6 +77,7 @@ from solvax import (
     chunk_map,
 )
 
+from .._compat import host_eval_context
 from .device import AUTO
 from .errors import AdjointSolveError, VmecConvergenceError
 from .input import VmecInput
@@ -2986,6 +2987,11 @@ def _least_squares_implicit(
         raise ValueError(
             "jac_solver must be 'auto', 'block', 'gmres', or 'reverse', "
             f"got {jac_solver!r}")
+    if jax.__version_info__ < (0, 7):
+        # JAX 0.6, the last release for Python 3.10, differentiates the
+        # Mercier, Glasser and J.B terms wrongly in forward mode; reverse mode
+        # agrees with finite differences.
+        jac_solver = "reverse"
     if jac_solver in ("auto", "block"):
         jac_impl = jacobian_rows_block
     else:
@@ -3565,7 +3571,8 @@ def _least_squares_implicit(
         """Concrete calls reuse the host lane's executables; traces inline."""
         if isinstance(x, jax.core.Tracer):
             return residual_value_grad_jit(x, problem_data)
-        value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
+        with host_eval_context():
+            value, gradient = value_and_grad(np.asarray(jax.device_get(x), dtype=float))
         return _place(np.asarray(value)), _place(gradient)
 
     def jax_state_runtime(x: jnp.ndarray):

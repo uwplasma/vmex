@@ -21,6 +21,9 @@ confirms the two representations describe one equilibrium:
 :language: python
 ```
 
+`examples/run_from_toml.py` solves the same circular tokamak from
+`examples/data/circular_tokamak.toml`; Python 3.10 reads TOML through `tomli`.
+
 A DESC input or output (`vmex equilibrium.h5`, text inputs, HDF5 or pickle
 outputs) is converted to `input.equilibrium` and solved the same way; DESC
 itself need not be installed, and `--desc-tol` sets the boundary-mode

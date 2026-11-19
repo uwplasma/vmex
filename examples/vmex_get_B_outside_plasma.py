@@ -3,6 +3,10 @@
 
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 from pathlib import Path
 
 import jax

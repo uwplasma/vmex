@@ -78,6 +78,7 @@ def test_example_names_exist_in_vmex(path):
     assert missing == []
 
 
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="needs Python 3.11 or newer (SciPy 1.16 least_squares callbacks)")
 def test_pwo_example_optimization_stage_runs_and_lowers_its_cost(tmp_path):
     """The shipped pwO script, up to its verification solve, at the CI budget."""
     script = ROOT / "examples" / "optimization" / "pwO_optimization.py"

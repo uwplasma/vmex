@@ -8,6 +8,10 @@ a = R0 / ASPECT_TARGET.  The seed is scaled to the target aspect ratio and
 one solve corrects the estimate, so the beta and aspect-ratio targets agree.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

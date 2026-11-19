@@ -14,6 +14,10 @@ Loosening the limits lowers the residual at the price of an extremely shaped
 boundary.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path
