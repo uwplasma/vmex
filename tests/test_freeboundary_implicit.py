@@ -1133,6 +1133,7 @@ def _toy_anchor(monkeypatch, *, jacobian_sign=1.0, refine_tol=1.0e-10):
     monkeypatch.setattr(fbi, "_anchor_factor", lambda *_a, **_k: "factors")
     monkeypatch.setattr(fbi, "_anchor_coupling", lambda *_a, **_k: "coupling")
     monkeypatch.setattr(fbi, "_edge_response", response)
+    monkeypatch.setattr(fbi, "_FREE_LAST_BULK", {})
 
     def run(patient=True):
         return fbi._anchor_root(cfg, im.params_from_input(inp), field.extcur,
@@ -1156,6 +1157,11 @@ def test_newton_anchor_lands_on_the_root_and_reports_what_it_did(
         rtol=0.0, atol=1.0e-12)
     assert report.displacement > 0.0
     assert "[vmex anchor] step 1" in capsys.readouterr().out
+
+    # The next anchor of this config starts from that preconditioner.
+    calls.update(response=0, factor=0)
+    _, report = run()
+    assert report.certified and report.factorizations == 0 and calls["factor"] == 0
 
     # A stale factorization is rebuilt before the next step.
     monkeypatch.setattr(fbi, "_ANCHOR_REFACTOR_KRYLOV", 0)
