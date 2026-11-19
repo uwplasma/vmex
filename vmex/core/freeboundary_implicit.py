@@ -173,6 +173,10 @@ def make_free_boundary_config(
     if (device == AUTO and solve_device is not None and jax.default_backend() == "gpu"
             and recommended_device(resolution) == "gpu"):
         auto_gpu = jax.devices("gpu")[0]
+    if solve_device is None and jax.default_backend() != "cpu":
+        # The host solve runs inside a callback, under JAX's CPU default device,
+        # while its cached runtime lives on the default device: name that device.
+        solve_device = next(iter(jnp.zeros(()).devices()))
     cfg = im.make_config(
         inp, ns=resolution.ns, ftol=ftol, max_iterations=max_iterations,
         adjoint_tol=adjoint_tol, adjoint_maxiter=adjoint_maxiter,
