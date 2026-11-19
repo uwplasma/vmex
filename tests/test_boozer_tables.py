@@ -156,6 +156,7 @@ def test_rz_tables_interpolate_full_mesh_parity(solved, axis):
 
     On the first half-mesh row (``axis``) the axis term is divided by 1, as in
     booz_xform: dividing round-off by sqrt(0) gave R/Z tables of order 1e13.
+    There m = 1 is extrapolated from full rows 1 and 2, also as in booz_xform.
     """
     wout, tables, j, axis_tables = solved
     if axis:
@@ -174,6 +175,9 @@ def test_rz_tables_interpolate_full_mesh_parity(solved, axis):
         sq = 0.5 * (ref_jm1 / (sqrt_s[j - 1] or 1.0) + ref_j / sqrt_s[j])
         s_half = np.sqrt(0.5 * (s_full[j] + s_full[j - 1]))
         ref = np.where(xm % 2 == 1, sq * s_half, even)
+        if axis:
+            ref_2, _ = _match_wout_row(wout.xm, wout.xn, rows, 2, tables["xm"], tables["xn"])
+            ref = np.where(xm == 1, (1.5 * ref_j / sqrt_s[1] - 0.5 * ref_2 / sqrt_s[2]) * s_half, ref)
         got = np.asarray(tables[key])
         np.testing.assert_allclose(got[mask], ref[mask], rtol=1e-8,
                                    atol=1e-10 * np.max(np.abs(rows)), err_msg=key)
@@ -722,6 +726,49 @@ def test_boozer_geometry_preserves_the_major_radius_range(lasym_solved):
     span = float(reference.max() - reference.min())
     assert abs(boozer.min() - reference.min()) < 0.05 * span
     assert abs(boozer.max() - reference.max()) < 0.05 * span
+
+
+@pytest.fixture(scope="module")
+def li383_eq():
+    """Three-dimensional finite-pressure stellarator-symmetric deck (ns = 16)."""
+    from vmex.core import optimize as opt
+
+    return opt.solve_equilibrium(VmecInput.from_file(str(DATA_DIR / "input.li383_low_res")))
+
+
+@pytest.mark.parametrize("deck", ["symmetric_eq", "li383_eq"])
+def test_every_boozer_family_matches_booz_xform_on_every_surface(deck, request):
+    """``geometry=True`` equals booz_xform on the wout of the same state, surface by surface.
+
+    Both run the same transform (Sanchez et al. 2000) on the same tables, so
+    every family agrees to round-off, 1e-12 of its largest harmonic. On the
+    first half surface booz_xform extrapolates the m = 1 rows of R and Z as
+    ``(1.5 f_1/sqrt(s_1) - 0.5 f_2/sqrt(s_2)) sqrt(s_half)``
+    (``init_from_vmec.cpp``); averaging with the zero axis row gave about half.
+    LASYM decks are not compared here: the wout writes the sine partner of
+    B_zeta from the IEQUI-corrected field (``wrout.f``), not the half-mesh field.
+    """
+    from booz_xform_jax import Booz_xform
+
+    eq = request.getfixturevalue(deck)
+    ns = int(np.asarray(eq.runtime.setup.s_full).shape[0])
+    host = Booz_xform()
+    host.verbose = 0
+    host.read_wout_data(eq.wout)
+    host.mboz, host.nboz = 6, 6 if np.any(np.asarray(eq.wout.xn)) else 0
+    host.compute_surfs = list(range(ns - 1))
+    host.run()
+    booz = boozer_spectrum_state(eq.state, eq.runtime, surfaces=(np.arange(ns - 1) + 0.5) / (ns - 1),
+                                 mboz=host.mboz, nboz=host.nboz, oversample=1, geometry=True)
+    np.testing.assert_array_equal(np.asarray(booz["xm_b"]), np.asarray(host.xm_b))
+    np.testing.assert_array_equal(np.asarray(booz["xn_b"]), np.asarray(host.xn_b))
+    families = ["bmnc", "rmnc", "zmns", "pmns", "gmnc"]
+    families += ["bmns", "rmns", "zmnc", "pmnc", "gmns"] if host.asym else []
+    for key in families:
+        # boozmn convention: p = phi - zeta_B = -nu
+        ref = np.asarray(getattr(host, key.replace("pmn", "numn") + "_b")).T * (-1.0 if key[0] == "p" else 1.0)
+        error = np.max(np.abs(np.asarray(booz[key + "_b"]) - ref), axis=1) / np.max(np.abs(ref), axis=1)
+        assert np.all(error < 1e-12), (key, error)
 
 
 def test_batched_spectrum_equals_per_surface_construction(symmetric_eq):

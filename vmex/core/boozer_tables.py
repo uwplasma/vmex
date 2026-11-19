@@ -59,7 +59,8 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
       file stores the full-mesh average of consecutive half-mesh rows
       (``wrout.f``); this table stays on half-mesh row ``j``;
     - ``rmnc``, ``zmns``: R/Z tables from the full-mesh rows ``j-1``/``j``
-      with the VMEC odd-m ``sqrt(s)`` parity interpolation to the half mesh;
+      with the VMEC odd-m ``sqrt(s)`` parity interpolation to the half mesh
+      (m = 1 on row 1 extrapolated from full rows 1 and 2, as booz_xform does);
     - ``lmns``: the wout lambda sine table, reconstructed from the
       (lamscale-scaled) angular derivatives with the wout ``1/phips`` factor;
     - ``iota`` (``add_fluxes.f`` for ``ncurr=1``, else the prescribed
@@ -233,6 +234,11 @@ def boozer_input_tables(state: SpectralState, rt: SolverRuntime, j: int) -> dict
         # entries are zero up to round-off, which 1e-30 would amplify.
         axis_safe = jnp.where(sqrt_s[j - 1] > 0, sqrt_s[j - 1], 1.0)
         interp_odd = 0.5 * (a / axis_safe + b / sqrt_s[j]) * jnp.sqrt(s_half_j)
+        # First half surface, m = 1: f/sqrt(s) is finite on the axis, so
+        # extrapolate it from full rows 1 and 2 (booz_xform init_from_vmec.cpp).
+        c = project(mirror(phys_row(even, odd, j + 1), angular_parity), coefficient_parity)
+        axis_m1 = (1.5 * b / sqrt_s[j] - 0.5 * c / sqrt_s[j + 1]) * jnp.sqrt(s_half_j)
+        interp_odd = jnp.where((j == 1) & jnp.asarray(xm == 1), axis_m1, interp_odd)
         return jnp.where(m_even, interp_even, interp_odd)
 
     rmnc = spectral_half(geometry.R_even, geometry.R_odd, "even", "cos")
