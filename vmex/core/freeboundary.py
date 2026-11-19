@@ -364,6 +364,8 @@ def free_boundary_resolution(
       :class:`VmecInputError` (``nfper0 /= nfp -> ier_flag = 9``);
     * explicit incompatible ``NZETA`` -> typed :class:`VmecInputError`
       (VMEC2000 rejects the same deck before solving);
+    * ``NTOR = 0`` with a one-plane (axisymmetric) table -> ``nzeta = 1``,
+      whatever ``NZETA`` says: every plane holds the same field;
     * automatic resolution (``NZETA = 0``) -> the smallest divisor of the
       table's plane count at or above the ``read_indata.f`` floor
       ``2*ntor + 4`` (e.g. a 24-plane table with ``ntor = 9`` selects 24,
@@ -382,7 +384,13 @@ def free_boundary_resolution(
             hint=f"set NFP = {int(external_field.nfp)} in the deck, or regenerate the "
                  f"mgrid (MAKEGRID) with nfp = {int(inp.nfp)}")
     if kp is None or int(inp.ntor) == 0:
-        return resolution
+        # An axisymmetric table (one plane) is the same field on every
+        # toroidal plane, so a solve with ``ntor = 0`` carries one: NESTOR
+        # sums the toroidal images of the surface exactly there, while the
+        # 2 to 4 planes of an explicit ``NZETA`` leave its kernel unresolved
+        # (inconsistent vacuum field; the solve then stalls or not with the
+        # rounding of the machine).
+        return replace(resolution, nzeta=1) if kp == 1 else resolution
     if int(inp.nzeta) > 0:
         if kp % int(inp.nzeta) != 0:
             raise VmecInputError(
