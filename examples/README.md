@@ -173,6 +173,17 @@ that research budget as one commented set of constants next to the default.
   `epsilon_eff^(3/2)` below 3e-7, and QH (`NFP = 3`) at 5e-4 to 1.3e-3 with
   `epsilon_eff^(3/2)` below 2e-5. QP is limited by its shape limits (see the
   script docstring).
+  `QI_optimization_finite_n.py` *(AGNI, `pip install "vmex[agni]"`)* stabilizes
+  the global finite-n ideal-MHD instability of `finite_n_stability.py`'s NFP = 4
+  QI seed (beta 5.1 %) at fixed physical targets: a softplus of the summed top
+  two `gamma2` of toroidal families 0 and 1 (a cluster sum, because the top two
+  modes of a family swap under small boundary steps), with beta, aspect ratio,
+  volume, mean and edge iota and the constructed-QI residual held at the seed's
+  values by stiff quadratic rows, in two `max_mode` stages of scaled L-BFGS-B.
+  An eigensolve that does not converge makes the objective non-finite, so it is
+  rejected rather than scored low. It re-solves the initial and final boundaries
+  at ns = 91 and recomputes every family there with fresh eigensolves at the
+  same bandwidth. The run takes hours; the smoke pass only shows that it executes.
   `single_stage_optimization.py` *(preview)* is the simplest joint
   plasma-and-coil script and the one to copy for a new problem: every
   constraint is a quadratic penalty and the optimizer is one bounded L-BFGS-B
