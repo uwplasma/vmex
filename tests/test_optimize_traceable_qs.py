@@ -113,9 +113,9 @@ def test_state_grad_after_lanes_reload_from_disk_and_wout(tmp_path, monkeypatch)
 
     monkeypatch.setattr(aot, "_directory", lambda: tmp_path / "aot")
     inp = VmecInput.from_file(DATA_DIR / "input.solovev")
-    opt.solve_equilibrium(inp)                      # stores the lane executables
+    opt.solve_equilibrium(inp)  # stores the lane executables
     aot.release()
-    equilibrium = opt.solve_equilibrium(inp)        # loads them from disk
+    equilibrium = opt.solve_equilibrium(inp)  # loads them from disk
     assert equilibrium.wout is not None
     qs = opt.QuasisymmetryRatioResidual([0.5], 1, -1)
     grad = jax.grad(lambda st: qs.total_state(st, equilibrium.runtime))(equilibrium.state)

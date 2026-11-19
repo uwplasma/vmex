@@ -168,6 +168,6 @@ def test_results_of_a_loaded_executable_are_differentiable(tmp_path, monkeypatch
         return jnp.cos(x)
 
     x = jnp.arange(6.0).reshape(2, 3)
-    aot.AotLane(fn)(x)                              # builds and stores the blob
-    loaded = aot.AotLane(fn)(x)                     # a fresh lane loads it from disk
+    aot.AotLane(fn)(x)  # builds and stores the blob
+    loaded = aot.AotLane(fn)(x)  # a fresh lane loads it from disk
     np.testing.assert_array_equal(jax.grad(lambda z: jnp.sum(jnp.sin(z)))(loaded), jnp.cos(loaded))
