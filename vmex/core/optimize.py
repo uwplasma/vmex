@@ -2395,10 +2395,11 @@ def _least_squares_implicit(
     Gauss-Newton residual geometry and are jit-compiled once per stage.
 
     The residual and Jacobian graphs run on the device chosen by
-    :func:`vmex.core.device.resolve_implicit_device` — the CPU by default,
-    where the per-dof vmapped adjoint GMRES is far faster than the
-    launch-bound, dof-count-scaling GPU compile (R1); an explicit
-    ``device=`` overrides this.  The forward equilibrium callback uses the
+    :func:`vmex.core.device.resolve_implicit_device`: the GPU when it is the
+    default backend and the block Jacobian is used, else the CPU, where the
+    per-dof vmapped adjoint GMRES is far faster than the launch-bound,
+    dof-count-scaling GPU compile (R1); an explicit ``device=`` overrides
+    this.  The forward equilibrium callback uses the
     solver's independent automatic per-stage placement policy.
 
     Repeated construction with identical content reuses the earlier
@@ -2482,13 +2483,14 @@ def _least_squares_implicit(
         max_fsq_ratio=max_fsq_ratio,
         refine_tol=refine_tol,
     )
-    # Pin the residual/Jacobian graphs to the fastest device for this
-    # launch-bound path (CPU by default; explicit device= honored; None
-    # leaves placement untouched).  The resolved device is ALSO carried in
+    # Pin the residual/Jacobian graphs to the fastest device for this path
+    # (the GPU when one is the default backend, else the CPU; explicit
+    # device= honored; None leaves placement untouched).  The resolved device is ALSO carried in
     # the static config so the host callback, the cached runtime template,
     # and the custom-VJP backward re-enter the same placement context on
     # their own — no outer jax.default_device context needed.
-    jac_device = resolve_implicit_device(device, cfg.resolution)
+    jac_device = resolve_implicit_device(
+        device, cfg.resolution, block_jacobian=jac_solver in ("auto", "block"))
     # Re-canonicalize after the device replace (the implicit.run precedent):
     # a fresh config identity here missed every identity-keyed implicit
     # cache (_template_runtime, the residual lane, _LAST_SOLVE) on repeated
