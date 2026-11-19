@@ -12,7 +12,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -134,25 +133,10 @@ print(f"PHIEDGE: closed form {closed_form_phiedge:.6f} Wb gives beta "
 ### Set up the objective ######################################################
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
-    return jnp.maximum(opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-def elongation_excess(equilibrium_state, solver_context):
-    """Hinge on the cross-section elongation above its limit."""
-    return jnp.maximum(opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
-
 # Each term is (function, target, weight).
 objective_function_terms = [(qi, 0.0, 10.0), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0), (mirror_excess, 0.0, 10.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0), (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0),
     # At fixed flux beta scales as ASPECT**-4, so this row and the aspect row
     # hold beta together; it carries the QI row's weight.
     (opt.volume_average_beta, TARGET_BETA, 10.0 / TARGET_BETA**2)]

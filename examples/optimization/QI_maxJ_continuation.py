@@ -129,27 +129,6 @@ ASPECT_TARGET = float(opt.aspect_ratio(equilibrium.solution, equilibrium.solver_
 qi = ConstructedQIResidual(SURFACES, mboz=QI_MBOZ, nboz=QI_MBOZ, **QI_OPTIONS)
 
 
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio above its limit; zero while the limit holds."""
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
-
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def magnetic_well_floor(equilibrium_state, solver_context):
-    """Hinge below the magnetic-well target; zero once the well is deep enough."""
-    return jnp.maximum(
-        MAGNETIC_WELL_TARGET - opt.magnetic_well(equilibrium_state, solver_context), 0.0)
-
-
 report = opt.EquilibriumReporter(
     ("QI", qi.total, ".4e"), ("aspect", opt.aspect_ratio, ".3f"),
     ("iota", opt.mean_iota, ".3f"), ("mirror", opt.mirror_ratio, ".3f"),
@@ -195,9 +174,9 @@ for stage, (max_mode, max_nfev, maxj_target, maxj_weight, qi_weight,
     stage_shape_terms = [
         (qi, 0.0, constructed_weight),
         (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-        (iota_floor, 0.0, 10.0),
-        (mirror_excess, 0.0, 100.0),
-        (magnetic_well_floor, 0.0, well_weight),
+        (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
+        (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 100.0),
+        (opt.magnetic_well, opt.at_least(MAGNETIC_WELL_TARGET), well_weight),
     ]
     objective_function_terms = [(qi_maxj, 0.0, 1.0), *stage_shape_terms]
     problem = opt.VmecProblem.from_tuples(inp, objective_function_terms, max_mode=max_mode,

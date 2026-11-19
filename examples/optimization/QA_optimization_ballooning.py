@@ -125,11 +125,6 @@ def lambdas(state, runtime):
     return ballooning_lambda(state, runtime, s_indices=surface_indices(ns), **LINES)
 
 
-def ballooning_excess(state, runtime):
-    """One row per line: its growth rate above the threshold, zero when below."""
-    return jnp.maximum(lambdas(state, runtime) - BALLOONING_THRESHOLD, 0.0).ravel()
-
-
 def worst_lambda(state, runtime):
     """Hard max lambda over the sampled lines, the number worth quoting."""
     return jnp.max(lambdas(state, runtime))
@@ -140,11 +135,6 @@ def mercier_window(state, runtime):
     dmerc = PHIEDGE**2 * opt.d_merc_state(state, runtime)
     s = np.linspace(0.0, 1.0, dmerc.shape[0])
     return dmerc[(s >= MERCIER_MIN_S) & (s < 1.0)]
-
-
-def mercier_rows(state, runtime):
-    """Hinge on the Mercier criterion below its margin (positive is stable)."""
-    return jnp.maximum(MERCIER_MARGIN - mercier_window(state, runtime), 0.0)
 
 
 def minimum_mercier(state, runtime):
@@ -158,8 +148,8 @@ objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
     (opt.volume_average_beta, BETA_TARGET, BETA_WEIGHT),
-    (mercier_rows, 0.0, MERCIER_WEIGHT),
-    (ballooning_excess, 0.0, BALLOONING_WEIGHT),
+    (mercier_window, opt.at_least(MERCIER_MARGIN), MERCIER_WEIGHT),
+    (lambdas, opt.at_most(BALLOONING_THRESHOLD), BALLOONING_WEIGHT),
 ]
 
 report = opt.EquilibriumReporter(

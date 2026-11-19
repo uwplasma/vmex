@@ -85,17 +85,12 @@ inp = replace(inp, rbc=rbc, zbs=zbs)
 
 ### Set up the objective ######################################################
 
-def iota_floor(state, runtime):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(IOTA_FLOOR - opt.min_abs_iota(state, runtime), 0.0)
-
-
 # Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, 1.0),
 ]
 
