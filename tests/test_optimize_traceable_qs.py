@@ -107,6 +107,21 @@ def test_pointwise_state_grad_is_finite(eq):
     assert all(np.all(np.isfinite(np.asarray(leaf))) for leaf in leaves)
 
 
+def test_state_grad_after_lanes_reload_from_disk_and_wout(tmp_path, monkeypatch):
+    """CI's warm cache: the solve's lanes load from disk, ``eq.wout`` is built, then the state gradient."""
+    from vmex.core import aot
+
+    monkeypatch.setattr(aot, "_directory", lambda: tmp_path / "aot")
+    inp = VmecInput.from_file(DATA_DIR / "input.solovev")
+    opt.solve_equilibrium(inp)                      # stores the lane executables
+    aot.release()
+    equilibrium = opt.solve_equilibrium(inp)        # loads them from disk
+    assert equilibrium.wout is not None
+    qs = opt.QuasisymmetryRatioResidual([0.5], 1, -1)
+    grad = jax.grad(lambda st: qs.total_state(st, equilibrium.runtime))(equilibrium.state)
+    assert all(np.all(np.isfinite(np.asarray(leaf))) for leaf in jax.tree.leaves(grad))
+
+
 def test_lasym_state_derivative_matches_finite_difference(lasym_eq):
     """QS includes asymmetric R-sine/Z-cosine state families."""
     qs = opt.QuasisymmetryRatioResidual([0.3, 0.7], 1, 0)
