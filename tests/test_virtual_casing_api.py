@@ -92,9 +92,12 @@ def test_exterior_source_grid_is_sized_from_the_boundary():
                 == ext._source_nphi_for_digits(
                     VmecInput.from_file(data / "input.LandremanPaul2021_QA_lowres"), 6)
                 == 64)
-    assert ext._source_nphi_for_digits(
-        VmecInput.from_file(data / "input.circular_tokamak"), 6
-    ) == ext._DEFAULT_SOURCE_NPHI
+    # The data floor, 2 band + 1 samples of the Nyquist field series with band
+    # = ntheta1/2 + mpol - 1: 18 for the circular tokamak and 35 for DIII-D,
+    # whose field still has 2e-3 of its peak at the m = 16 that 32 aliases.
+    for name, chosen in (("circular_tokamak", 40), ("DIII-D_lasym_false", 72)):
+        assert ext._source_nphi_for_digits(
+            VmecInput.from_file(data / f"input.{name}"), 6) == chosen
 
 
 def test_surface_field_from_a_live_state_takes_the_state_spectra():
