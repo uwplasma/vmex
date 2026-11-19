@@ -691,6 +691,21 @@ def test_traced_explicit_gpu_config_runs_on_the_cpu(monkeypatch):
     assert fbi._traced_config(cfg) is sibling and fbi._traced_config(sibling) is sibling
 
 
+def test_unplaced_config_on_an_accelerator_names_the_default_device(monkeypatch):
+    """With JAX placement left alone on a GPU backend the host solve gets JAX's default device.
+
+    Without it the callback body built arrays on the CPU next to a runtime on
+    the GPU and the first force evaluation raised a device mismatch.
+    """
+    inp = dataclasses.replace(lasym_free_input(DATA), ns_array=np.array([8]))
+    field = lasym_free_field()
+    monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+    monkeypatch.setattr(fbi, "resolve_implicit_device", lambda *_a: None)
+    for device in (None, "auto"):
+        cfg = make_free_boundary_config(inp, field, ns=8, device=device)
+        assert cfg.implicit.device == next(iter(jnp.zeros(()).devices()))
+
+
 def test_free_boundary_warm_failure_retries_once_from_cold(monkeypatch):
     """A bad cached state is discarded, but implementation errors are not."""
     inp = dataclasses.replace(
