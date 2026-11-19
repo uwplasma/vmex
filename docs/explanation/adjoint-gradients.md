@@ -183,6 +183,32 @@ interior `Z_sin` objective, where the released family left 1-3 % and 140x
 A plain `vmex` run still releases it, as VMEC2000 does.
 Axisymmetric (`ntor = 0`) decks and the lasym `n = 0` entry are exact theta-origin gauges and stay released.
 
+### Fixing the released coordinate family
+
+Pass a fixed `m1_gauge` solution to hold its released interior m=1 Z
+combinations in both the native solve and implicit residual. The boundary
+still follows the trial parameters; other reference coefficients are ignored.
+
+```python
+from vmex import optimize as opt
+
+reference = opt.solve_equilibrium(inp, use_fft=False, raise_on_max_iterations=True)
+solve_kwargs = {"m1_gauge": reference.solution, "use_fft": False}
+problem = opt.VmecProblem.from_loss(
+    inp, loss, restart_from=reference, solve_kwargs=solve_kwargs,
+)
+trial = opt.solve_equilibrium(problem.input_from_x(x_trial), **solve_kwargs)
+```
+
+Use the same reference, radial/mode resolution and `lconm1` basis for every
+trial. Changing the reference introduces a derivative the adjoint omits.
+This option supports single-resolution fixed-boundary solves without force
+polishing. Compare derivatives against warm and cold native re-solves over
+several step sizes, with stopping errors below the derivative tolerance.
+`Equilibrium.wout` converts unconstrained m=1 states for export without
+mutating them; raw WOUT conversion and restart helpers require constrained
+states.
+
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at
 `ftol = 1e-12` can sit about 1e-2 from that root in coefficient norm, so
