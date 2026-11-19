@@ -1121,7 +1121,7 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
 
     def spy_problem_jit(key, slot, build):
         fn = problem_jit(key, slot, build)
-        return (lambda *a: jac_calls.append((fn, a)) or fn(*a)) if slot == "jac" else fn
+        return (lambda *a: jac_calls.append((fn, a)) or fn(*a)) if slot == "jac_rows" else fn
 
     monkeypatch.setattr(opt, "_problem_jit", spy_problem_jit)
     # The public problem uses cost weights: weight=4 scales residuals and

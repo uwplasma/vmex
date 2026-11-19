@@ -2949,6 +2949,29 @@ def _least_squares_implicit(
     else:
         probe_chunk = chunk
 
+    tangent_chunk = ndof if chunk is None else chunk
+
+    def _block_tangents(x, state, data, columns):
+        _, tangent_of, _, _, (params, frozen, _, _) = _jac_parts(x, state, data)
+        stack = tangent_stack if columns is None else tuple(t[columns] for t in tangent_stack)
+        return params, frozen, jax.vmap(tangent_of)(stack)
+
+    def _block_responses(lane, params, frozen, tangents, data, bands):
+        return lane(params, frozen, mask_const, tangents, data["jac_tol"], bands, cfg=cfg,
+                    active_fields=active_fields, probe_chunk_size=probe_chunk,
+                    response_chunk_size=tangent_chunk, certify_maxiter=certify_maxiter)
+
+    def _block_rows(x, state, data, columns, dz0, report):
+        _, tangent_of, _, column_of, _ = _jac_parts(x, state, data)
+        stack = tangent_stack if columns is None else tuple(t[columns] for t in tangent_stack)
+
+        def column(args):
+            tp_stack, dz = args
+            return column_of(dz, tangent_of(tp_stack)), dz
+
+        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
+        return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
+
     def jacobian_rows_block(x: jnp.ndarray, state, data, bands=None, columns=None):
         """``jacobian_rows`` via one block-tridiagonal factorization (R25.2).
 
@@ -2962,25 +2985,22 @@ def _least_squares_implicit(
         omits them and the graph builds its own.  ``columns`` selects the dofs
         (default all) when the host splits the column chunks over threads.
         """
-        _, tangent_of, _, column_of, (params, frozen, _, _) = \
-            _jac_parts(x, state, data)
-        stack = tangent_stack if columns is None else tuple(t[columns] for t in tangent_stack)
-        tangent_batch = jax.vmap(tangent_of)(stack)
-        tangent_chunk = ndof if chunk is None else chunk
-        dz0, report = imp._implicit_evolved_tangent_multi_rhs(
-            params, cfg, frozen, mask_const, tangent_batch,
-            active_fields=active_fields, probe_chunk_size=probe_chunk,
-            response_chunk_size=tangent_chunk, certify_rtol=data["jac_tol"],
-            certify_maxiter=certify_maxiter, bands=bands,
-        )
+        params, frozen, tangents = _block_tangents(x, state, data, columns)
+        dz0, report = _block_responses(
+            imp._evolved_tangent_lane.fn, params, frozen, tangents, data, bands)
+        return _block_rows(x, state, data, columns, dz0, report)
 
-        def column(args):
-            tp_stack, dz = args
-            tp = tangent_of(tp_stack)
-            return column_of(dz, tp), dz
+    block_tangents_jit = _problem_jit(problem_jit_key, "jac_tangents", lambda: jax.jit(_block_tangents))
+    block_rows_jit = _problem_jit(problem_jit_key, "jac_rows", lambda: jax.jit(_block_rows))
 
-        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
-        return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
+    def jacobian_rows_block_host(x, state, data, bands, columns=None):
+        """:func:`jacobian_rows_block` in three programs, the state responses from the
+        AOT-cached :func:`implicit._evolved_tangent_lane`, so a warm process does not
+        retrace or relower the implicit solve."""
+        params, frozen, tangents = block_tangents_jit(x, state, data, columns)
+        dz0, report = _block_responses(
+            imp._evolved_tangent_lane, params, frozen, tangents, data, bands)
+        return block_rows_jit(x, state, data, columns, dz0, report)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):
         raise ValueError(
@@ -3004,11 +3024,14 @@ def _least_squares_implicit(
         width = ndof if chunk is None else chunk
         chunks = ndof // width
         split = max((k for k in range(1, imp.probe_workers(cfg) + 1) if chunks % k == 0), default=1)
-        if jac_impl is not jacobian_rows_block or ndof % width or split == 1:
+        if jac_impl is not jacobian_rows_block:
             return jac_jit(x, state, roots, bands)
+        if ndof % width or split == 1:
+            return jacobian_rows_block_host(x, state, roots, bands)
         slices = np.split(np.arange(ndof), split)
         with concurrent.futures.ThreadPoolExecutor(split) as pool:
-            parts = list(pool.map(lambda c: jac_jit(x, state, roots, bands, c), slices))
+            parts = list(pool.map(
+                lambda c: jacobian_rows_block_host(x, state, roots, bands, c), slices))
         certificates = np.stack([np.asarray(part[2]) for part in parts])
         worst = np.argmax(certificates[:, 2] / np.maximum(certificates[:, 3], np.finfo(float).tiny))
         summary = np.array([

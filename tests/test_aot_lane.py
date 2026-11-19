@@ -158,3 +158,41 @@ def test_target_device_follows_jit_placement():
     assert aot._device([jax.device_put(jnp.ones(2), cpu)]) == cpu
     with jax.default_device(cpu):
         assert aot._device([np.ones(2)]) == cpu
+
+
+def test_static_arguments_with_an_aot_key_are_keyed_by_content(tmp_path, monkeypatch):
+    """Equal ``_aot_key`` shares one executable across objects; a new key builds another."""
+    monkeypatch.setattr(aot, "_directory", lambda: tmp_path / "aot")
+
+    class Config:
+        def __init__(self, k):
+            self.k = k
+
+        def _aot_key(self):
+            return f"Config:{self.k}"
+
+    def fn(x, *, cfg):
+        return x * cfg.k
+
+    lane = aot.AotLane(fn, static_argnames=("cfg",))
+    x = jnp.arange(4.0)
+    for k in (2, 2, 3):
+        np.testing.assert_array_equal(lane(x, cfg=Config(k)), x * k)
+    assert len(list((tmp_path / "aot").glob("*.aot"))) == 2
+
+
+def test_implicit_config_key_follows_the_compiled_content():
+    """Boundary values reach the implicit lanes traced, so they leave the key alone;
+    a tolerance or a resolution changes it."""
+    import dataclasses
+    from pathlib import Path
+
+    from vmex.core import implicit as im
+    from vmex.core.input import VmecInput
+
+    inp = VmecInput.from_file(Path(__file__).resolve().parents[1] / "examples" / "data" / "input.solovev")
+    moved = dataclasses.replace(inp, rbc=np.asarray(inp.rbc) * 1.01)
+    key = im.make_config(inp)._aot_key()
+    assert im.make_config(moved)._aot_key() == key
+    assert im.make_config(inp, adjoint_tol=1e-9)._aot_key() != key
+    assert im.make_config(inp, ns=7)._aot_key() != key
