@@ -493,10 +493,10 @@ jobs:
       - name: Install with CUDA 12 JAX
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          uv venv --python 3.10 .venv
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
-          uv pip install . pytest 'jax[cuda12]'
+          uv venv --python 3.10 "$RUNNER_TEMP/venv"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$RUNNER_TEMP/venv" >> "$GITHUB_ENV"
+          uv pip install --python "$RUNNER_TEMP/venv/bin/python" . pytest 'jax[cuda12]'
       - name: Require the GPU backend
         run: python -c "import jax; assert jax.default_backend() == 'gpu', jax.devices()"
       - name: GPU tests
@@ -504,7 +504,7 @@ jobs:
         run: pytest -q -x -m gpu $(python tools/test_manifest.py select pr-gpu-ci) --durations=10
       - name: Remove the virtual environment
         if: always()
-        run: rm -rf .venv
+        run: rm -rf "$RUNNER_TEMP/venv"
 
   install:
     # One cheap Linux cell plus the two platforms CI never otherwise touches.
