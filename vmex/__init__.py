@@ -42,6 +42,8 @@ links to the module that documents it.
 - :class:`~vmex.core.wout.WoutData` / :func:`~vmex.core.wout.read_wout` /
   :func:`~vmex.core.wout.write_wout` / :func:`~vmex.core.wout.wout_from_state`
   / :func:`~vmex.core.wout.wout_from_result` (the one-call form: deck + solve result)
+- :func:`~vmex.core.statephysics.wout_tables_from_state` — the wout radial and Fourier
+  tables of a state, traceable (gradients flow)
 - :func:`~vmex.core.turbulence.gk_fieldline_geometry_from_wout` — GK
   field-line geometry from any compatible wout, without a solve
 - :func:`~vmex.core.scaling.scale_input` / :func:`~vmex.core.scaling.scale_wout`
