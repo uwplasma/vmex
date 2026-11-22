@@ -59,7 +59,7 @@ from .solver import (
     _prefetch_block_lane,
     _polish_solve_result, _release_used_lane_executables, _result_from_carry,
     _resolve_force_balance_polish, _solve_stage, _resolve_use_fft,
-    hot_restart_state, prepare_runtime, resolution_from_input,
+    hold_m1_keyword, hot_restart_state, prepare_runtime, resolution_from_input,
     runtime_with_baselines,
 )
 from .transforms import odd_m_sqrt_s_scaling
@@ -256,6 +256,7 @@ def _launch_lane_prefetch(
     return thread
 
 
+@hold_m1_keyword
 def solve_multigrid(
     inp: VmecInput,
     ns_array=None,
@@ -283,8 +284,11 @@ def solve_multigrid(
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
     lambda_m0_floor: float | None = None,
+    hold_m1: bool = False,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
+
+    ``hold_m1`` as in :func:`vmex.core.solver.solve`, for every stage.
 
     VMEC2000 ``Sources/TimeStep/runvmec.f``: for each grid ``igrid`` the
     radial resolution ``nsval = ns_array(igrid)`` is solved with tolerance

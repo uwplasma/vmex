@@ -46,7 +46,7 @@ from vmex.core.errors import AdjointSolveError
 from vmex.core.input import VmecInput
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache_held_m1.pkl"
+FD_CACHE = Path(tempfile.gettempdir()) / "vmex_implicit_fd_cache_held_m1_n0.pkl"
 # Host solves as the implicit path runs them: the m=1 constrained family held.
 _held_solve = im._holding_m1(solver.solve)
 
@@ -1066,8 +1066,8 @@ def test_lasym_boundary_map_derivative_vs_fd(lasym):
 
 def test_lasym_wb_aspect_gradient_vs_fd(lasym):
     """``d(wb)/d`` and ``d(aspect)/d`` clean m = 2 rbs/zbc dofs vs naive
-    central FD through the host solve; agreement is at the solver-limited
-    floor of this m=1-constrained deck (~1e-4, printed)."""
+    central FD through the held host solve at ftol = 1e-12 (tolerances
+    printed); the ns = 17, ftol = 1e-14 check above reaches 1e-10."""
     name, inp, cfg, p0, _, _, _ = lasym
     ntor = int(inp.ntor)
 
@@ -1084,7 +1084,7 @@ def test_lasym_wb_aspect_gradient_vs_fd(lasym):
         ("aspect", "zbc", (ntor, 2), 3e-5, 5e-4),
     ]
     print(f"\n[{name}] lasym boundary gradient vs naive central FD "
-          f"(forward ftol = {cfg.ftol:g}, solver-limited ~1e-4):")
+          f"(forward ftol = {cfg.ftol:g}):")
     for out, field, idx, h, tol in checks:
         fd = _fd(name, inp, cfg, p0, field, idx, h)[out]
         ad = float(np.asarray(getattr(jac, field))[row[out], idx[0], idx[1]])
@@ -1200,6 +1200,59 @@ def test_lasym_adjoint_vs_frozen_path_fd(lasym):
         print(f"  d(wb)/d({field}{idx}), h={h:.0e}: analytic={an:+.9e} "
               f"frozen-FD={fd:+.9e} rel={rel:.2e}")
         assert rel <= 5e-5, f"{field}{idx}: adjoint vs frozen-path FD rel {rel:.2e}"
+
+
+def test_plain_solve_hold_m1_keyword_holds_the_lasym_n0_entry(lasym):
+    """``solve(..., hold_m1=True)`` is the implicit lane's host solve: the
+    lasym ``(1, 0)`` constrained ``Z_cos`` entry stays on the guess; the
+    default releases it as VMEC2000 does."""
+    _, inp, cfg, _, x_held, rt, _ = lasym
+    k = [i for i, (m, n) in enumerate(zip(rt.modes.m, rt.modes.n)) if (m, n) == (1, 0)][0]
+    kwargs = dict(ftol=cfg.ftol, max_iterations=cfg.max_iterations, mode="cli")
+    held = solver.solve(inp, cfg.resolution, hold_m1=True, **kwargs).state
+    released = solver.solve(inp, cfg.resolution, **kwargs).state
+    guess = np.asarray(solver._initial_state(rt.setup).Z_cos)[:, k]
+    np.testing.assert_array_equal(np.asarray(held.Z_cos)[:, k], guess)
+    np.testing.assert_array_equal(np.asarray(held.Z_cos), np.asarray(x_held.Z_cos))
+    assert np.max(np.abs(np.asarray(released.Z_cos)[:, k] - guess)) > 1e-6
+
+
+@pytest.mark.full  # five ns = 17 solves, about a minute on a laptop
+def test_lasym_2d_gradient_matches_resolved_central_differences():
+    """The implicit lane holds the lasym ``n = 0`` m = 1 constrained entry at
+    the ``profil3d.f`` guess, as its re-solves do, so ``d(wb)`` and the
+    derivative of the physical ``Z_cos(1, 0)`` at mid radius equal central
+    differences of ``solve_implicit`` re-solves (h = 1e-5).  Measured 1e-10
+    and 1e-9; freezing the entry at the solved state misses by 3e-5 in
+    ``wb`` and by 0.31 in the coefficient."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(str(DATA_DIR / "input.up_down_asymmetric_tokamak")),
+        ns_array=np.array([17]), ftol_array=np.array([1e-14]),
+        niter_array=np.array([20000]))
+    cfg = im.make_config(inp, ftol=1e-14, max_iterations=20000)
+    p0 = im.params_from_input(inp)
+    modes = im._template_runtime(cfg).modes
+    k = [i for i, (m, n) in enumerate(zip(modes.m, modes.n)) if (m, n) == (1, 0)][0]
+
+    def outputs(p):
+        rt = im.runtime_from_params(p, cfg)
+        state = im.solve_implicit(p, cfg)
+        z_cos = solver._physical_coefficients(
+            state, modes=rt.modes, lthreed=False, lasym=True, lconm1=True)[2]
+        return jnp.stack([im.mhd_energy(state, rt)[0], z_cos[8, k]])
+
+    jac = jax.jacrev(outputs)(p0)
+    zero = jax.tree.map(jnp.zeros_like, p0)
+    h = 1e-5
+    for field in ("rbc", "rbs"):
+        t = dataclasses.replace(zero, **{field: getattr(zero, field).at[0, 2].set(1.0)})
+        ad = np.asarray(sum(jnp.tensordot(a, b, axes=b.ndim) for a, b in zip(
+            jax.tree.leaves(jac), jax.tree.leaves(t))))
+        fd = (np.asarray(outputs(jax.tree.map(lambda a, d: a + h * d, p0, t)))
+              - np.asarray(outputs(jax.tree.map(lambda a, d: a - h * d, p0, t)))) / (2 * h)
+        rel = np.abs(ad - fd) / np.abs(fd)
+        print(f"d(wb, Z_cos(1,0))/d({field}(0,2)): AD={ad} FD={fd} rel={rel}")
+        assert np.all(rel < 1e-7), (field, rel)
 
 
 # ===========================================================================

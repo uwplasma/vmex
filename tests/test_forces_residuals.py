@@ -97,7 +97,8 @@ def test_m1_mappings_roundtrip(case):
 def test_hold_m1_family_sets_only_the_constrained_coordinate(case):
     """The coordinate comes from ``source`` and nothing else moves: the
     difference is antisymmetric in each ``Z_sin`` pair (symmetric in ``Z_cos``
-    on lasym), and holding twice changes nothing."""
+    on lasym, whose ``n = 0`` entry is taken whole), and holding twice changes
+    nothing."""
     rt, x = case.rt, case.state
     rng = np.random.default_rng(0)
     y = jax.tree.map(lambda a: jnp.asarray(rng.standard_normal(np.shape(a))), x)
@@ -111,8 +112,10 @@ def test_hold_m1_family_sets_only_the_constrained_coordinate(case):
             _allclose(d[:, p] - sign * d[:, q], 0.0 * d[:, p], f"{name} pair kept")
             _allclose(e[:, p] + sign * e[:, q], 0.0 * e[:, p], f"{name} pair taken")
         mask = np.ones(m.size, bool); mask[[k for pq in pairs for k in pq]] = False  # noqa: E702
-        mask[(m == 1) & (n == 0)] = True
+        mask[(m == 1) & (n == 0)] = name == "Z_sin"
         assert not np.any(d[:, mask])
+        if name == "Z_cos":
+            assert not np.any(e[:, (m == 1) & (n == 0)])
     assert lasym or np.array_equal(np.asarray(h.Z_cos), np.asarray(x.Z_cos))
     for a, b in zip(jax.tree.leaves(newr.hold_m1_family(h, y, rt.modes, lasym=lasym)), jax.tree.leaves(h)):
         _allclose(a, b, "hold twice")
@@ -222,7 +225,7 @@ def test_full_chain_residuals_finite(case):
         m, n = np.asarray(case.rt.modes.m), np.asarray(case.rt.modes.n)
         gauge = (m == 1) & (n == 0)
         assert np.any(np.asarray(free.Z_cos)[:, gauge] != 0.0)
-        _allclose(held.Z_cos[:, gauge], free.Z_cos[:, gauge], "released LASYM gauge")
+        assert not np.any(np.asarray(held.Z_cos)[:, gauge]), "held LASYM n = 0 entry"
 
 
 def test_full_chain_is_jittable(case):

@@ -180,8 +180,12 @@ follows, so a cold re-solve is the differentiated map. On `li383_low_res`,
 1 % from the first solve, they agree to 3e-6 on mean iota and 1e-4 on an
 interior `Z_sin` objective, where the released family left 1-3 % and 140x
 (`tests/test_implicit_grad_fd.py::test_li383_resolve_fd_matches_the_implicit_derivative`).
-A plain `vmex` run still releases it, as VMEC2000 does.
-Axisymmetric (`ntor = 0`) decks and the lasym `n = 0` entry are exact theta-origin gauges and stay released.
+A plain `vmex` run still releases it, as VMEC2000 does; `solve(..., hold_m1=True)`
+(also `solve_multigrid` and `solve_equilibrium`) holds it as the implicit solves do.
+The lasym `n = 0` entry is held too: at finite `mpol` it moves the surfaces (by
+1e-3 m on `up_down_asymmetric_tokamak` at every `ns` from 9 to 65), and holding it
+makes the 2-D asymmetric gradient equal re-solved differences to 1e-10
+(`tests/test_implicit_grad.py::test_lasym_2d_gradient_matches_resolved_central_differences`).
 
 For free-boundary solves, compare against re-solves anchored by Newton steps
 on the same projected coupled residual. A converged free-boundary solve at
