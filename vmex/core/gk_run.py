@@ -27,7 +27,8 @@ import json
 import time
 import warnings
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+import math
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -41,7 +42,8 @@ class TurbulenceSettings:
 
     The command line exposes ``s``, ``alpha``, the gradients, kinetic electrons and the ``t_max``
     cap; everything else is set here (Python API) or in the GKX decks written next to the output.
-    ``nx``, ``ny`` and ``nz`` default to the resolution validated for the electron model.
+    ``nx`` and ``ny`` default to the resolution validated for the electron model; ``nz`` (points per
+    poloidal turn) to ``flux_tube_box``'s rule for the equilibrium (16 per field period, at least 48).
     """
 
     s: float = 0.5  # normalized toroidal flux of the flux tube
@@ -51,7 +53,7 @@ class TurbulenceSettings:
     ky_min: float = 0.1
     ky_max: float = 1.0
     nky: int = 8
-    nx: int | None = None  # nonlinear grid; nz points per poloidal turn
+    nx: int | None = None  # nonlinear grid; nz points per poloidal turn (None: the box rule)
     ny: int | None = None
     nz: int | None = None
     npol: float = 3.0  # poloidal turns of the flux tube (VMEC field lines need >= 3)
@@ -65,20 +67,21 @@ class TurbulenceSettings:
     out: str | None = None  # GKX NetCDF bundle; default <outdir>/<case>_turbulence.out.nc
 
     def __post_init__(self) -> None:
-        nx, ny, nz = (96, 96, 24) if not self.kinetic_electrons else (16, 16, 16)
+        nx, ny, nz = (96, 96, None) if not self.kinetic_electrons else (16, 16, 16)
         for name, value in (("nx", nx), ("ny", ny), ("nz", nz)):
             if getattr(self, name) is None:
                 object.__setattr__(self, name, value)
 
     @property
     def ntheta(self) -> int:
-        """Total parallel points ``nz * npol``."""
+        """Total parallel points ``nz * npol`` (``nz`` per turn is what the GKX deck carries)."""
         return int(round(self.nz * self.npol))
 
 
 # Linear-run horizon (a / v_ti, capped at t_max); GKX falls back to a Krylov eigensolve when the
 # time fit is not a clean growing mode.
 _T_LINEAR = 50.0
+_NZ_MIN = 48  # points per poloidal turn
 _NU_ION = 0.01
 _BETA_KINETIC = 1e-4  # small finite beta with A_par: GKX's kinetic-electron stepper needs it
 _ELECTRON_MOMENTS = (4, 48)  # (Nl, Nm), GKX's nonlinear kinetic-electron default
@@ -95,7 +98,7 @@ _DECK = """schema_version = 1
 [grid]
 Nx = {nx}
 Ny = {ny}
-Nz = {ntheta}
+Nz = {nz_total}
 Lx = {lx:.6g}
 Ly = {ly:.6g}
 boundary = "{boundary}"
@@ -161,14 +164,20 @@ kinetic = true
 {moments}"""
 
 
-def flux_tube_box(cfg: TurbulenceSettings) -> dict:
-    """Radial box of the nonlinear flux tube: the one place the ``jtwist`` / ``Lx`` rule lives.
+def flux_tube_box(cfg: TurbulenceSettings, geom: dict | None = None) -> dict:
+    """Box of the flux tube: the one place the parallel resolution and the ``jtwist`` / ``Lx`` rule live.
 
-    ``jtwist = None`` leaves GKX's own rule (``jtwist = round(2 s_hat gds21 / gds22)`` at the end
-    of the line, ``x0 = y0 jtwist / that factor``, ``Lx = 2 pi x0``); an integer is written to the deck.
+    Points per poloidal turn: 16 per field period (``nfp / |iota|`` periods per turn), at least 48
+    (``cfg.nz`` overrides). Below that the linear growth rate moves by 1-5% and, from about 24 per
+    turn down, jumps to a grid-scale branch (GKX #527 measurements on five public equilibria).
+    ``jtwist = None`` leaves GKX's own rule (the line is cut where ``2 s_hat gds21 / gds22`` last
+    crosses an integer inside ``npol`` turns, so ``Lx = Ly``); an integer is written to the deck.
     """
     y0 = 1.0 / cfg.ky_min
-    return {"y0": y0, "lx": 2 * np.pi * y0, "ly": 2 * np.pi * y0, "jtwist": None}
+    nz = cfg.nz
+    if nz is None:
+        nz = max(_NZ_MIN, 8 * math.ceil(2 * int(geom["nfp"]) * abs(float(geom["q"]))))
+    return {"y0": y0, "lx": 2 * np.pi * y0, "ly": 2 * np.pi * y0, "jtwist": None, "nz": int(nz)}
 
 
 def twist_estimate(geom: dict, cfg: TurbulenceSettings) -> tuple[int, float]:
@@ -180,7 +189,7 @@ def twist_estimate(geom: dict, cfg: TurbulenceSettings) -> tuple[int, float]:
 
 def write_deck(path: Path, wout: Path, cfg: TurbulenceSettings, *, nonlinear: bool,
                saturation: bool = True) -> Path:
-    """Write the GKX TOML deck for the linear scan or the nonlinear run."""
+    """Write the GKX TOML deck for the linear scan or the nonlinear run (``cfg.nz`` resolved)."""
     species = _SPECIES.format(name="ion", charge=1.0, mass=1.0, tprim=cfg.tprim, fprim=cfg.fprim, nu=_NU_ION,
                               moments=f"Nl = {cfg.nl}\nNm = {cfg.nm}\n" if cfg.kinetic_electrons else "")
     if cfg.kinetic_electrons:
@@ -192,7 +201,7 @@ def write_deck(path: Path, wout: Path, cfg: TurbulenceSettings, *, nonlinear: bo
         name=path.name, species=species, wout=wout.resolve(), s=cfg.s, alpha=cfg.alpha,
         t_max=cfg.t_max if nonlinear else min(_T_LINEAR, cfg.t_max),
         nx=cfg.nx if nonlinear else 1, ny=cfg.ny if nonlinear else 3 * int(ky_grid(cfg)[-1] * box["y0"] + 0.5) + 1,
-        ntheta=cfg.ntheta, npol=cfg.npol, lx=box["lx"], ly=box["ly"], y0=box["y0"],
+        ntheta=cfg.nz, nz_total=cfg.ntheta, npol=cfg.npol, lx=box["lx"], ly=box["ly"], y0=box["y0"],
         boundary="fix aspect" if nonlinear else "linked",
         linear=str(not nonlinear).lower(), nonlinear=str(nonlinear).lower(),
         electrostatic=str(es).lower(), adiabatic=str(es).lower(),
@@ -287,7 +296,8 @@ UNCERTAINTY = (
 def settings_block(wout: Path, cfg: TurbulenceSettings, *, backend: str, out: Path, geom: dict,
                    rel_sem: float | None = None, t_sat_min: float | None = None) -> list[str]:
     """Everything that determines the answer, one compact block (mirrors the ``--trace`` banner)."""
-    box = flux_tube_box(cfg)
+    box = flux_tube_box(cfg, geom)
+    cfg = replace(cfg, nz=box["nz"])
     jt, lx = twist_estimate(geom, cfg) if box["jtwist"] is None else (box["jtwist"], box["lx"])
     kin = cfg.kinetic_electrons
     ele = (f"kinetic (m_e/m_i = 1/3670, nu_e = 0, (Nl, Nm) = {_ELECTRON_MOMENTS}, beta = {_BETA_KINETIC:g} with A_par)"
@@ -303,7 +313,7 @@ def settings_block(wout: Path, cfg: TurbulenceSettings, *, backend: str, out: Pa
         f"   drive     : a/LT = {cfg.tprim:g}, a/Ln = {cfg.fprim:g} (every species); electrons {ele}",
         f"   box       : Lx = {lx:.1f}, Ly = {box['ly']:.1f} (ky_min = {cfg.ky_min:g}, y0 = {box['y0']:g}), "
         f"jtwist = {jt}" + ("" if box["jtwist"] is not None else " (GKX default rule)"),
-        f"   grid      : Nx x Ny x Nz = {cfg.nx} x {cfg.ny} x {cfg.ntheta} ({cfg.nz} per turn), ions (Nl, Nm) = ({cfg.nl}, {cfg.nm})",
+        f"   grid      : Nx x Ny x Nz = {cfg.nx} x {cfg.ny} x {cfg.ntheta} ({cfg.nz} points per turn x {cfg.npol:g} turns), ions (Nl, Nm) = ({cfg.nl}, {cfg.nm})",
         f"   time      : GKX CFL-controlled stepper, cap t_max = {cfg.t_max:g} a/v_ti; {stop}; {window}",
         f"   collisions: nu_i = {_NU_ION:g}; hypercollisions on; k_perp hyperdiffusion D = {cfg.d_hyper:g} "
         "(normalized to the grid cutoff)",
@@ -349,9 +359,15 @@ def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
     if not abs(float(geom["q"])) < 1e3:
         raise ValueError(f"iota is ~0 at s={cfg.s:g}: the field line never closes poloidally, so no flux tube is defined")
 
+    cfg = replace(cfg, nz=flux_tube_box(cfg, geom)["nz"])
     # GKX releases up to 2.9.0 have no saturation_t_min and reject it in a deck.
     has_t_min = "saturation_t_min" in {f.name for f in dataclasses.fields(TimeConfig)}
     lin_case = gkx.load(write_deck(outdir / f"{label}_gkx_linear.toml", wout_path, cfg, nonlinear=False))
+    from gkx.geometry.vmec_eik import build_vmec_geometry_request
+
+    if build_vmec_geometry_request(lin_case).ntheta != cfg.ntheta:  # GKX #527: grid.ntheta is per turn
+        raise ImportError(f"vmex --turbulence writes ntheta per poloidal turn, which GKX {gkx.__version__} counts as a "
+                          "total; install GKX main from #527 on (the next release)")
     nl_case = gkx.load(write_deck(outdir / f"{label}_gkx_nonlinear.toml", wout_path, cfg, nonlinear=True,
                                   saturation=has_t_min))
     for line in settings_block(wout_path, cfg, backend=f"GKX {gkx.__version__}, {jax.default_backend()}", out=out,
