@@ -2982,7 +2982,8 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
+        # lax.map, not a vmapped chunk: jaxlib 0.6 algsimp miscompiles the batched jvp.
+        cols, dz_cols = jax.lax.map(column, (stack, dz0))
         return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):
