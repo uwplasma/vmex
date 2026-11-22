@@ -14,7 +14,8 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   oldest release CI tests; 0.6.2 or newer on Python 3.10), `scipy` (1.16 or
   newer: the optimization examples pass `least_squares(callback=...)`, which
   SciPy 1.16 introduced, so on Python 3.10, where SciPy stops at 1.15, those
-  examples do not run),
+  examples do not run, except `QA_optimization.py` and `pwO_optimization.py`,
+  which call `vmex.optimize.scipy_least_squares` to pass the callback there),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
   `booz_xform_jax>=0.5.2` and `solvax>=0.36.2` (the linear solvers). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to

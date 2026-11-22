@@ -788,4 +788,57 @@ class StallStop:
                 raise StopIteration
 
 
-__all__ = ["EquilibriumReporter", "OptimizationMonitor", "OptimizationRecord", "StallStop"]
+
+class _Halt(Exception):
+    """Carries the accepted iterate out of SciPy when a callback stops it."""
+
+
+def scipy_least_squares(fun: Callable, x0: Any, *, jac: Callable, callback: Callable | None = None,
+                  **kwargs: Any) -> Any:
+    """``scipy.optimize.least_squares`` with ``callback`` also on SciPy < 1.16.
+
+    SciPy 1.16 added ``callback``; SciPy 1.15 is the newest on Python 3.10.
+    There SciPy evaluates ``jac`` once at each accepted iterate, so the
+    wrapped ``jac`` passes ``callback`` the accepted ``x``, ``fun``, ``cost``
+    and ``nit`` (rejected trials are not reported), and a ``StopIteration``
+    ends the run with ``status = -2`` as in SciPy 1.16.
+    """
+    from scipy.optimize import OptimizeResult
+    from scipy.optimize import least_squares
+
+    if callback is None or "callback" in inspect.signature(least_squares).parameters:
+        return least_squares(fun, x0, jac=jac, callback=callback, **kwargs)
+    last = {"x": None, "f": None, "nfev": 0, "njev": 0}
+
+    def observed_fun(x, *args, **kw):
+        f = np.asarray(fun(x, *args, **kw), dtype=float)
+        last.update(x=np.array(x, dtype=float), f=f, nfev=last["nfev"] + 1)
+        return f
+
+    def observed_jac(x, *args, **kw):
+        J = jac(x, *args, **kw)
+        last["njev"] += 1
+        if last["njev"] > 1:
+            f = last["f"] if np.array_equal(last["x"], x) else np.asarray(fun(x, *args, **kw), dtype=float)
+            step = OptimizeResult(x=np.array(x, dtype=float), fun=f, cost=0.5 * float(f @ f),
+                                  nit=last["njev"] - 1, nfev=last["nfev"])
+            try:
+                callback(step)
+            except StopIteration:
+                raise _Halt(step, J) from None
+        return J
+
+    try:
+        return least_squares(observed_fun, x0, jac=observed_jac, **kwargs)
+    except _Halt as halt:
+        step, J = halt.args
+        J = np.asarray(J, dtype=float)
+        grad = J.T @ step.fun
+        step.update(jac=J, grad=grad, optimality=float(np.max(np.abs(grad))), njev=last["njev"],
+                    status=-2, success=False,
+                    message="Stopped because `callback` function raised `StopIteration`")
+        return step
+
+
+__all__ = ["EquilibriumReporter", "OptimizationMonitor", "OptimizationRecord", "StallStop",
+           "scipy_least_squares"]

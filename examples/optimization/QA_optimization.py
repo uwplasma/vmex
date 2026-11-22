@@ -12,13 +12,11 @@ trust-region model applies. ``QA_optimization_scalar.py`` minimizes the
 identical aggregate cost with one reverse equilibrium adjoint per gradient.
 """
 
-import inspect
 import os
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
@@ -147,15 +145,14 @@ for max_mode, max_nfev in zip(MAX_MODES, MAX_NFEV):
     stage = problem.subproblem(max_mode=max_mode, x=x)
     print(f"dof_names = {stage.dof_names}")
     step = PARAMETER_STEP * stage.scales
-    # least_squares accepts a callback from SciPy 1.16, which needs Python 3.11:
-    callback = {"callback": opt.StallStop(monitor, min_iterations=max_nfev // 4)} \
-        if "callback" in inspect.signature(least_squares).parameters else {}
-    result = least_squares(
+    # scipy.optimize.least_squares; also passes the callback on SciPy < 1.16.
+    result = opt.scipy_least_squares(
         stage.residual, stage.x0, jac=stage.residual_jac,
         x_scale=step, max_nfev=max_nfev,
         bounds=(stage.x0 - MAX_PARAMETER_CHANGE * step,
                 stage.x0 + MAX_PARAMETER_CHANGE * step),
-        ftol=1e-6, xtol=1e-10, verbose=2, **callback)
+        ftol=1e-6, xtol=1e-10, verbose=2,
+        callback=opt.StallStop(monitor, min_iterations=max_nfev // 4))
     x = stage.embed(result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)

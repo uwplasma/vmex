@@ -133,7 +133,7 @@ from .statephysics import (
 )
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
-from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop
+from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop, scipy_least_squares
 
 __all__ = [
     "report_targets",
@@ -144,6 +144,7 @@ __all__ = [
     "OptimizationMonitor",
     "OptimizationRecord",
     "StallStop",
+    "scipy_least_squares",
     "make_problem",
     "Equilibrium",
     "solve_equilibrium",
