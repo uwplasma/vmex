@@ -442,6 +442,7 @@ def test_native_current_mode_ignores_the_unused_iota_profile():
 
 def test_exterior_from_state_differentiates_the_net_current_through_runtime():
     """The live-state exterior carries the profile parameters only via ``runtime``."""
+    pytest.importorskip("virtual_casing_jax")
     import dataclasses
 
     from vmex.core import implicit as im
