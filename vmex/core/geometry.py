@@ -48,6 +48,7 @@ __all__ = [
     "RealSpaceGeometry",
     "HalfMeshJacobian",
     "apply_lambda_axis_closure",
+    "apply_lambda_cos_axis_closure",
     "real_space_geometry",
     "half_mesh_jacobian",
     "sqrt_s_half_mesh",
@@ -111,6 +112,21 @@ def apply_lambda_axis_closure(
     copy = jnp.asarray(copy_mask)
     axis_row = jnp.where(copy, lambda_sin[1, :], lambda_sin[0, :])
     return jnp.concatenate([axis_row[None, :], lambda_sin[1:]], axis=0)
+
+
+def apply_lambda_cos_axis_closure(lambda_cos: Array | None, *, modes: ModeTable) -> Array | None:
+    """Apply VMEC's asymmetric-lambda axis closure to the cos coefficients.
+
+    VMEC2000: ``totzsp_mod.f`` (``totzspa``) sets ``lmncc(js=1, n, m=0) =
+    lmncc(js=2, n, m=0)`` for every ``n``, with no ``lthreed`` gate.  ``None``
+    (stellarator-symmetric runs) and ``ns < 2`` pass through.
+    """
+    if lambda_cos is None or int(jnp.shape(lambda_cos)[0]) < 2:
+        return lambda_cos
+    lambda_cos = jnp.asarray(lambda_cos)
+    copy = jnp.asarray(np.asarray(modes.m, dtype=int) == 0)
+    axis_row = jnp.where(copy, lambda_cos[1, :], lambda_cos[0, :])
+    return jnp.concatenate([axis_row[None, :], lambda_cos[1:]], axis=0)
 
 
 @dataclass(frozen=True)

@@ -1110,7 +1110,7 @@ def lift_high_order_state(
     """
 
     from . import postprocess as _pp
-    from .geometry import apply_lambda_axis_closure
+    from .geometry import apply_lambda_axis_closure, apply_lambda_cos_axis_closure
     from .residuals import m1_constrained_to_physical
     from .statephysics import _field_chain
     from .transforms import physical_to_internal_scale
@@ -1158,7 +1158,8 @@ def lift_high_order_state(
     pressure = _pp.full_mesh_from_half(np.asarray(fields.pressure, dtype=float)) / MU0
 
     lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=modes, ntor=runtime.resolution.ntor)
-    lambda_internal = (np.asarray(state.L_cos, dtype=float), np.asarray(lambda_sin, dtype=float))
+    lambda_cos = apply_lambda_cos_axis_closure(state.L_cos, modes=modes)
+    lambda_internal = (np.asarray(lambda_cos, dtype=float), np.asarray(lambda_sin, dtype=float))
     safe_phip = np.where(phipf != 0.0, phipf, 1.0)
     lambda_physical = [
         block * mode_scale[None, :] * float(np.asarray(setup.lamscale)) / safe_phip[:, None]
@@ -1288,7 +1289,7 @@ def traced_lift(
     """
 
     from .residuals import m1_constrained_to_physical
-    from .geometry import apply_lambda_axis_closure
+    from .geometry import apply_lambda_axis_closure, apply_lambda_cos_axis_closure
     from .statephysics import _field_chain
     from .transforms import physical_to_internal_scale
 
@@ -1349,7 +1350,8 @@ def traced_lift(
         return HighOrderEquilibriumState(
             radial_basis=radial_basis, m=m_values, n=n_values, nfp=int(runtime.resolution.nfp),
             R_cos=geometry(R_cos), R_sin=geometry(R_sin), Z_cos=geometry(Z_cos), Z_sin=geometry(Z_sin),
-            L_cos=angle(jnp.asarray(state.L_cos)), L_sin=angle(jnp.asarray(L_sin)),
+            L_cos=angle(apply_lambda_cos_axis_closure(state.L_cos, modes=runtime.modes)),
+            L_sin=angle(jnp.asarray(L_sin)),
             phipf=profile(live.phips), chipf=profile(fields.chips),
             pressure=profile(fields.pressure) / MU0,
             jacobian_sign=int(live.signgs), source="VMEX traced lift",

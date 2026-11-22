@@ -60,7 +60,7 @@ import jax.numpy as jnp
 from . import profiles as prof
 from .errors import VmecInputError
 from .fourier import ModeTable, Resolution, TrigTables, mode_table, trig_tables
-from .geometry import RealSpaceGeometry, apply_lambda_axis_closure, real_space_geometry
+from .geometry import RealSpaceGeometry, apply_lambda_axis_closure, apply_lambda_cos_axis_closure, real_space_geometry
 from .input import VmecInput
 from .residuals import m1_constrained_to_physical, m1_physical_to_constrained
 from .transforms import (
@@ -1081,7 +1081,7 @@ def _geometry_state_arrays(
     ntor = int(np.abs(np.asarray(modes.n)).max(initial=0))
     return dict(
         R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
-        lambda_cos=lambda_cos,
+        lambda_cos=apply_lambda_cos_axis_closure(lambda_cos, modes=modes),
         lambda_sin=apply_lambda_axis_closure(lambda_sin, modes=modes, ntor=ntor),
     )
 

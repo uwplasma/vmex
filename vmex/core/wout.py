@@ -54,6 +54,7 @@ from .fields import energies_and_force_norms, magnetic_fields, metric_elements
 from .fourier import Resolution, mode_table, trig_tables
 from .geometry import (
     apply_lambda_axis_closure,
+    apply_lambda_cos_axis_closure,
     half_mesh_jacobian,
     real_space_geometry,
 )
@@ -672,7 +673,7 @@ def _wout_field_state_lane(state, s_full, phips, phipf, chips, mass, icurv,
     lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=modes, ntor=ntor)
     geometry = real_space_geometry(
         R_cos=R_cos_p, R_sin=R_sin_p, Z_cos=Z_cos_p, Z_sin=Z_sin_p,
-        lambda_cos=state.L_cos, lambda_sin=lambda_sin,
+        lambda_cos=apply_lambda_cos_axis_closure(state.L_cos, modes=modes), lambda_sin=lambda_sin,
         modes=modes, trig=trig, s=s_full,
     )
     jacobian = half_mesh_jacobian(geometry, s=s_full)

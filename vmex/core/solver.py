@@ -138,7 +138,7 @@ from .forces import (
     spectral_mhd_forces,
 )
 from .fourier import ModeTable, Resolution, TrigTables, mode_table, trig_tables
-from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_geometry
+from .geometry import apply_lambda_axis_closure, apply_lambda_cos_axis_closure, half_mesh_jacobian, real_space_geometry
 from .input import VmecInput
 from .preconditioner import (
     RadialPreconditionerCoefficients, TridiagonalMatrices,
@@ -611,7 +611,7 @@ def _geometry(
     lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=rt.modes, ntor=rt.resolution.ntor)
     geometry = real_space_geometry(
         R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
-        lambda_cos=state.L_cos, lambda_sin=lambda_sin,
+        lambda_cos=apply_lambda_cos_axis_closure(state.L_cos, modes=rt.modes), lambda_sin=lambda_sin,
         modes=rt.modes, trig=rt.trig, s=setup.s_full, use_fft=use_fft,
         odd_m_scaling=setup.scalxc,
     )

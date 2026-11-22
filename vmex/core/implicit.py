@@ -168,7 +168,7 @@ from .errors import AdjointSolveError, VmecError
 from .fields import magnetic_fields, metric_elements
 from .fourier import Resolution
 from .geometry import (
-    apply_lambda_axis_closure, half_mesh_jacobian, real_space_geometry,
+    apply_lambda_axis_closure, apply_lambda_cos_axis_closure, half_mesh_jacobian, real_space_geometry,
 )
 from .input import VmecInput
 from .multigrid import solve_multigrid
@@ -1120,7 +1120,8 @@ def _raw_force_state(
     )
     geometry = real_space_geometry(
         R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
-        lambda_cos=x.L_cos, lambda_sin=lambda_sin, modes=rt.modes,
+        lambda_cos=apply_lambda_cos_axis_closure(x.L_cos, modes=rt.modes) if axis_closure else x.L_cos,
+        lambda_sin=lambda_sin, modes=rt.modes,
         trig=rt.trig, s=s, axis_closure=axis_closure,
         odd_m_scaling=scalxc,
     )
