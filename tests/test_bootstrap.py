@@ -840,7 +840,7 @@ def test_least_squares_current_dofs_implicit():
             [w * (opt._call_term(f, eq_t) - t) for (f, t, w) in terms])
 
     x_star = np.asarray(res.x, dtype=float)
-    for col in (nb, nb + 2):  # one spline value + curtor
+    for col in (0, nb, nb + 2):  # one boundary dof, one spline value, curtor
         h = 1e-4
         xp = x_star.copy(); xp[col] += h
         xm = x_star.copy(); xm[col] -= h

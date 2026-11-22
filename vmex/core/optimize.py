@@ -2912,9 +2912,9 @@ def _least_squares_implicit(
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state, data)
 
-        def column(tp_stack):
+        def column(args):
+            tp_stack, rhs = args
             tp = tangent_of(tp_stack)
-            rhs = rhs_of(tp)
             dz, krylov = imp._adjoint_solve(
                 Fz, rhs, cfg, rtol=data["jac_tol"],
                 max_restarts=certify_maxiter)
@@ -2923,8 +2923,10 @@ def _least_squares_implicit(
             return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
+        # Right-hand sides by lax.map (see _implicit_evolved_tangent_multi_rhs).
+        rhs_batch = jax.lax.map(lambda t: rhs_of(tangent_of(t)), tangent_stack)
         cols, dz_cols, krylov = chunk_map(
-            column, tangent_stack, chunk_size=tangent_chunk
+            column, (tangent_stack, rhs_batch), chunk_size=tangent_chunk
         )
         return jnp.transpose(cols), dz_cols, _linear_response_summary(krylov)
 
