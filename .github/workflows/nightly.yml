@@ -172,11 +172,11 @@ jobs:
         # to skip in every lane -- which is how #354's aliased effective ripple
         # shipped.  This is the one job that exercises the released extras.
         run: |
-          python -m pip install ".[coils,turbulence,freeb,neoclassical,optimizers]" \
+          python -m pip install ".[alfven,coils,turbulence,freeb,neoclassical,optimizers]" \
             simsopt pytest pytest-xdist
       - name: Verify imports
         run: |
-          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax"
+          python -c "import essos, gkx, virtual_casing_jax, neo_jax, jaxopt, optax, fax"
           python -c "import simsopt"
       - name: Fetch reference assets
         run: python tools/fetch_assets.py --bundle reference-nc
@@ -200,8 +200,8 @@ jobs:
       # executed anywhere -- ``pip install vmex[neoclassical]`` plus RUN_FULL=1
       # was the documented on-demand recipe and nothing automated it.  The
       # example takes about 90 s at its shipped settings; it has no cheaper
-      # smoke path, because coarsening the NEO controls returns a profile that
-      # no longer rises outward, which is the result it exists to show.
+      # smoke path, because coarsening the NEO controls returns a profile
+      # several times too large.
       - name: Run effective-ripple smoke
         env:
           RUN_FULL: "1"
