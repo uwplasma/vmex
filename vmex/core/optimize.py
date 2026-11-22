@@ -482,6 +482,9 @@ def solve_equilibrium(
     iteration cap, using the same names as the optimization problem API.
     Force-balance polishing is strictly opt-in: the default
     ``polish_force_balance=False`` returns the ordinary converged VMEC state.
+    ``hold_m1=True`` (a :func:`~vmex.core.multigrid.solve_multigrid` keyword)
+    holds the m=1 constrained coordinate on the initial guess, as the
+    implicit lanes do; the default releases it as VMEC2000 does.
     """
     if forward_ftol is not None and "ftol_array" in solve_kwargs:
         raise ValueError("forward_ftol and ftol_array cannot both be supplied")

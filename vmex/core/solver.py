@@ -708,8 +708,12 @@ def prepare_runtime(
     prec2d: Prec2DConfig | None = None,
     use_fft: bool = False,
     lambda_m0_floor: float | None = None,
+    hold_m1: bool | None = None,
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
+
+    ``hold_m1`` (``None``: the :data:`HOLD_M1` context) never releases the
+    m=1 constrained coordinate; ``False`` releases it as VMEC2000 does.
 
     Raises ``RuntimeError`` when JAX is not in float64 (see :func:`vmex.configure`).
 
@@ -786,7 +790,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
-        hold_m1=bool(HOLD_M1.get() and setup.lconm1),
+        hold_m1=bool((HOLD_M1.get() if hold_m1 is None else hold_m1) and setup.lconm1),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -2354,21 +2358,6 @@ HOLD_M1: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "vmex_hold_m1", default=False)
 
 
-def hold_m1_keyword(fn: Callable) -> Callable:
-    """``fn(..., hold_m1=True)`` runs with :data:`HOLD_M1` set; the default
-    ``False`` keeps the VMEC2000 release (``residue.f90``)."""
-    @functools.wraps(fn)
-    def run(*args, **kwargs):
-        if not kwargs.get("hold_m1"):
-            return fn(*args, **kwargs)
-        token = HOLD_M1.set(True)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            HOLD_M1.reset(token)
-    return run
-
-
 def _resolve_use_fft(
     use_fft: bool | None, device: Any, resolution: Resolution
 ) -> bool:
@@ -2783,7 +2772,6 @@ def _polish_solve_result(
     )
 
 
-@hold_m1_keyword
 def solve(
     source: VmecInput | RunSetup,
     resolution: Resolution | None = None,
@@ -2805,14 +2793,15 @@ def solve(
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
     raise_on_max_iterations: bool = True,
-    hold_m1: bool = False,
+    hold_m1: bool | None = None,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
 
     ``hold_m1=True`` never releases the m=1 constrained coordinate and keeps
     it on the ``profil3d.f`` guess, as the implicit lanes do, so the root is a
-    function of the input alone; the default releases it below
-    ``fsqz = 1e-6`` as VMEC2000 does.
+    function of the input alone; ``False`` releases it below ``fsqz = 1e-6``
+    as VMEC2000 does; the default ``None`` follows :data:`HOLD_M1` (unset:
+    released).
 
     ``source`` is a parsed :class:`vmex.core.input.VmecInput`
     (recommended; supplies the ``delt/tcon0/gamma/nstep/ftol/niter`` defaults,
@@ -2933,6 +2922,7 @@ def solve(
             lconm1=lconm1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
             use_fft=use_fft_resolved, lambda_m0_floor=lambda_m0_floor,
+            hold_m1=hold_m1,
         )
     with device_context(device, rt.resolution):
         if initial_state is not None:

@@ -1215,6 +1215,18 @@ def test_plain_solve_hold_m1_keyword_holds_the_lasym_n0_entry(lasym):
     np.testing.assert_array_equal(np.asarray(held.Z_cos)[:, k], guess)
     np.testing.assert_array_equal(np.asarray(held.Z_cos), np.asarray(x_held.Z_cos))
     assert np.max(np.abs(np.asarray(released.Z_cos)[:, k] - guess)) > 1e-6
+    inner = im._holding_m1(solver.solve)(inp, cfg.resolution, hold_m1=False, **kwargs).state
+    np.testing.assert_array_equal(np.asarray(inner.Z_cos), np.asarray(released.Z_cos))
+
+
+def test_solve_equilibrium_passes_hold_m1_to_the_solve(lasym):
+    """``solve_equilibrium(..., hold_m1=True)`` reaches the solve: the lasym
+    ``(1, 0)`` constrained entry stays on the guess."""
+    from vmex.core.optimize import solve_equilibrium
+
+    _, inp, cfg, _, x_held, _, _ = lasym
+    eq = solve_equilibrium(inp, hold_m1=True)
+    np.testing.assert_array_equal(np.asarray(eq.state.Z_cos), np.asarray(x_held.Z_cos))
 
 
 @pytest.mark.full  # five ns = 17 solves, about a minute on a laptop
@@ -1253,6 +1265,37 @@ def test_lasym_2d_gradient_matches_resolved_central_differences():
         rel = np.abs(ad - fd) / np.abs(fd)
         print(f"d(wb, Z_cos(1,0))/d({field}(0,2)): AD={ad} FD={fd} rel={rel}")
         assert np.all(rel < 1e-7), (field, rel)
+
+
+@pytest.mark.full  # three ns = 11 solves
+def test_lasym_3d_gradient_matches_resolved_central_differences():
+    """The same hold on a 3-D asymmetric deck: ``d(wb)`` and ``d(aspect)``
+    along ``rbs(n=1, m=1)`` equal central differences of ``solve_implicit``
+    re-solves (h = 1e-5).  Measured 2.4e-10 and 1.1e-10; releasing the
+    ``n = 0`` entry gave 8.1e-6 and 2.8e-6."""
+    inp = dataclasses.replace(
+        VmecInput.from_file(str(DATA_DIR / "input.basic_non_stellsym_simsopt")),
+        ns_array=np.array([11]), ftol_array=np.array([1e-14]),
+        niter_array=np.array([20000]))
+    cfg = im.make_config(inp, ftol=1e-14, max_iterations=20000)
+    p0 = im.params_from_input(inp)
+
+    def outputs(p):
+        rt = im.runtime_from_params(p, cfg)
+        state = im.solve_implicit(p, cfg)
+        return jnp.stack([im.mhd_energy(state, rt)[0], im.aspect_ratio(state, rt)])
+
+    zero = jax.tree.map(jnp.zeros_like, p0)
+    t = dataclasses.replace(zero, rbs=zero.rbs.at[int(inp.ntor) + 1, 1].set(1.0))
+    ad = np.asarray(sum(
+        jnp.tensordot(a, b, axes=b.ndim)
+        for a, b in zip(jax.tree.leaves(jax.jacrev(outputs)(p0)), jax.tree.leaves(t))))
+    h = 1e-5
+    fd = (np.asarray(outputs(jax.tree.map(lambda a, d: a + h * d, p0, t)))
+          - np.asarray(outputs(jax.tree.map(lambda a, d: a - h * d, p0, t)))) / (2 * h)
+    rel = np.abs(ad - fd) / np.abs(fd)
+    print(f"d(wb, aspect)/d(rbs(1,1)): AD={ad} FD={fd} rel={rel}")
+    assert np.all(rel < 1e-7), rel
 
 
 # ===========================================================================

@@ -59,7 +59,7 @@ from .solver import (
     _prefetch_block_lane,
     _polish_solve_result, _release_used_lane_executables, _result_from_carry,
     _resolve_force_balance_polish, _solve_stage, _resolve_use_fft,
-    hold_m1_keyword, hot_restart_state, prepare_runtime, resolution_from_input,
+    HOLD_M1, hot_restart_state, prepare_runtime, resolution_from_input,
     runtime_with_baselines,
 )
 from .transforms import odd_m_sqrt_s_scaling
@@ -217,7 +217,7 @@ _PREFETCH_ATTEMPTED: set = set()
 def _launch_lane_prefetch(
     inp: VmecInput, *, ns_next: int, ftol_next: float, niter_next: int,
     lconm1: bool, time_step, tcon0, gamma, nstep, precon_type,
-    prec2d_threshold, prec2d, use_fft, device, lambda_m0_floor=None,
+    prec2d_threshold, prec2d, use_fft, device, lambda_m0_floor=None, hold_m1=False,
 ) -> threading.Thread:
     """Start compiling the NEXT rung's block-lane executable in the background.
 
@@ -242,7 +242,7 @@ def _launch_lane_prefetch(
                     tcon0=tcon0, gamma=gamma,
                     precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
-                    use_fft=use_fft, lambda_m0_floor=lambda_m0_floor,
+                    use_fft=use_fft, lambda_m0_floor=lambda_m0_floor, hold_m1=hold_m1,
                 )
                 _prefetch_block_lane(
                     rt, use_fft=use_fft, time_step0=time_step0
@@ -256,7 +256,6 @@ def _launch_lane_prefetch(
     return thread
 
 
-@hold_m1_keyword
 def solve_multigrid(
     inp: VmecInput,
     ns_array=None,
@@ -284,7 +283,7 @@ def solve_multigrid(
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
     lambda_m0_floor: float | None = None,
-    hold_m1: bool = False,
+    hold_m1: bool | None = None,
 ) -> SolveResult:
     """Fixed-boundary multigrid solve over the ``NS_ARRAY`` ladder.
 
@@ -439,6 +438,7 @@ def solve_multigrid(
     )
     if lambda_m0_floor is None:
         lambda_m0_floor = inp.lambda_m0_floor
+    hold_m1 = HOLD_M1.get() if hold_m1 is None else bool(hold_m1)  # resolved here: the prefetch thread has no context
     for igrid in range(n_stages):
         nsval = int(ns_arr[igrid])
         resolution = resolution_from_input(inp, ns=nsval)
@@ -450,7 +450,7 @@ def solve_multigrid(
                 tcon0=tcon0, gamma=gamma,
                 precon_type=precon_type, prec2d_threshold=prec2d_threshold,
                 prec2d=prec2d, use_fft=stage_use_fft,
-                lambda_m0_floor=lambda_m0_floor,
+                lambda_m0_floor=lambda_m0_floor, hold_m1=hold_m1,
             )
             target = _placement_device(device, resolution)
             state = _put_numeric_leaves(state, target)
@@ -505,7 +505,7 @@ def solve_multigrid(
                     gamma=gamma, nstep=nstep, precon_type=precon_type,
                     prec2d_threshold=prec2d_threshold, prec2d=prec2d,
                     use_fft=use_fft_next, device=device,
-                    lambda_m0_floor=lambda_m0_floor,
+                    lambda_m0_floor=lambda_m0_floor, hold_m1=hold_m1,
                 )
         with device_context(device, resolution):
             carry = _solve_stage(
@@ -571,6 +571,7 @@ def solve_multigrid(
                 polish_force_balance=polish,
                 polish_config=polish_config,
                 lambda_m0_floor=lambda_m0_floor,
+                hold_m1=hold_m1,
             )
         last_stage = not np.any(ns_arr[igrid + 1:] >= nsval)
         # runvmec.f (lgiveup): end the ladder, and so report non-convergence,
