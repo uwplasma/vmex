@@ -30,7 +30,7 @@ def test_saturated_mean_is_window_mean_with_batch_error():
 
 
 def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
-    cfg = gk_run.TurbulenceSettings(ky_min=0.1, ky_max=1.0, nky=8)
+    cfg = gk_run.TurbulenceSettings(ky_min=0.1, ky_max=1.0, nky=8, nz=48)
     ky = gk_run.ky_grid(cfg)
     assert ky[0] == pytest.approx(0.1) and ky[-1] == pytest.approx(1.0)
     np.testing.assert_allclose(ky / 0.1, np.rint(ky / 0.1), atol=1e-12)
@@ -44,29 +44,37 @@ def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
                                            nonlinear=True).read_text())
     assert [s["name"] for s in deck["species"]] == ["ion", "electron"]
     assert deck["physics"]["nonlinear"] is True and deck["physics"]["adiabatic_electrons"] is False
-GEOM = {"q": 1.4, "s_hat": 0.8, "gds21": np.array([0.5, 0.0]), "gds22": np.array([2.0, 1.0])}
+GEOM = {"q": 1.4, "nfp": 1, "s_hat": 0.8, "gds21": np.array([0.5, 0.0]), "gds22": np.array([2.0, 1.0])}
 
 
 def test_defaults_deck_and_settings_block(tmp_path):
     cfg = gk_run.TurbulenceSettings()
     assert (cfg.nx, cfg.ny, cfg.nz, cfg.npol, cfg.nl, cfg.nm, cfg.t_max, cfg.t_sat_min) == (
-        96, 96, 24, 3.0, 4, 8, 800.0, 300.0)
+        96, 96, None, 3.0, 4, 8, 800.0, 300.0)
     out = tmp_path / "x.out.nc"
+    text = "\n".join(gk_run.settings_block(Path("wout_x.nc"), cfg, backend="GKX test, cpu", out=out, geom=GEOM,
+                                           rel_sem=0.1, t_sat_min=300.0))
+    cfg = dataclasses.replace(cfg, nz=48)
     deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
                                            nonlinear=True).read_text())
-    assert deck["grid"]["Nz"] == deck["grid"]["ntheta"] == 72 and deck["geometry"]["npol"] == 3.0
+    assert (deck["grid"]["Nz"], deck["grid"]["ntheta"]) == (144, 48) and deck["geometry"]["npol"] == 3.0
     assert deck["grid"]["boundary"] == "fix aspect" and deck["time"]["saturation_t_min"] == 300.0
     old = tomllib.loads(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
                                           saturation=False).read_text())
     assert "saturation_t_min" not in old["time"]
-    text = "\n".join(gk_run.settings_block(Path("wout_x.nc"), cfg, backend="GKX test, cpu", out=out, geom=GEOM,
-                                           rel_sem=0.1, t_sat_min=300.0))
     # jtwist = round(2 * 0.8 * 0.5 / 2) = 0 -> 1; the box follows GKX's rule x0 = y0 jtwist / factor
     for needle in ("s = 0.5 (rho = 0.707)", "alpha = 0", "q = 1.400", "s_hat = 0.800", "a/LT = 3", "a/Ln = 1",
-                   "96 x 96 x 72", "(Nl, Nm) = (4, 8)", "y0 = 10", "jtwist = 1 (GKX default rule)",
+                   "96 x 96 x 144 (48 points per turn x 3 turns)", "(Nl, Nm) = (4, 8)", "y0 = 10", "jtwist = 1 (GKX default rule)",
                    "t_max = 800", "SEM <= 10%", "t = 300", "adiabatic", "nu_i = 0.01", "D = 0.05", "float32",
                    "uncertainty", "seed", str(out)):
         assert needle in text, needle
+
+
+def test_points_per_turn_rule():
+    box = lambda nfp, q, **kw: gk_run.flux_tube_box(gk_run.TurbulenceSettings(**kw), {"nfp": nfp, "q": q})["nz"]  # noqa: E731
+    # 16 per field period, at least 48: tokamak, nfp 3 QI, nfp 4 (iota 1.1), nfp 6 (iota 1.42)
+    assert [box(1, 1 / 0.875), box(3, 1 / 1.061), box(4, 1 / 1.1), box(6, 1 / 1.419)] == [48, 48, 64, 72]
+    assert box(4, 1 / 1.1, nz=24) == 24  # an explicit nz wins
 
 
 def test_kinetic_electron_deck_follows_gkx_example(tmp_path):
