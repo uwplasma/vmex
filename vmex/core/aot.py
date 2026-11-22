@@ -18,6 +18,7 @@ directory is kept to ``MAX_FILES`` executables, oldest first.
 
 from __future__ import annotations
 
+import copyreg
 import hashlib
 import os
 import pickle
@@ -79,6 +80,20 @@ def _source_hash() -> str | None:
                 h.update(path.read_bytes())
         _SOURCE_HASH = h.hexdigest()[:16]
     return _SOURCE_HASH
+
+
+def _auto_layout() -> Any:
+    """JAX's layout singleton, for unpickling it as itself."""
+    from jax._src.layout import AutoLayout
+    return AutoLayout
+
+
+try:  # JAX 0.12.1 unpickles the singleton as a second object that its gradient
+    # type check rejects, so outputs of a loaded executable fail jax.grad.
+    if pickle.loads(pickle.dumps(_auto_layout())) is not _auto_layout():
+        copyreg.pickle(type(_auto_layout()), lambda _: (_auto_layout, ()))
+except ImportError:
+    pass
 
 
 def _directory() -> Path | None:
