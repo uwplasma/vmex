@@ -63,13 +63,15 @@ def test_constant_drift_angle_gives_the_trapped_fraction(radial, gradient, tange
     """
     eps = 0.2
     lines, _ = _model_lines(eps, radial=radial, gradient=gradient, tangency=tangency)
-    out = gammac.gamma_c_from_fieldlines(
-        **lines, num_transit=3, completeness=0.0, max_levels=16)
-    angle = (2 / np.pi) * np.arctan2(radial, abs(tangency * gradient))
-    expected = angle**2 * np.sqrt(eps / (1 + eps))
-    assert not bool(out["overflow"])
-    np.testing.assert_allclose(float(out["gamma_c"]), expected, rtol=2e-4, atol=1e-12)
-    np.testing.assert_allclose(np.asarray(out["gamma_c_lines"]), expected, rtol=2e-4, atol=1e-12)
+    # Nemov's form carries the constant tangency factor; Velasco's (default) does not
+    for width, factor in ((0.05, tangency), (None, 1.0)):
+        out = gammac.gamma_c_from_fieldlines(
+            **lines, num_transit=3, completeness=0.0, max_levels=16, tangency_width=width)
+        angle = (2 / np.pi) * np.arctan2(radial, abs(factor * gradient))
+        expected = angle**2 * np.sqrt(eps / (1 + eps))
+        assert not bool(out["overflow"])
+        np.testing.assert_allclose(float(out["gamma_c"]), expected, rtol=2e-4, atol=1e-12)
+        np.testing.assert_allclose(np.asarray(out["gamma_c_lines"]), expected, rtol=2e-4, atol=1e-12)
 
 
 @pytest.mark.parametrize("level", [1.04, 1.12, 1.19])
@@ -101,7 +103,7 @@ def test_stationary_points_resolve_wells_smaller_than_a_cell():
     # sample a field whose second harmonic dips below the level between two nodes
     B = 1.0 + 0.2 * jnp.cos(x) + 0.0 * x
     F = jnp.stack([B] + [jnp.ones(n)] * 5)
-    levels, _ = gammac._breakpoint_nodes(F, 2 * np.pi, 16, 2)[0:2]
+    levels, _ = gammac._breakpoint_nodes(F, 2 * np.pi, 16, 2, 8)[0:2]
     assert bool(jnp.all(jnp.diff(jnp.sort(levels)) >= 0))
     c = gammac._hermite(B)
     t, ok = gammac._stationary(c)
@@ -348,7 +350,8 @@ def test_line_kernel_is_mirror_invariant(qa_eq):
     F = gammac._check_lines(lines["bmag"], lines)
     sign = jnp.array([1.0, -1.0, 1.0, 1.0, 1.0, 1.0])[:, None]
     line = jax.jit(jax.value_and_grad(lambda f: gammac._gamma_c_line(
-        f, length, K=96, Q=3, W=16, qorder=32, width=0.05, completeness=0.05)[0]))
+        f, length, K=96, Q=3, W=16, qorder=32, width=0.05, completeness=0.05,
+        panels=32)[0]))
     for index in (1, 2):
         value, grad = line(F[index])
         mirror, mgrad = line(F[index][:, ::-1] * sign)
@@ -356,6 +359,37 @@ def test_line_kernel_is_mirror_invariant(qa_eq):
         scale = float(jnp.max(jnp.abs(grad)))
         np.testing.assert_allclose(np.asarray(mgrad[:, ::-1] * sign), np.asarray(grad),
                                    atol=5e-3 * scale)
+
+
+def test_gamma_c_respects_the_stellarator_reflection():
+    """``d(Gamma_c)/d(sine)`` is small on a stellarator-symmetric state.
+
+    ``Gamma_c`` is even under the reflection and the sine-parity spectra are
+    odd; the line set is centred on the field-line label and closed under
+    ``alpha -> -alpha``.  Run on a symmetric deck solved with ``LASYM = T``
+    so the sine coefficients are real degrees of freedom with round-off
+    content.  The identity is not exact: on the two self-mirror lines mirror
+    wells give tied critical levels, whose zero-width pitch panels make the
+    derivative depend on the tie order.  Empty panels were the source of
+    sine-parity gradients 1e4 times the physical one (nodes on a singular
+    level); now the ratio is 2.6e-2 (the pre-rewrite code reached 3e-11).
+    """
+    inp = dataclasses.replace(
+        VmecInput.from_file(DATA_DIR / "input.li383_low_res"), lasym=True)
+    eq = opt.solve_equilibrium(inp)
+    assert eq.result.converged and bool(eq.runtime.setup.lasym)
+    state, rt = eq.state, eq.runtime
+    assert float(jnp.max(jnp.abs(state.R_sin))) < 1.0e-12 * float(jnp.max(jnp.abs(state.R_cos)))
+
+    def total(spectral):
+        return gammac.gamma_c_state(
+            spectral, rt, surfaces=(0.5,), **{**FAST, "nalpha": 6, "num_transit": 2})["gamma_c"][0]
+
+    gradient = jax.grad(total)(state)
+    physical = float(jnp.max(jnp.abs(gradient.R_cos)))
+    spurious = float(jnp.max(jnp.abs(gradient.R_sin)))
+    assert physical > 1.0
+    assert spurious / physical < 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +468,7 @@ def test_wout_row_map_preserves_values_and_directional_derivatives(lasym, kind):
         zmnc=.01 * rmnc if lasym else None,
         lmnc=zero if lasym else None)
     options = dict(nalpha=4, num_transit=1, points_per_transit=16, quadrature_order=8,
-                   max_wells=4, **({"pitch_nodes": 2, "max_levels": 8} if kind == "c"
+                   max_wells=4, **({"pitch_nodes": 2, "max_levels": 8, "pitch_panels": 4} if kind == "c"
                                    else {"pitch_levels": 6}))
     cfg = gammac._resolve(kind, options) + (("nfp", 1),)
     settings = dict(rows=(2, 4), kind=kind, cfg=cfg)

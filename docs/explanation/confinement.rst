@@ -963,27 +963,62 @@ Axisymmetry sends :math:`\Gamma_c \to 0` exactly, and a constant drift
 angle gives :math:`\Gamma_c = \gamma^2\,(\pi/2\sqrt 2)\,f_{\mathrm{trapped}}`
 (both anchored in ``tests/test_gammac.py``).
 
-**Nemov's tangency factor is discontinuous.**  The surface-tangency factor
-:math:`T = |\nabla\rho|\,\Vert e_\alpha\Vert` is a point value at the lowest
-point of a well, and a well with several dips of nearly equal depth — every
-quasisymmetric or omnigenous field has them — switches its lowest point
-abruptly between dips while :math:`T` varies by factors of several along a
-line.  The exact hard :math:`\Gamma_c` is therefore discontinuous in the
-boundary there (changes of 40 % between 1e-3 steps were measured).
-:class:`~vmex.core.gammac.GammaC` replaces the point value by the Boltzmann
-average :math:`\exp(-(B-B_{\min})/(w\,(b-B_{\min})))` over the well, with
-``tangency_width`` :math:`w`; it tends to Nemov's value as
-:math:`w \to 0` (Laplace) and is smooth for :math:`w > 0`.  The default
-:math:`w = 0.05` is the smallest width the default 64-node sine map resolves;
-the tables in the resolution section give the value against :math:`w`.
+**Which drift ratio.**  By default :class:`~vmex.core.gammac.GammaC` uses
+Velasco's :math:`\gamma_c^*` (eq. 14, bounce-averaged drift ratio in
+:math:`(s, \alpha)` coordinates), which is smooth by construction; Nemov's
+form multiplies the poloidal drift by the surface-tangency factor
+:math:`T = |\nabla\rho|\,\Vert e_\alpha\Vert` at the lowest point of each
+well (``tangency_width`` set).  That point value jumps between the dips of a
+well with several nearly equal ones — every quasisymmetric or omnigenous
+field has them — and :math:`T` varies by factors of several along a line, so
+the exact Nemov :math:`\Gamma_c` is discontinuous in the boundary (changes of
+40 % between 1e-3 steps were measured).  With a width the factor is replaced
+by the Boltzmann average
+:math:`\exp(-(B-B_{\min})/(w\,(b-B_{\min})))` over the well, which tends to
+Nemov's value as :math:`w \to 0`; it moves the value by 10 to 25 % between
+:math:`w = 0.05` and 0.01 and the 64-node sine map cannot resolve narrower
+widths.  DESC's ``Gamma_c Velasco`` is a different object: it uses the
+literal line integral of the poloidal drift with a secular shear term that
+drives the value to zero as the line lengthens, whereas the periodic form
+used here is the exact :math:`\partial_\psi J` (finite in the limit).
 Near a quasisymmetric optimum :math:`\Gamma_c` is proportional to the
 quasisymmetry error itself (the superbanana resonances have area
-:math:`\propto |v_r|`), so it has a cusp there rather than a minimum with
-zero slope: use finite differences away from the exact optimum and the
-least-squares form (``GammaC.total``) in optimizers.  The reverse-mode
-gradient needs a tight forward solve (``forward_ftol=1e-12``, ``1e-14`` at a
-sharp quasisymmetric start); a looser solve makes the adjoint miss its
-acceptance and the gradient is rejected rather than returned.
+:math:`\propto |v_r|`), so it has a cusp there: use finite differences away
+from the exact optimum and the least-squares form (``GammaC.total``) in
+optimizers.  The reverse-mode gradient needs a tight forward solve
+(``forward_ftol=1e-12``, ``1e-14`` at a sharp quasisymmetric start); a looser
+solve makes the adjoint miss its acceptance and the gradient is rejected
+rather than returned.  Even then the state cotangent of :math:`\Gamma_c` is
+large (1e4 per coefficient) against a physical response of order one, and on
+some boundary coefficients (QH, QI, nfp = 2 seed: coefficient 1) the
+reverse-mode value is several times the finite difference of the re-solved
+value:
+
+.. list-table:: Reverse mode against finite differences of the re-solved value (default form, coefficient 1)
+   :header-rows: 1
+
+   * - Start
+     - Reverse mode
+     - Finite difference, steps 3e-5 and 1e-4
+   * - QH nfp 4
+     - 9.10
+     - 3.88, 2.54
+   * - QI nfp 2
+     - 18.98
+     - 2.70, 3.95
+   * - nfp 2 seed
+     - 4.87
+     - 9.51, 21.54
+   * - nfp 4 seed
+     - 16.72
+     - 3.25, 5.20
+
+At fixed state the linearization of the kernel with the true re-solved state
+change reproduces the finite difference (QH: 0.5 to 1.0 against a true 0.9 to
+5.8) and not the adjoint value, so the discrepancy sits in the implicit
+adjoint applied to this cotangent, not in the bounce kernel; the nfp 2
+ellipse components of the earlier Nemov-form runs (-23.58 against -23.47 and
+-10.81 against -10.54) did agree.
 
 :class:`~vmex.core.gammac.GammaAlpha` implements the Velasco et al. 2021
 (section 4.2, eq. 25) loss fraction on the same wells: every well is
@@ -1048,15 +1083,13 @@ report the validation set. The sampling noise of :math:`\Gamma_c` is real:
 shifting the field-line origin changes the hard value by 5 to 13 % and can
 reorder near-equal candidates; between distinct designs the order is stable.
 
-**Convergence of Gamma_c.** Value of :class:`~vmex.core.gammac.GammaC` at
-:math:`s = 0.5` on six solved equilibria (QA, QH and QI optimized, an nfp = 4
-ellipse, a near-axisymmetric QA with its toroidal modes scaled by 0.05),
-varying one budget around the default (16 lines, 4 transits, 32 points per
-transit, 4 pitch nodes, 64-node sine map, 192 level slots) and quoted
-relative to the default; the last line is the default against a reference of
-24 lines, 8 transits, 48 points, 6 nodes and a 128-node sine map.
+**Convergence of Gamma_c.** Default Velasco form at :math:`s = 0.5`; each
+budget is doubled around the default (16 lines, 4 transits, 64 points per
+transit, 4 nodes on each of 64 equispaced pitch panels plus the critical
+levels, 64-node sine map) and the percentage change of the last doublings is
+quoted.
 
-.. list-table:: Gamma_c against its budgets (default = 1)
+.. list-table:: Change of Gamma_c at the last doublings (%)
    :header-rows: 1
 
    * - Budget
@@ -1065,110 +1098,52 @@ relative to the default; the last line is the default against a reference of
      - QI
      - nfp 4 ellipse
      - near-axisymmetric
-   * - 8 lines
-     - 0.98
-     - 1.06
-     - 1.02
-     - 0.80
-     - 0.99
-   * - 32 lines
-     - 1.01
-     - 1.00
-     - 1.01
-     - 1.13
-     - 0.95
-   * - 2 / 8 transits
-     - 0.86 / 1.01
-     - 0.98 / 1.00
-     - 0.96 / 0.98
-     - 0.93 / 1.08
-     - 0.71 / 0.97
-   * - 16 / 64 points per transit
-     - 0.93 / 1.00
-     - 0.96 / 1.01
-     - 2.2 / 0.75
-     - 0.99 / 1.00
-     - 0.88 / 1.23
-   * - 3 / 6 pitch nodes
-     - 1.00 / 1.00
-     - 1.00 / 1.00
-     - 1.01 / 1.00
-     - 1.00 / 1.00
-     - 1.00 / 1.00
-   * - sine map 32 / 128
-     - 1.00 / 1.00
-     - 1.09 / 1.03
-     - 1.03 / 1.00
-     - 0.98 / 0.99
-     - 1.00 / 1.00
-   * - ``tangency_width`` 0.02 / 0.01
-     - 1.17 / 1.24
-     - 1.07 / 1.09
-     - 1.05 / 1.08
-     - 1.04 / 1.07
-     - 0.98 / 0.97
-   * - default against reference
-     - -1 %
-     - -4 %
-     - +27 %
-     - -14 %
-     - +12 %
+   * - lines 16 -> 32 -> 64
+     - 0.6, -0.9
+     - 0.0, 0.2
+     - 0.6, 0.4
+     - 2.2, 1.1
+     - -5.4, -10
+   * - transits 4 -> 8 -> 16
+     - -0.6, 1.0
+     - 0.0, 0.2
+     - 1.0, 0.4
+     - 1.3, 3.2
+     - -4.3, -0.5
+   * - points per transit 32 -> 64 -> 128
+     - -0.4, 0.0
+     - 0.2, 0.0
+     - -19.5, 1.3
+     - 0.1, 0.0
+     - 64 and finer overflow the level slots
+   * - pitch panels 64 -> 128 -> 256
+     - -0.7, 0.6
+     - 0.0, 0.4
+     - 0.1, 0.0
+     - 0.0, 0.1
+     - 1.4, -0.5
+   * - nodes per panel 4 -> 6 -> 8
+     - 0.5, 0.2
+     - 0.4, -0.2
+     - 0.0, 0.1
+     - 0.2, -0.1
+     - 0.7, -0.1
+   * - sine map 64 -> 128 -> 256
+     - 0.0, 0.0
+     - 2.0, -2.3
+     - -0.2, 0.8
+     - -0.7, 0.1
+     - 0.0, 0.0
 
-The pitch nodes, the sine map and the number of lines converge on QA and QH to
-a few percent; the QI, the ellipse and the near-axisymmetric case do not reach
-1 %: their shallow ripple wells move with the sampling of the field line
-(points per transit, lines), so report the budget with the number.  The
-tangency width is a modelling parameter, not a discretization: it moves the
-value by 10 to 25 % between 0.05 and 0.01 and is not converged in the table
-because the 64-node sine map cannot resolve narrower widths.
-On a laptop one value on three surfaces takes about 4 s warm and a value
-with its reverse-mode gradient about 40 s.
-
-**Gradient against finite differences.** Reverse mode through the implicit
-solve (``forward_ftol=1e-12``) against central differences after a tight
-warm-started re-solve (least-squares slope over five points, steps 3e-5 and
-1e-4 of the coefficient scale), summed over :math:`s = 0.25, 0.5, 0.75`,
-mode-1 boundary coefficients:
-
-.. list-table:: Reverse-mode against finite difference
-   :header-rows: 1
-
-   * - Start, coefficient
-     - Reverse mode
-     - Finite difference (3e-5, 1e-4)
-   * - nfp 2 ellipse, 1
-     - -23.58
-     - -23.47, -20.58
-   * - nfp 2 ellipse, 2
-     - -10.81
-     - -10.54, -9.71
-   * - nfp 2 ellipse, 3
-     - -18.50
-     - -18.30, -17.98
-   * - nfp 4 seed, 0
-     - -3.85
-     - -3.88, -2.89
-   * - nfp 4 seed, 3
-     - 12.89
-     - 12.47, 12.47
-   * - nfp 4 seed, 4
-     - -2.91
-     - -2.95, -2.19
-   * - nfp 2 seed, 3
-     - 19.62
-     - 21.14, 21.06
-   * - nfp 2 seed, 1
-     - 31.86
-     - 3.55, 17.33
-   * - nfp 4 seed, 1
-     - 25.10
-     - 9.70, 7.07
-
-The first seven agree to 1 to 8 % at the smaller step; the last two do not:
-the value itself is noisy at about 1e-4 of its size at these steps (a handful
-of level choices flip), the finite difference is not converged in the step
-there, and the reverse-mode value is unconfirmed.  Components whose gradient is
-below 1 are dominated by that noise.
+QA, QI (at 128 points per transit) and the pitch and quadrature budgets
+converge to the percent; the QH sine map moves by 2 %, the nfp 4 ellipse is
+still moving by 3 % with the number of transits, and the near-axisymmetric
+case does not converge in the number of lines (-10 % at 64) and runs out of
+critical-level slots at 64 points per transit (NaN, by design).  The QI
+needs 128 points per transit because its shallow ripple wells are not
+resolved by the default grid.  On four pinned office cores a value on three
+surfaces takes 8.5 s warm and a value with its reverse-mode gradient about
+45 s; each compiles in 16 and 62 s.
 
 **Which metric predicts the alpha loss.** Across the 39 optimized equilibria
 the Spearman coefficient between the metric and the alpha loss is 0.93 for

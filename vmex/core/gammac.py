@@ -69,7 +69,9 @@ the exact quantity under refinement:
   complete wells of the same level, ``tau * <gamma^2>_complete`` with the
   complete-well weight floored at ``completeness`` of the total, so that the
   last complete well leaving the window does not make the estimate jump.
-- ``tangency_width``: Nemov's ``T`` is a point value at the *lowest* point of
+- ``tangency_width``: by default (``None``) the ratio is Velasco's, eq. 14
+  (his footnote: Nemov's differs only by the factor ``T``), smooth by
+  construction.  With a width, Nemov's ``T`` is a point value at the *lowest* point of
   a well.  Wells with several dips of nearly equal depth (every omnigenous
   or quasisymmetric field has them) make that point jump discontinuously
   between dips, and ``T`` varies by factors of several along a line, so the
@@ -210,20 +212,21 @@ def _root(c, tl, th, bl, bh, level, iters=40):
     return t - (_peval(c, t) - level) / jnp.where(dd != 0, dd, 1.0)
 
 
-def _breakpoint_nodes(F: Array, length, K: int, Q: int):
+def _breakpoint_nodes(F: Array, length, K: int, Q: int, panels: int):
     """Pitch levels ``b = 1/lambda`` and weights ``db/b**2`` of one line.
 
-    ``K`` level slots hold the critical levels (the values of the local
-    extrema of ``B`` and of its two end values) and, in the remaining slots,
-    repeated bisections of the widest gap.  Between slots the well topology
-    is constant, and the integrand is analytic except for the logarithmic
-    divergence at barrier tops; the drift integrals nevertheless vary on
-    scales much finer than the gap between critical levels (a bounce point
-    sweeping a plateau of ``B``, a zero of the poloidal drift), which the
-    bisections resolve.  Each gap gets ``Q`` Gauss-Legendre nodes on the
+    Panel edges are the critical levels (values of the local extrema of ``B``
+    and its two end values, ``K`` slots, unused ones repeating the maximum)
+    merged with ``panels`` equispaced levels between the extremes of the
+    line.  Between edges the well topology is constant, so each panel is
+    smooth; the drift integrals vary on scales much finer than the gap between
+    critical levels (a bounce point sweeping a plateau of ``B``, a zero of the
+    poloidal drift), which the equispaced edges resolve.  Every edge moves
+    continuously with the field, so the rule has no parameter-dependent
+    discrete choice.  Each panel gets ``Q`` Gauss-Legendre nodes on the
     smootherstep ``s(t) = t^3 (10 - 15 t + 6 t^2)``, which flattens the
-    logarithmic singularity.  Returns the nodes, the weights and the
-    overflow flag (more critical levels than slots).
+    logarithmic singularity at barrier tops.  Returns the nodes, the weights
+    and the overflow flag (more critical levels than slots).
     """
     C = _hermite(F[0])
     t, ok = _stationary(C)
@@ -233,29 +236,27 @@ def _breakpoint_nodes(F: Array, length, K: int, Q: int):
     values = jnp.where(ok, _peval(C, t), _INF).ravel()
     values = jnp.concatenate([values, F[0, :1], F[0, -1:]])
     count = jnp.sum(jnp.isfinite(values))
-    top = jnp.max(jnp.where(jnp.isfinite(values), values, -_INF))
+    top, bottom = jnp.max(jnp.where(jnp.isfinite(values), values, -_INF)), jnp.min(values)
     edges = jnp.sort(values)[:K]
     edges = jnp.where(jnp.isfinite(edges), edges, top)
-
-    def bisect(i, edges):
-        # widths are compared on a grid of 1e-8 of the range, so rounding
-        # noise cannot flip the choice between equal gaps of mirror lines
-        j = jnp.argmax(jnp.round((edges[1:] - edges[:-1]) / (1e-8 * (top - edges[0]) + 1e-300)))
-        slot = jnp.minimum(count + i, K - 1)       # a free (padded) slot
-        mid = jnp.where(count + i < K, 0.5 * (edges[j] + edges[j + 1]), edges[slot])
-        return jnp.sort(edges.at[slot].set(mid))
-
-    edges = jax.lax.fori_loop(0, K, bisect, edges)
+    uniform = bottom + (top - bottom) * jnp.arange(1, panels + 1) / (panels + 1)
+    edges = jnp.sort(jnp.concatenate([edges, uniform]))
     x, w = np.polynomial.legendre.leggauss(Q)
     t, w = 0.5 * (x + 1), 0.5 * w
     lo, hi = edges[:-1, None], edges[1:, None]
-    b = (lo + (hi - lo) * t**3 * (10 - 15 * t + 6 * t * t)).ravel()
-    weight = ((hi - lo) * 30 * t**2 * (1 - t)**2 * w).ravel() / b**2
+    b = lo + (hi - lo) * t**3 * (10 - 15 * t + 6 * t * t)
+    # Empty panels (tied critical levels, padding) carry no weight; their nodes
+    # sit on a critical level where the integrand is singular and its derivative
+    # explodes (1e6 on mirror-symmetric lines), so they are moved to a harmless
+    # level under stop_gradient.
+    live = hi - lo > 1e-9 * (top - bottom)
+    b = jnp.where(live, b, jax.lax.stop_gradient(0.5 * (top + bottom))).ravel()
+    weight = (jnp.where(live, hi - lo, 0.0) * 30 * t**2 * (1 - t)**2 * w).ravel() / b**2
     return b, weight, count > K
 
 
 def _line_wells(F: Array, length, b: Array, *, W: int, qorder: int,
-                width: float):
+                width: float | None):
     """Bounce wells of one field line at the pitch levels ``b = 1/lambda``.
 
     ``F`` stacks the six ingredients ``(6, n)`` (module ``_FIELDS`` order) on
@@ -309,13 +310,16 @@ def _line_wells(F: Array, length, b: Array, *, W: int, qorder: int,
     inverse = jnp.where(inside, 1.0 / jnp.where(inside, speed, 1.0), 0.0)
     dx = weights * half[..., None] * np.cos(angle)       # sine-map measure
     drift = (1.0 - 0.5 * B / b[:, None, None]) * inverse
-    # tangency factor: Boltzmann average over the well bottom
-    bottom = jnp.min(jnp.where(mask[..., None], B, _INF), -1, keepdims=True)
-    bottom = jnp.where(jnp.isfinite(bottom), bottom, 0.0)
-    boltz = jnp.exp(-(B - bottom) / (width * jnp.maximum(
-        b[:, None, None] - bottom, 1e-12))) * dx
-    norm = jnp.where(mask, jnp.sum(boltz, -1), 1.0)
-    tangency = jnp.sum(boltz * tang, -1) / norm
+    centre = 0.5 * (left + right)
+    if width is None:           # Velasco et al. 2021 eq. 14: no pointwise factor
+        tangency = 1.0
+    else:                       # Nemov: Boltzmann average of T over the well bottom
+        bottom = jnp.min(jnp.where(mask[..., None], B, _INF), -1, keepdims=True)
+        bottom = jnp.where(jnp.isfinite(bottom), bottom, 0.0)
+        boltz = jnp.exp(-(B - bottom) / (width * jnp.maximum(
+            b[:, None, None] - bottom, 1e-12))) * dx
+        norm = jnp.where(mask, jnp.sum(boltz, -1), 1.0)
+        tangency = jnp.sum(boltz * tang, -1) / norm
     cut = jnp.minimum(left, length - right) / jnp.minimum(length / 2, jnp.pi)
     complete = jnp.where((left > 0) & (right < length), jnp.sin(
         0.5 * jnp.pi * jnp.clip(cut, 0.0, 1.0))**2, 0.0)
@@ -325,7 +329,7 @@ def _line_wells(F: Array, length, b: Array, *, W: int, qorder: int,
         D=tangency * (jnp.sum(f_grad * drift * dl * dx, -1)
                       + jnp.sum(corr * speed * dl * dx, -1)),
         g=complete, mask=mask, overflow=overflow,
-        bottom=jnp.sum(boltz * xq, -1) / norm)
+        bottom=centre if width is None else jnp.sum(boltz * xq, -1) / norm)
 
 
 def _drift_angle(w: dict) -> Array:
@@ -347,8 +351,8 @@ def _complete_mean(w: dict, value: Array, completeness: float):
     return total, jnp.sum(w["g"] * vt * value, -1) / jnp.where(scale > 0, scale, 1.0)
 
 
-def _gamma_c_line(F, length, *, K, Q, W, qorder, width, completeness):
-    b, weight, overflow = _breakpoint_nodes(F, length, K, Q)
+def _gamma_c_line(F, length, *, K, Q, W, qorder, width, completeness, panels=64):
+    b, weight, overflow = _breakpoint_nodes(F, length, K, Q, panels)
     w = _line_wells(F, length, b, W=W, qorder=qorder, width=width)
     total, mean = _complete_mean(w, _drift_angle(w) ** 2, completeness)
     return (jnp.sum(weight * total * mean), _line_length(F, length),
@@ -378,10 +382,10 @@ def _check_lines(bmag, ingredients):
 
 
 def _caps(num_transit: int, max_levels, max_wells) -> tuple[int, int]:
-    """Level and well slots per line; the defaults (48 and 8 per transit)
-    hold the shaped nfp = 2-4 boundaries tried (up to ~30 extrema of ``B`` per
-    transit) and leave the rest of the level slots to the bisections."""
-    return (48 * int(num_transit) if max_levels is None else int(max_levels),
+    """Critical-level and well slots per line; the defaults (24 and 8 per
+    transit) hold the nfp = 2-4 boundaries tried except the wiggliest seed
+    (~30 extrema of ``B`` per transit), which overflows to NaN."""
+    return (24 * int(num_transit) if max_levels is None else int(max_levels),
             8 * int(num_transit) if max_wells is None else int(max_wells))
 
 
@@ -389,7 +393,7 @@ def gamma_c_from_fieldlines(
     *, bmag, radial_drift, radial_gradient, drift_correction, tangency, dl_dx,
     length, num_transit: int = 4, pitch_nodes: int = 4,
     quadrature_order: int = 64, max_levels: int | None = None,
-    max_wells: int | None = None, tangency_width: float = 0.05,
+    pitch_panels: int = 64, max_wells: int | None = None, tangency_width: float | None = None,
     completeness: float = 0.05,
 ) -> dict[str, Array]:
     """Nemov ``Gamma_c`` of one flux surface from sampled field lines.
@@ -399,10 +403,11 @@ def gamma_c_from_fieldlines(
     arrays are the module-docstring ingredients: ``radial_drift`` is
     ``(B x grad B) . grad psi / B^3``, ``radial_gradient`` is
     ``dB/drho at fixed PEST angles / B``, ``drift_correction`` is ``K / B``,
-    ``tangency`` is ``T``.  ``pitch_nodes`` is the Gauss-Legendre order
-    between consecutive critical levels of a line; ``max_levels`` and
-    ``max_wells`` (defaults scale with ``num_transit``) bound the pitch-level
-    slots per line (critical levels plus bisections) and the wells per level.  Any overflow turns ``gamma_c``
+    ``tangency`` is ``T``.  ``pitch_nodes`` is the Gauss-Legendre order per
+    pitch panel; panels are bounded by the critical levels of a line and by
+    ``pitch_panels`` equispaced levels; ``max_levels`` and ``max_wells``
+    (defaults scale with ``num_transit``) bound the critical-level slots per
+    line and the wells per level.  Any overflow turns ``gamma_c``
     into NaN rather than a falsely low cost.  Also returns ``gamma_c_lines``,
     the per-line values, and the ``overflow`` flag.
     """
@@ -411,8 +416,8 @@ def gamma_c_from_fieldlines(
         drift_correction=drift_correction, dl_dx=dl_dx, tangency=tangency))
     K, W = _caps(num_transit, max_levels, max_wells)
     numer, line, over = jax.lax.map(jax.checkpoint(functools.partial(
-        _gamma_c_line, length=length, K=K, Q=int(pitch_nodes), W=W,
-        qorder=int(quadrature_order), width=float(tangency_width),
+        _gamma_c_line, length=length, K=K, Q=int(pitch_nodes), W=W, panels=int(pitch_panels),
+        qorder=int(quadrature_order), width=None if tangency_width is None else float(tangency_width),
         completeness=float(completeness))), F)
     per_line = jnp.pi / (8 * jnp.sqrt(2.0)) * numer / line
     gamma_c = jnp.pi / (8 * jnp.sqrt(2.0)) * jnp.mean(numer) / jnp.mean(line)
@@ -454,7 +459,7 @@ def gamma_alpha_from_fieldlines(
     *, bmag, radial_drift, radial_gradient, drift_correction, tangency, dl_dx,
     length, iota, nfp: int = 1, num_transit: int = 4, pitch_levels: int = 64,
     quadrature_order: int = 64, max_wells: int | None = None,
-    tangency_width: float = 0.05, completeness: float = 0.05,
+    tangency_width: float | None = None, completeness: float = 0.05,
     threshold_width: float = 0.05,
 ) -> dict[str, Array]:
     """Velasco ``Gamma_alpha`` (module docstring) of one flux surface.
@@ -481,7 +486,7 @@ def gamma_alpha_from_fieldlines(
     labels = 2 * jnp.pi * jnp.arange(n) / n
     w = jax.lax.map(jax.checkpoint(lambda a: _alpha_line(
         a[0], a[1], length=length, iota=iota, nfp=nfp, b=b, W=W,
-        qorder=int(quadrature_order), width=float(tangency_width))), (F, labels))
+        qorder=int(quadrature_order), width=None if tangency_width is None else float(tangency_width))), (F, labels))
     # hat weights of every well on the periodic alpha grid: (line, level, well, bin)
     u = jnp.mod(w["alpha"] / (2 * jnp.pi) * n, n)[..., None] - jnp.arange(n)
     hat = jnp.maximum(0.0, 1.0 - jnp.abs((u + n / 2) % n - n / 2))
@@ -620,12 +625,12 @@ def _line_ingredients(ctx: dict, j: int, zeta0: Array, alpha: Array,
 
 
 _OPTIONS = {
-    "c": dict(nalpha=16, num_transit=4, points_per_transit=32, pitch_nodes=4,
-              quadrature_order=64, max_levels=None, max_wells=None,
-              tangency_width=0.05, completeness=0.05),
-    "alpha": dict(nalpha=16, num_transit=4, points_per_transit=32,
+    "c": dict(nalpha=16, num_transit=4, points_per_transit=64, pitch_nodes=4,
+              quadrature_order=64, max_levels=None, pitch_panels=64, max_wells=None,
+              tangency_width=None, completeness=0.05),
+    "alpha": dict(nalpha=16, num_transit=4, points_per_transit=64,
                   pitch_levels=64, quadrature_order=64, max_wells=None,
-                  tangency_width=0.05, completeness=0.05, threshold_width=0.05),
+                  tangency_width=None, completeness=0.05, threshold_width=0.05),
 }
 _OUTPUTS = {"c": ("gamma_c",), "alpha": ("gamma_alpha", "f_trapped")}
 _KERNELS = {"c": gamma_c_from_fieldlines, "alpha": gamma_alpha_from_fieldlines}
@@ -644,7 +649,7 @@ def _resolve(kind: str, options: dict) -> tuple:
         raise ValueError("num_transit must be >= 1 and points_per_transit >= 16")
     if min(cfg.get("pitch_nodes", 2), cfg.get("pitch_levels", 2), cfg["quadrature_order"]) < 2:
         raise ValueError("pitch_nodes, pitch_levels and quadrature_order must be >= 2")
-    if not (cfg["tangency_width"] > 0 and cfg["completeness"] >= 0
+    if not ((cfg["tangency_width"] is None or cfg["tangency_width"] > 0) and cfg["completeness"] >= 0
             and cfg.get("threshold_width", 1.0) > 0):
         raise ValueError("tangency_width and threshold_width must be positive, completeness >= 0")
     return tuple(sorted(cfg.items()))
