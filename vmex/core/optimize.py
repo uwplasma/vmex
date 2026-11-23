@@ -2724,6 +2724,9 @@ def _least_squares_implicit(
             params_of(_place(x), problem_data))
         if hit[0] != imp._params_key(params_np):
             return False
+        refined = imp._LAST_REFINED.get(cfg)
+        if refined is not None and refined[0] == hit[0] and refined[2]:
+            return False  # anchor above refine_tol: status 3, no certified Jacobian
         result = hit[1]
         if bool(result.converged):
             return True
