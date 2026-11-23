@@ -96,10 +96,9 @@ DKX_FINAL_STAGES = 2              # BOOTSTRAP = "dkx": stages that use DKX's row
 DKX_WEIGHT = 10.0
 KINETIC_SURFACES = (0.3, 0.6)
 
-# Gamma_c surfaces, surrogate temperature and quadrature:
+# Gamma_c surfaces and sampling budget:
 GAMMA_C_SURFACES = (0.35, 0.6, 0.85)
-GAMMA_C_TEMPERATURE = 0.15
-GAMMA_C_BUDGET = dict(nalpha=5, num_transit=3, points_per_transit=64, num_pitch=24,
+GAMMA_C_BUDGET = dict(nalpha=16, num_transit=4, points_per_transit=32, pitch_nodes=4,
                       quadrature_order=32)
 
 # Weight of the beta residual, which is relative because the target is small:
@@ -254,7 +253,7 @@ def stability_weights(criterion):
 
 
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
-gamma_c = opt.GammaCSmooth(GAMMA_C_SURFACES, temperature=GAMMA_C_TEMPERATURE, **GAMMA_C_BUDGET)
+gamma_c = opt.GammaC(GAMMA_C_SURFACES, **GAMMA_C_BUDGET)
 monitor = opt.OptimizationMonitor()
 
 ### Run the optimization ######################################################

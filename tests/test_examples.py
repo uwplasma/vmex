@@ -787,10 +787,10 @@ def test_qa_maxj_example_states_its_physical_scope():
 
 
 def test_combined_confinement_example_states_the_surrogate_policy():
-    """Optimize GammaCSmooth, report hard values, promise no zero losses."""
+    """Optimize GammaC, report a sharper-width value, promise no zero losses."""
     text = (EXAMPLES / "optimization" / "omnigenity_epsilon_gammac_maxj.py").read_text()
-    assert "optimize the surrogate, report the hard values" in text
-    assert "GammaCSmooth(" in text and "GammaC(" in text
+    assert "optimize ``GammaC``, report its value" in text
+    assert text.count("GammaC(") == 2
     assert "does not promise" in text
     assert "normalized by its seed value" in text
     assert "VmecProblem.from_loss" in text  # one aggregate scalar adjoint

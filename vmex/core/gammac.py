@@ -1,81 +1,108 @@
-"""Differentiable fast-ion confinement proxy ``Gamma_c``.
+"""Differentiable fast-ion confinement proxies ``Gamma_c`` and ``Gamma_alpha``.
 
 ``Gamma_c`` measures how far the contours of the second adiabatic invariant
 ``J`` deviate from flux surfaces: trapped particles whose bounce-averaged
 drift has a radial component ride superbanana orbits out of the device.
-``Gamma_c`` is an optimization proxy, not a loss law: Velasco et al. 2021
-define a rescaled ``Gamma_c`` (eq. 20) and a ``|gamma_c*|``-based variant
-(eq. 21), find in their section 5.4 that the prompt-loss fraction follows
-the eq. 21 variant more linearly while ``Gamma_c`` itself cannot predict it,
-and validate ``Gamma_alpha`` (their section 4.2) as the predictor.  The proxy
-of Nemov, Kasilov, Kernbichler, Leitold, Phys. Plasmas 15, 052501 (2008),
-equation 61, as organized by Velasco et al., Nucl. Fusion 61, 116059 (2021),
-equation 16, is
+The proxy of Nemov, Kasilov, Kernbichler, Leitold, Phys. Plasmas 15, 052501
+(2008), equation 61, as organized by Velasco et al., Nucl. Fusion 61,
+116059 (2021), equation 16, is
 
 .. math::
 
-   \\gamma_c = \\frac{2}{\\pi}\\arctan
-     \\frac{v_r}{v_p},
+   \\gamma_c = \\frac{2}{\\pi}\\arctan\\frac{v_r}{v_p},
    \\qquad
    \\Gamma_c = \\frac{\\pi}{4\\sqrt 2}\\left\\langle
      \\int_{1/B_{\\max}}^{1/B}\\!\\mathrm d\\lambda\\,
-     \\frac{B}{\\sqrt{1-\\lambda B}}\\,\\gamma_c^2\\right\\rangle,
-
-where :math:`v_r` and :math:`v_p` are the bounce-averaged radial and
-poloidal-tangential projections of the magnetic drift
-:math:`\\mathbf v_M \\propto (1-\\lambda B/2)\\,
-\\mathbf B\\times\\nabla B/B^3`, bounce averages run between bounce points,
-and :math:`\\langle\\cdot\\rangle` is the flux-surface average.  Expanded
-over wells ``w`` along field lines this is evaluated as
-
-.. math::
-
-   \\Gamma_c = \\frac{\\pi}{8\\sqrt 2}\\,
+     \\frac{B}{\\sqrt{1-\\lambda B}}\\,\\gamma_c^2\\right\\rangle
+   = \\frac{\\pi}{8\\sqrt 2}\\,
      \\frac{\\int\\mathrm d\\lambda\\sum_w (v\\tau_b\\,\\gamma_c^2)_w}
           {\\int \\mathrm dl/B},
 
-averaging numerator and denominator over the sampled field-line labels.
+with :math:`v_r, v_p` the bounce-averaged radial and poloidal projections of
+the magnetic drift, ``w`` the wells along field lines and
+:math:`\\langle\\cdot\\rangle` the flux-surface average.  ``Gamma_alpha`` is the
+fraction of trapped particles lost promptly according to Velasco et al. 2021,
+section 4.2, equation 25 (below).  Neither is a loss law: Velasco et al.
+find ``Gamma_c`` itself cannot predict prompt losses and validate
+``Gamma_alpha`` as the predictor.
 
-VMEX evaluates the drift ratio in Nemov's own form, using DESC's rewrite of
-Nemov's equations 21-22 into single-valued maps of periodic quantities
-(``desc.compute._fast_ion``, on the bounce kernel of Unalmis et al.,
-J. Plasma Phys. 92(3), 2026, doi:10.1017/S0022377826101652):
+The drift ratio is Nemov's, in DESC's single-valued rewrite of his equations
+21-22 (``desc.compute._fast_ion``, bounce kernel of Unalmis et al., J. Plasma
+Phys. 92(3), 2026):
 
 .. math::
 
    \\tan\\frac{\\pi\\gamma_c}{2} =
    \\frac{\\int\\mathrm dl\\, w\\,
           (\\mathbf B\\times\\nabla B)\\cdot\\nabla\\psi/B^3}
-        {\\big(|\\nabla\\rho|\\,\\Vert\\mathbf e_\\alpha\\Vert\\big)_{B_{\\min}}
-         \\int \\mathrm dl\\,\\big[w\\,\\partial_\\rho B|_{\\vartheta,\\phi}
+        {T\\int \\mathrm dl\\,\\big[w\\,\\partial_\\rho B|_{\\vartheta,\\phi}
          + \\sqrt{1-\\lambda B}\\,K\\big]/B},
 
 with :math:`w = (1-\\lambda B/2)/\\sqrt{1-\\lambda B}`, PEST angles
 :math:`(\\vartheta,\\phi)`, :math:`\\rho=\\sqrt{s}`,
 :math:`K = \\iota_\\rho\\,(\\nabla\\psi\\times\\mathbf b)\\cdot\\nabla\\phi
 - 2\\,\\partial_\\rho B|_{\\vartheta,\\phi}
-+ B\\,\\partial_\\rho B^\\phi|_{\\vartheta,\\phi}/B^\\phi`, and the
-surface-tangency factor interpolated to the field minimum of each well.
-Unlike the literal line-integral form of Velasco's equations 14-15, whose
-poloidal drift carries a secular shear term that grows with the sampled
-line length, this form is built from periodic quantities only and converges
-as transits are added — the reason it is also DESC's default ``GammaC``
-variant.  Velasco's :math:`\\gamma_c^*` differs from Nemov's only by the
-tangency factor in the arctan argument (Velasco 2021, footnote to eq. 14).
++ B\\,\\partial_\\rho B^\\phi|_{\\vartheta,\\phi}/B^\\phi` and
+:math:`T=|\\nabla\\rho|\\,\\Vert\\mathbf e_\\alpha\\Vert` Nemov's surface-tangency
+factor at the field minimum of the well.  Field lines are the PEST lines of
+:mod:`vmex.core.stability`; every geometric ingredient is an exact spectral
+point evaluation with JAX AD.
 
-Field lines are the PEST lines of :mod:`vmex.core.stability` /
-:mod:`vmex.core.turbulence`; every geometric ingredient is an exact spectral
-point evaluation with JAX AD, and the singular bounce integrals reuse the
-drift kernels of :func:`vmex.core.bounce.bounce_action`.  Everything is jnp:
-the proxy is traceable end to end. Symmetric and asymmetric toroidal states
-use the same interior-flux-surface geometry; the field-line parameterization
-requires nonzero ``iota`` on the target surfaces.
+Numerics.  Each field line is a cubic Hermite spline (fourth-order slopes) of
+the sampled ingredients.  Its stationary points split every grid interval
+into monotone pieces, so every bounce point at every pitch level is found
+exactly (a safeguarded Newton solve whose last step carries the implicit
+function derivative) and wells smaller than a grid cell are not missed.
+The pitch integral is split at the critical levels of each line (the values
+of its local extrema and of its end points): between them the well topology
+is constant and the integrand is analytic except for the logarithmic
+divergence at barrier tops, which a smootherstep map of the Gauss-Legendre
+nodes removes.  The levels depend on the field, so the Leibniz terms of the
+moving breakpoints are differentiated exactly.  The bounce integrals use the
+sine map that cancels the inverse-square-root endpoint singularity.
 
-:class:`GammaC` supplies the hard diagnostic; its sampled boundary derivative
-can change sign under refinement. :class:`GammaCSmooth` regularizes
-separatrix bounce-time curvature and superbanana drift-angle corners with an
-annealable ``temperature``. Both omit normalized pitch-grid shape derivatives,
-so check actual forward descent before optimizing a new configuration.
+Two modelling choices make the finite-line estimator continuous; both tend to
+the exact quantity under refinement:
+
+- ``completeness``: wells cut by the ends of the finite line enter the
+  normalising bounce time but their ``gamma_c**2`` is borrowed from the
+  complete wells of the same level, ``tau * <gamma^2>_complete`` with the
+  complete-well weight floored at ``completeness`` of the total, so that the
+  last complete well leaving the window does not make the estimate jump.
+- ``tangency_width``: Nemov's ``T`` is a point value at the *lowest* point of
+  a well.  Wells with several dips of nearly equal depth (every omnigenous
+  or quasisymmetric field has them) make that point jump discontinuously
+  between dips, and ``T`` varies by factors of several along a line, so the
+  exact ``Gamma_c`` is genuinely discontinuous there.  ``T`` is replaced by
+  its Boltzmann average ``exp(-(B-B_min)/(tangency_width (b-B_min)))`` over
+  the well, which tends to Nemov's value as ``tangency_width -> 0`` (Laplace
+  principle) and is smooth for positive width.
+
+``Gamma_alpha`` (Velasco et al. 2021, eq. 25; ripple wells ignored, as there)
+
+.. math::
+
+   \\Gamma_\\alpha = \\frac12\\left\\langle\\int_{1/B_{\\max}}^{1/B}
+     \\!\\mathrm d\\lambda\\,\\frac{B}{\\sqrt{1-\\lambda B}}\\;
+     H\\big((\\alpha_{out}-\\alpha)\\,v_\\alpha\\big)\\,
+     H\\big((\\alpha-\\alpha_{in})\\,v_\\alpha\\big)\\right\\rangle
+
+counts the orbits that, precessing in the direction of
+:math:`v_\\alpha=\\mathbf v_M\\cdot\\nabla\\alpha`, meet an outward superbanana
+(:math:`\\gamma_c^*>\\gamma_{th}`) before an inward one
+(:math:`\\gamma_c^*<-\\gamma_{th}`), with
+:math:`\\gamma_c^*=\\frac2\\pi\\arctan(v_r/|v_p|)` and ``gamma_th = 0.2``.
+It lies between zero and the trapped fraction.  Per field line and pitch
+level the well data are reduced to a signed ``gamma_c*`` and a precession
+direction, the first outward-before-inward event is found along the periodic
+``alpha`` grid with smoothed (smoothstep) thresholds of half-width
+``threshold_width``, and the pitch integral is a midpoint rule on a common
+level grid.  Both limits (``threshold_width -> 0``, finer levels and lines)
+give eq. 25.  The precession direction is the sign of the poloidal drift
+integral above for a positive charge.
+
+Everything is jnp: both proxies are traceable end to end.  The field-line
+parameterization requires nonzero ``iota`` on the target surfaces.
 """
 
 from __future__ import annotations
@@ -89,7 +116,6 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from .bounce import bounce_action
 from .solver import SolverRuntime, SpectralState
 from .omnigenity import _ResidualTerm
 from .statephysics import _field_line_frame
@@ -101,247 +127,379 @@ from .stability import (
 Array = Any
 
 __all__ = [
+    "GammaAlpha",
     "GammaC",
-    "GammaCSmooth",
+    "gamma_alpha_from_fieldlines",
+    "gamma_alpha_from_wout",
+    "gamma_alpha_state",
     "gamma_c_from_fieldlines",
     "gamma_c_from_wout",
-    "gamma_c_smooth_from_fieldlines",
-    "gamma_c_smooth_state",
     "gamma_c_state",
 ]
 
+_INF = jnp.inf
+_FIELDS = ("bmag", "radial_drift", "radial_gradient", "drift_correction",
+           "dl_dx", "tangency")
+_GAMMA_TH = 0.2     # Velasco et al. 2021, section 4.1
+
+
+# --------------------------------------------------------------------------
+# Line kernel: spline, bounce points, wells
+# --------------------------------------------------------------------------
+
+def _hermite(f: Array) -> Array:
+    """Cubic Hermite coefficients ``(4, ..., n-1)`` of uniform samples ``f``.
+
+    Slopes are the fourth-order central differences (cubic extrapolation at
+    the ends); ``t in [0, 1]`` spans one grid interval.
+    """
+    f0, f1, f2, f3 = (f[..., i] for i in range(4))
+    g0, g1, g2, g3 = (f[..., -1 - i] for i in range(4))
+    pad = jnp.concatenate([
+        jnp.stack([10 * f0 - 20 * f1 + 15 * f2 - 4 * f3,
+                   4 * f0 - 6 * f1 + 4 * f2 - f3], -1), f,
+        jnp.stack([4 * g0 - 6 * g1 + 4 * g2 - g3,
+                   10 * g0 - 20 * g1 + 15 * g2 - 4 * g3], -1)], -1)
+    m = (pad[..., :-4] - 8 * pad[..., 1:-3] + 8 * pad[..., 3:-1] - pad[..., 4:]) / 12
+    d, m0, m1 = f[..., 1:] - f[..., :-1], m[..., :-1], m[..., 1:]
+    return jnp.stack([f[..., :-1], m0, 3 * d - 2 * m0 - m1, -2 * d + m0 + m1])
+
+
+def _peval(c, t):
+    return ((c[3] * t + c[2]) * t + c[1]) * t + c[0]
+
+
+def _pder(c, t):
+    return (3 * c[3] * t + 2 * c[2]) * t + c[1]
+
+
+def _stationary(c):
+    """Stationary points ``t`` of the cubics ``c`` in ``[0, 1]``: ``(2, N)`` and validity."""
+    b, cc, d = c[1], c[2], c[3]
+    disc = cc * cc - 3 * b * d
+    q = -(cc + jnp.where(cc >= 0, 1.0, -1.0)
+          * jnp.sqrt(jnp.where(disc > 0, disc, 1.0)))
+    t = jnp.stack([jnp.where(d != 0, q / jnp.where(d != 0, 3 * d, 1.0), _INF),
+                   jnp.where(q != 0, b / jnp.where(q != 0, q, 1.0), _INF)])
+    return t, (disc > 0) & (t >= 0) & (t <= 1)
+
+
+def _root(c, tl, th, bl, bh, level, iters=40):
+    """Root of ``cubic(t) = level`` in the monotone piece ``[tl, th]``.
+
+    Safeguarded Newton on stopped values; the last step is differentiable,
+    which gives the implicit-function derivative at the converged root.
+    """
+    sg = jax.lax.stop_gradient
+    c0, tl, th, bl, bh, b0 = map(sg, (c, tl, th, bl, bh, level))
+    inc = bh > bl
+    t = tl + (th - tl) * (b0 - bl) / jnp.where(bh != bl, bh - bl, 1.0)
+    lo, hi = jnp.broadcast_to(tl, t.shape), jnp.broadcast_to(th, t.shape)
+
+    def body(_, s):
+        t, lo, hi = s
+        f = _peval(c0, t) - b0
+        left = (f > 0) == inc
+        hi, lo = jnp.where(left, t, hi), jnp.where(left, lo, t)
+        dd = _pder(c0, t)
+        tn = t - f / jnp.where(dd != 0, dd, 1.0)
+        return jnp.where((tn > lo) & (tn < hi), tn, 0.5 * (lo + hi)), lo, hi
+
+    t = sg(jax.lax.fori_loop(0, iters, body, (t, lo, hi))[0])
+    dd = _pder(c, t)
+    return t - (_peval(c, t) - level) / jnp.where(dd != 0, dd, 1.0)
+
+
+def _breakpoint_nodes(F: Array, length, K: int, Q: int):
+    """Pitch levels ``b = 1/lambda`` and weights ``db/b**2`` of one line.
+
+    ``K`` level slots hold the critical levels (the values of the local
+    extrema of ``B`` and of its two end values) and, in the remaining slots,
+    repeated bisections of the widest gap.  Between slots the well topology
+    is constant, and the integrand is analytic except for the logarithmic
+    divergence at barrier tops; the drift integrals nevertheless vary on
+    scales much finer than the gap between critical levels (a bounce point
+    sweeping a plateau of ``B``, a zero of the poloidal drift), which the
+    bisections resolve.  Each gap gets ``Q`` Gauss-Legendre nodes on the
+    smootherstep ``s(t) = t^3 (10 - 15 t + 6 t^2)``, which flattens the
+    logarithmic singularity.  Returns the nodes, the weights and the
+    overflow flag (more critical levels than slots).
+    """
+    C = _hermite(F[0])
+    t, ok = _stationary(C)
+    # envelope theorem: B' = 0 at the extremum, so t is held fixed (its own
+    # derivative diverges at the birth or death of a pair)
+    t = jax.lax.stop_gradient(jnp.where(ok, t, 0.0))
+    values = jnp.where(ok, _peval(C, t), _INF).ravel()
+    values = jnp.concatenate([values, F[0, :1], F[0, -1:]])
+    count = jnp.sum(jnp.isfinite(values))
+    top = jnp.max(jnp.where(jnp.isfinite(values), values, -_INF))
+    edges = jnp.sort(values)[:K]
+    edges = jnp.where(jnp.isfinite(edges), edges, top)
+
+    def bisect(i, edges):
+        # widths are compared on a grid of 1e-8 of the range, so rounding
+        # noise cannot flip the choice between equal gaps of mirror lines
+        j = jnp.argmax(jnp.round((edges[1:] - edges[:-1]) / (1e-8 * (top - edges[0]) + 1e-300)))
+        slot = jnp.minimum(count + i, K - 1)       # a free (padded) slot
+        mid = jnp.where(count + i < K, 0.5 * (edges[j] + edges[j + 1]), edges[slot])
+        return jnp.sort(edges.at[slot].set(mid))
+
+    edges = jax.lax.fori_loop(0, K, bisect, edges)
+    x, w = np.polynomial.legendre.leggauss(Q)
+    t, w = 0.5 * (x + 1), 0.5 * w
+    lo, hi = edges[:-1, None], edges[1:, None]
+    b = (lo + (hi - lo) * t**3 * (10 - 15 * t + 6 * t * t)).ravel()
+    weight = ((hi - lo) * 30 * t**2 * (1 - t)**2 * w).ravel() / b**2
+    return b, weight, count > K
+
+
+def _line_wells(F: Array, length, b: Array, *, W: int, qorder: int,
+                width: float):
+    """Bounce wells of one field line at the pitch levels ``b = 1/lambda``.
+
+    ``F`` stacks the six ingredients ``(6, n)`` (module ``_FIELDS`` order) on
+    a uniform grid ``[0, length]``.  Returns per level and well slot ``W`` the
+    dict ``vt`` (bounce time ``v tau``), ``bottom`` (position of the well bottom), ``N``, ``D`` (drift integrals;
+    ``tan(pi gamma_c / 2) = N / D``), ``g`` (completeness weight of a well
+    away from the ends, 0 for cut wells), ``mask`` and the overflow flag.
+    """
+    n = F.shape[-1]
+    N = n - 1
+    step = length / N
+    C = _hermite(F)
+    cB = C[:, 0]
+    ts, ok = _stationary(cB)
+    edges = jnp.concatenate([jnp.zeros((1, N)),
+                             jnp.sort(jnp.where(ok, ts, 1.0), axis=0),
+                             jnp.ones((1, N))])
+    tl, th = edges[:-1], edges[1:]                      # monotone pieces (3, N)
+    bl_, bh_ = _peval(cB[:, None], tl), _peval(cB[:, None], th)
+    lev = b[:, None, None]
+    down = (bl_ >= lev) & (bh_ < lev)
+    up = (bl_ < lev) & (bh_ >= lev)
+    c3 = jnp.broadcast_to(cB[:, None, :], (4, 3, N))[:, None]
+    t = _root(c3, tl, th, bl_, bh_, lev)
+    x = ((jnp.arange(N) + t) * step).reshape(b.shape[0], 3 * N)
+    # the line ends bound the wells that start or finish inside the window
+    down = jnp.concatenate(
+        [jnp.where(F[0, 0] < b, 0.0, _INF)[:, None],
+         jnp.where(down.reshape(x.shape), x, _INF)], 1)
+    up = jnp.concatenate(
+        [jnp.where(up.reshape(x.shape), x, _INF),
+         jnp.where(F[0, -1] < b, length, _INF)[:, None]], 1)
+    down, up = jnp.sort(down, -1), jnp.sort(up, -1)
+    left = down[:, :W]
+    shift = (up[:, 0] < down[:, 0]).astype(jnp.int32)
+    index = jnp.arange(W) + shift[:, None]
+    right = jnp.where(index < up.shape[1], jnp.take_along_axis(
+        up, jnp.minimum(index, up.shape[1] - 1), 1), _INF)
+    mask = jnp.isfinite(left) & jnp.isfinite(right) & (right > left)
+    overflow = jnp.any(jnp.sum(jnp.isfinite(down), -1) > W)
+    left, right = jnp.where(mask, left, 0.0), jnp.where(mask, right, 0.0)
+    half = 0.5 * (right - left)
+    nodes, weights = np.polynomial.legendre.leggauss(qorder)
+    angle, weights = 0.5 * np.pi * nodes, 0.5 * np.pi * weights
+    xq = 0.5 * (left + right)[..., None] + half[..., None] * np.sin(angle)
+    i = jnp.clip(jnp.floor(xq / step).astype(jnp.int32), 0, N - 1)
+    B, f_rad, f_grad, corr, dl, tang = _peval(C[:, :, i], xq / step - i)
+    parallel = jnp.where(mask[..., None], 1.0 - B / b[:, None, None], 1.0)
+    inside = parallel > 0
+    speed = jnp.where(inside, jnp.sqrt(jnp.where(inside, parallel, 1.0)), 0.0)
+    inverse = jnp.where(inside, 1.0 / jnp.where(inside, speed, 1.0), 0.0)
+    dx = weights * half[..., None] * np.cos(angle)       # sine-map measure
+    drift = (1.0 - 0.5 * B / b[:, None, None]) * inverse
+    # tangency factor: Boltzmann average over the well bottom
+    bottom = jnp.min(jnp.where(mask[..., None], B, _INF), -1, keepdims=True)
+    bottom = jnp.where(jnp.isfinite(bottom), bottom, 0.0)
+    boltz = jnp.exp(-(B - bottom) / (width * jnp.maximum(
+        b[:, None, None] - bottom, 1e-12))) * dx
+    norm = jnp.where(mask, jnp.sum(boltz, -1), 1.0)
+    tangency = jnp.sum(boltz * tang, -1) / norm
+    cut = jnp.minimum(left, length - right) / jnp.minimum(length / 2, jnp.pi)
+    complete = jnp.where((left > 0) & (right < length), jnp.sin(
+        0.5 * jnp.pi * jnp.clip(cut, 0.0, 1.0))**2, 0.0)
+    return dict(
+        vt=jnp.where(mask, 2.0 * jnp.sum(inverse * dl * dx, -1), 0.0),
+        N=jnp.sum(f_rad * drift * dl * dx, -1),
+        D=tangency * (jnp.sum(f_grad * drift * dl * dx, -1)
+                      + jnp.sum(corr * speed * dl * dx, -1)),
+        g=complete, mask=mask, overflow=overflow,
+        bottom=jnp.sum(boltz * xq, -1) / norm)
+
+
+def _drift_angle(w: dict) -> Array:
+    """Signed ``gamma_c* = (2/pi) arctan(N / |D|)`` of every well (0 off mask)."""
+    m = w["mask"]
+    return jnp.where(m, (2 / jnp.pi) * jnp.arctan2(
+        jnp.where(m, w["N"], 1.0), jnp.abs(jnp.where(m, w["D"], 1.0))), 0.0)
+
+
+def _line_length(F: Array, length):
+    return jnp.trapezoid(F[4] / F[0], jnp.linspace(0.0, length, F.shape[-1]))
+
+
+def _complete_mean(w: dict, value: Array, completeness: float):
+    """``(total v tau, completeness-floored mean of value)`` per level."""
+    vt = w["vt"]
+    total, den = jnp.sum(vt, -1), jnp.sum(w["g"] * vt, -1)
+    scale = den + completeness * total
+    return total, jnp.sum(w["g"] * vt * value, -1) / jnp.where(scale > 0, scale, 1.0)
+
+
+def _gamma_c_line(F, length, *, K, Q, W, qorder, width, completeness):
+    b, weight, overflow = _breakpoint_nodes(F, length, K, Q)
+    w = _line_wells(F, length, b, W=W, qorder=qorder, width=width)
+    total, mean = _complete_mean(w, _drift_angle(w) ** 2, completeness)
+    return (jnp.sum(weight * total * mean), _line_length(F, length),
+            overflow | w["overflow"])
+
+
+def _alpha_line(F, alpha, *, length, iota, nfp, b, W, qorder, width):
+    """Wells of the line of label ``alpha``: bounce time, ``gamma_c*``,
+    precession direction, completeness weight and the label ``alpha_eff`` of
+    the well on the field-period-reduced surface (``alpha + 2 pi iota k / nfp``
+    for a well bottom in field period ``k``)."""
+    w = _line_wells(F, length, b, W=W, qorder=qorder, width=width)
+    m, d = w["mask"], jnp.where(w["mask"], w["D"], 1.0)
+    phi = (w["bottom"] - 0.5 * length) / iota
+    k = jnp.floor(phi * nfp / (2 * jnp.pi))
+    return dict(
+        w, gamma=_drift_angle(w), alpha=alpha + 2 * jnp.pi * iota * k / nfp,
+        direction=jnp.where(m, d / jnp.sqrt(d * d + w["N"]**2), 0.0))
+
+
+def _check_lines(bmag, ingredients):
+    bmag = jnp.asarray(bmag)
+    if bmag.ndim != 2 or int(bmag.shape[-1]) < 8:
+        raise ValueError("bmag must have shape (nline, nx >= 8)")
+    return jnp.stack([jnp.broadcast_to(jnp.asarray(ingredients[k], bmag.dtype),
+                                       bmag.shape) for k in _FIELDS], 1)
+
+
+def _caps(num_transit: int, max_levels, max_wells) -> tuple[int, int]:
+    """Level and well slots per line; the defaults (48 and 8 per transit)
+    hold the shaped nfp = 2-4 boundaries tried (up to ~30 extrema of ``B`` per
+    transit) and leave the rest of the level slots to the bisections."""
+    return (48 * int(num_transit) if max_levels is None else int(max_levels),
+            8 * int(num_transit) if max_wells is None else int(max_wells))
+
 
 def gamma_c_from_fieldlines(
-    *,
-    bmag,
-    radial_drift,
-    radial_gradient,
-    drift_correction,
-    tangency,
-    dl_dx,
-    length,
-    pitch,
-    pitch_weights,
-    max_wells: int | None = None,
-    quadrature_order: int = 32,
+    *, bmag, radial_drift, radial_gradient, drift_correction, tangency, dl_dx,
+    length, num_transit: int = 4, pitch_nodes: int = 4,
+    quadrature_order: int = 64, max_levels: int | None = None,
+    max_wells: int | None = None, tangency_width: float = 0.05,
+    completeness: float = 0.05,
 ) -> dict[str, Array]:
     """Nemov ``Gamma_c`` of one flux surface from sampled field lines.
 
-    ``bmag`` has shape ``(nline, nx)`` on a uniform bounded grid covering
-    ``[0, length]`` in the line parameter ``x``, with arc-length element
-    ``dl_dx``.  The remaining along-line arrays are the module-docstring
-    ingredients: ``radial_drift`` is
+    ``bmag`` is ``(nline, nx)`` on a uniform grid covering ``[0, length]`` in
+    the line parameter ``x`` with arc-length element ``dl_dx``; the other
+    arrays are the module-docstring ingredients: ``radial_drift`` is
     ``(B x grad B) . grad psi / B^3``, ``radial_gradient`` is
     ``dB/drho at fixed PEST angles / B``, ``drift_correction`` is ``K / B``,
-    and ``tangency`` is ``|grad rho| ||e_alpha||``.  ``pitch`` and
-    ``pitch_weights`` are quadrature nodes and weights of the lambda
-    integral. Any well-slot overflow invalidates the surface's ``gamma_c``
-    with NaN rather than a falsely low cost. ``excluded_fraction`` and
-    ``overflow_fraction`` report the fraction of overflowing line/pitch
-    pairs; increase ``max_wells`` before using that surface.
+    ``tangency`` is ``T``.  ``pitch_nodes`` is the Gauss-Legendre order
+    between consecutive critical levels of a line; ``max_levels`` and
+    ``max_wells`` (defaults scale with ``num_transit``) bound the pitch-level
+    slots per line (critical levels plus bisections) and the wells per level.  Any overflow turns ``gamma_c``
+    into NaN rather than a falsely low cost.  Also returns ``gamma_c_lines``,
+    the per-line values, and the ``overflow`` flag.
     """
-    return _wells_assembly(
-        bmag=bmag, radial_drift=radial_drift,
-        radial_gradient=radial_gradient, drift_correction=drift_correction,
-        tangency=tangency, dl_dx=dl_dx, length=length, pitch=pitch,
-        pitch_weights=pitch_weights, max_wells=max_wells,
-        quadrature_order=quadrature_order, kernel_floor=None)
+    F = _check_lines(bmag, dict(
+        bmag=bmag, radial_drift=radial_drift, radial_gradient=radial_gradient,
+        drift_correction=drift_correction, dl_dx=dl_dx, tangency=tangency))
+    K, W = _caps(num_transit, max_levels, max_wells)
+    numer, line, over = jax.lax.map(jax.checkpoint(functools.partial(
+        _gamma_c_line, length=length, K=K, Q=int(pitch_nodes), W=W,
+        qorder=int(quadrature_order), width=float(tangency_width),
+        completeness=float(completeness))), F)
+    per_line = jnp.pi / (8 * jnp.sqrt(2.0)) * numer / line
+    gamma_c = jnp.pi / (8 * jnp.sqrt(2.0)) * jnp.mean(numer) / jnp.mean(line)
+    return {"gamma_c": jnp.where(jnp.any(over), jnp.nan, gamma_c),
+            "gamma_c_lines": per_line, "overflow": jnp.any(over)}
 
 
-def gamma_c_smooth_from_fieldlines(
-    *,
-    bmag,
-    radial_drift,
-    radial_gradient,
-    drift_correction,
-    tangency,
-    dl_dx,
-    length,
-    pitch,
-    pitch_weights,
-    max_wells: int | None = None,
-    quadrature_order: int = 32,
-    temperature: float = 0.15,
+def _lost_fraction(gamma, direction, width):
+    """Probability that precession meets an outward superbanana first.
+
+    ``gamma``, ``direction`` are ``(nbin, nlevel)`` on the periodic ``alpha``
+    grid; the thresholds are smoothsteps rising over ``gamma_th +- width``
+    (exactly 0 and 1 outside, so a quiet field loses nothing); the two precession
+    directions are mixed with weights ``(1 +- direction) / 2``.  Eq. 25 pairs
+    an inward with an outward event, so the result is scaled by the
+    probability that an inward event exists at all.
+    """
+    n = gamma.shape[0]
+    def step(g):
+        u = jnp.clip((g - _GAMMA_TH) / (2 * width) + 0.5, 0.0, 1.0)
+        return u * u * (3.0 - 2.0 * u)
+
+    out, inward = step(gamma), step(-gamma)
+    free = jnp.clip(1.0 - out - inward, 0.0, 1.0)
+    steps = jnp.arange(n)
+
+    def sweep(sign):
+        k = (steps[:, None] + sign * steps[None, :]) % n          # (j, m)
+        alive = jnp.cumprod(free[k], axis=1)
+        alive = jnp.concatenate([jnp.ones_like(alive[:, :1]), alive[:, :-1]], 1)
+        return jnp.sum(out[k] * alive, axis=1)
+
+    plus = 0.5 * (1.0 + direction)
+    pair = 1.0 - jnp.prod(1.0 - inward, axis=0)
+    return (plus * sweep(1) + (1.0 - plus) * sweep(-1)) * pair
+
+
+def gamma_alpha_from_fieldlines(
+    *, bmag, radial_drift, radial_gradient, drift_correction, tangency, dl_dx,
+    length, iota, nfp: int = 1, num_transit: int = 4, pitch_levels: int = 64,
+    quadrature_order: int = 64, max_wells: int | None = None,
+    tangency_width: float = 0.05, completeness: float = 0.05,
+    threshold_width: float = 0.05,
 ) -> dict[str, Array]:
-    """Smooth surrogate of :func:`gamma_c_from_fieldlines`.
+    """Velasco ``Gamma_alpha`` (module docstring) of one flux surface.
 
-    Same ingredient contract, well detection, and sine-mapped bounce
-    quadrature as the hard diagnostic — including its exact per-well
-    cancellations, so the axisymmetric limit stays at quadrature noise —
-    with the hard-branch noise sources of the discretized boundary
-    derivative regularized on a field-dependent scale ``delta``:
-
-    - **capped bounce kernels**: the inverse parallel speed becomes
-      ``1/sqrt(max(1 - lambda B, 0) + delta)`` (the ``kernel_floor`` of
-      :func:`vmex.core.bounce.bounce_action`).  Near a separatrix the exact
-      bounce time diverges logarithmically in the reflecting level, so a
-      pitch node landing at distance ``d`` from a barrier top contributes a
-      ``1/d`` derivative term whose sign depends on which side the node
-      fell — the sign-flipping refinement ladder measured for the hard
-      gradient. The floor regularizes that curvature at scale ``delta``;
-    - the same floor also removes the hard **birth/death jump**: the exact
-      bounce time of a well born at a quadratic ``|B|`` minimum starts at the
-      finite oscillator period (amplitude-independent), so the hard value
-      jumps when a boundary variation creates or destroys a well — the
-      birth/death events of the well-connection graph of Ochs, J. Plasma
-      Phys. (2025).  With the floor, a newborn well's bounce time is
-      ``~ width/sqrt(delta) -> 0``, so wells fade in and out continuously.
-
-    ``delta = temperature * (B_max - B_min)/B_max`` of the sampled lines —
-    a fixed fraction of the trapped range, with softmax-weighted extrema so
-    the scale is differentiable (see the note at its construction: freezing
-    it under ``stop_gradient`` left the AD slope at 0.37x of the true FD
-    slope of the objective, and the missing coherent term let branch noise
-    set the through-the-solve sign).  Deliberately **not** tied to the grid
-    spacings: otherwise each refinement rung differentiates a different
-    functional. ``num_pitch * temperature >~ 4`` was a useful budget guide
-    on the tested li383 case, not a convergence guarantee. Normalized
-    pitch-grid shape derivatives remain frozen. Check actual forward
-    descent and independently refine field-line, pitch and bounce sampling
-    for each configuration; anneal ``temperature`` while comparing against
-    the hard diagnostic.
+    Same ingredients as :func:`gamma_c_from_fieldlines`; the lines are
+    equispaced in the field-line label ``alpha`` over one period and carry
+    ``iota`` and the number of field periods ``nfp``.  Every well is
+    assigned the label ``alpha_eff`` of its bottom reduced into the first
+    field period (the surface position that eq. 25 calls ``alpha``); the
+    ``gamma_c*`` and precession direction of the complete wells are binned on
+    a periodic ``alpha`` grid (hat weights), and each well takes the lost
+    probability of its position.  The pitch integral is a midpoint rule with
+    ``pitch_levels`` levels uniform in ``B`` between the extremes of the
+    lines.  Also returns the trapped fraction ``f_trapped`` (eq. 24).
     """
-    bmag = jnp.asarray(bmag)
-    if temperature <= 0.0:
-        raise ValueError("temperature must be positive")
-    # Softmax-weighted extrema, not hard min/max: differentiable (the FD
-    # consistency of the objective includes d(delta)/dp — freezing it under
-    # stop_gradient left AD at 0.37x of the true FD slope, measured), and
-    # exactly stellarator-reflection symmetric where hard extrema send the
-    # whole cotangent to one member of each mirror pair.  The weighted
-    # average is a continuum functional of the sampled lines, so refinement
-    # converges it (an unnormalized logsumexp would inflate the range by
-    # softscale * log(nsamples) — resolution-dependent).
-    softscale = 0.01 * jnp.mean(bmag)
-    weight_max = jax.nn.softmax(jnp.ravel(bmag) / softscale)
-    weight_min = jax.nn.softmax(-jnp.ravel(bmag) / softscale)
-    b_max = jnp.vdot(weight_max, jnp.ravel(bmag))
-    b_min = jnp.vdot(weight_min, jnp.ravel(bmag))
-    delta = jnp.asarray(temperature, bmag.dtype) * (b_max - b_min) / b_max
-    return _wells_assembly(
-        bmag=bmag, radial_drift=radial_drift,
-        radial_gradient=radial_gradient, drift_correction=drift_correction,
-        tangency=tangency, dl_dx=dl_dx, length=length, pitch=pitch,
-        pitch_weights=pitch_weights, max_wells=max_wells,
-        quadrature_order=quadrature_order, kernel_floor=delta,
-        corner_floor=float(temperature))
-
-
-def _wells_assembly(
-    *,
-    bmag,
-    radial_drift,
-    radial_gradient,
-    drift_correction,
-    tangency,
-    dl_dx,
-    length,
-    pitch,
-    pitch_weights,
-    max_wells,
-    quadrature_order,
-    kernel_floor,
-    corner_floor=None,
-) -> dict[str, Array]:
-    """Shared well detection, drift kernels, and ``Gamma_c`` assembly.
-
-    ``kernel_floor=None`` is the exact hard diagnostic; a positive floor
-    (with its ``corner_floor`` companion) is the smooth surrogate.  One
-    body, so the two lanes cannot drift apart in anything but the
-    deliberate smoothing.
-    """
-    bmag = jnp.asarray(bmag)
-    if bmag.ndim != 2:
-        raise ValueError("bmag must have shape (nline, nx)")
-    pitch = jnp.atleast_1d(jnp.asarray(pitch, dtype=bmag.dtype))
-    weights = jnp.atleast_1d(jnp.asarray(pitch_weights, dtype=bmag.dtype))
-    if pitch.shape != weights.shape:
-        raise ValueError("pitch_weights must have the same length as pitch")
-    dl_dx = jnp.broadcast_to(jnp.asarray(dl_dx, dtype=bmag.dtype), bmag.shape)
-
-    drift_integrands = {"radial": radial_drift, "gradient": radial_gradient}
-    parallel_integrands = {"correction": drift_correction}
-    if corner_floor is not None:
-        # L1 companions of the same kernels: the per-cell drift magnitude
-        # scale for the superbanana-corner regularization below.
-        drift_integrands["absradial"] = jnp.abs(jnp.asarray(radial_drift))
-        drift_integrands["absgradient"] = jnp.abs(jnp.asarray(radial_gradient))
-        parallel_integrands["abscorrection"] = jnp.abs(
-            jnp.asarray(drift_correction))
-    out = bounce_action(
-        bmag, pitch, dl_dphi=dl_dx, length=length, periodic=False,
-        max_wells=max_wells, quadrature_order=quadrature_order,
-        kernel_floor=kernel_floor,
-        drift_integrands=drift_integrands,
-        parallel_integrands=parallel_integrands,
-        argmin_integrands={"tangency": tangency})
-    keep = out["well_mask"] & ~out["overflow"][..., None]
-
-    def masked(name):
-        return jnp.where(keep, out[name], 0.0)
-
-    v_tau = masked("bounce_time")
-    numerator = masked("drift_radial")
-    denominator = masked("argmin_tangency") * (
-        masked("drift_gradient") + masked("parallel_correction"))
-    if corner_floor is None:
-        safe = jnp.where(denominator != 0.0, denominator, 1.0)
-        # Pure radial drift has |gamma|=1; only a zero drift vector gets zero.
-        gamma = jnp.where(denominator != 0.0,
-                         (2.0 / jnp.pi) * jnp.arctan(numerator / safe),
-                         jnp.sign(numerator))
-    else:
-        # Superbanana corners: where the radial AND tangential bounce-drift
-        # integrals vanish together, d(arctan(N/D))/dp ~ 1/|(N, D)|, and a
-        # well-cell passing near that codim-2 origin dominates the gradient
-        # with an arbitrary sign (measured: +-4 spikes in a delta sweep, on
-        # a total of ~0.3).  gamma**2 is even, so the denominator magnitude
-        # is floored at ``corner_floor`` times the cell's own L1 drift
-        # scale — the same bounce integrals of the |integrands| — which is
-        # what N and D would be without cancellation.  gamma is therefore
-        # touched only where the bounce average cancels by more than
-        # ~1/corner_floor, exactly the near-superbanana structure whose
-        # drift angle the discretization cannot determine stably; every
-        # drift-dominated cell keeps its hard value, and small wells are
-        # judged against their own scale. corner_floor is a quadrature
-        # parameter; the per-well magnitude keeps its field dependence.
-        magnitude = masked("drift_absradial") + masked("argmin_tangency") * (
-            masked("drift_absgradient") + masked("parallel_abscorrection"))
-        sigma = corner_floor * magnitude
-        gamma = (2.0 / jnp.pi) * jnp.arctan(
-            numerator / jnp.sqrt(
-                denominator**2 + sigma**2 + jnp.finfo(bmag.dtype).tiny))
-    # Wells drifting across the ends of the bounded trace would blink in and
-    # out; the taper fades them over the outer half-transit on each side, and
-    # the same window weights the normalizing length so the ratio stays the
-    # ergodic-limit estimate.
-    x = jnp.linspace(0.0, length, int(bmag.shape[-1]), dtype=bmag.dtype)
-    ramp = jnp.minimum(jnp.asarray(length, dtype=bmag.dtype) / 2.0, jnp.pi)
-
-    def window(position):
-        edge = jnp.minimum(position, length - position)
-        return jnp.sin(
-            0.5 * jnp.pi * jnp.clip(edge / ramp, 0.0, 1.0)) ** 2
-
-    center = jnp.where(keep, 0.5 * (out["well_left"] + out["well_right"]), 0.0)
-    velocity_sum = jnp.sum(
-        window(center) * v_tau * gamma * gamma, axis=-1)     # (nline, npitch)
-    line_length = jnp.trapezoid(window(x) * dl_dx / bmag, x, axis=-1)
-    gamma_c = (jnp.pi / (8.0 * jnp.sqrt(2.0))
-               * jnp.sum(weights * jnp.mean(velocity_sum, axis=0))
-               / jnp.mean(line_length))
-    gamma_c = jnp.where(jnp.any(out["overflow"]), jnp.nan, gamma_c)
-    out.update({
-        "gamma_c": gamma_c,
-        "gamma_per_well": jnp.where(keep, gamma, jnp.nan),
-        "line_length": line_length,
-        "excluded_fraction": jnp.mean(out["overflow"]),
-        "overflow_fraction": jnp.mean(out["overflow"]),
-    })
-    if kernel_floor is not None:
-        out["epsilon"] = kernel_floor
-    return out
-
+    F = _check_lines(bmag, dict(
+        bmag=bmag, radial_drift=radial_drift, radial_gradient=radial_gradient,
+        drift_correction=drift_correction, dl_dx=dl_dx, tangency=tangency))
+    n = F.shape[0]
+    _, W = _caps(num_transit, None, max_wells)
+    b_lo, b_hi = jnp.min(F[:, 0]), jnp.max(F[:, 0])
+    b = b_lo + (b_hi - b_lo) * (jnp.arange(pitch_levels) + 0.5) / pitch_levels
+    weight = (b_hi - b_lo) / pitch_levels / b**2
+    labels = 2 * jnp.pi * jnp.arange(n) / n
+    w = jax.lax.map(jax.checkpoint(lambda a: _alpha_line(
+        a[0], a[1], length=length, iota=iota, nfp=nfp, b=b, W=W,
+        qorder=int(quadrature_order), width=float(tangency_width))), (F, labels))
+    # hat weights of every well on the periodic alpha grid: (line, level, well, bin)
+    u = jnp.mod(w["alpha"] / (2 * jnp.pi) * n, n)[..., None] - jnp.arange(n)
+    hat = jnp.maximum(0.0, 1.0 - jnp.abs((u + n / 2) % n - n / 2))
+    vt = w["vt"]
+    # complete-well bin maps; the completeness floor mirrors _complete_mean
+    mass = jnp.einsum("lkwi,lkw->ki", hat, w["g"] * vt)
+    floor = completeness * jnp.einsum("lkwi,lkw->ki", hat, vt)
+    maps = [jnp.einsum("lkwi,lkw->ki", hat, w["g"] * vt * w[name]) / jnp.where(
+        mass + floor > 0, mass + floor, 1.0) for name in ("gamma", "direction")]
+    lost = _lost_fraction(maps[0].T, maps[1].T, float(threshold_width))  # (bin, level)
+    well_lost = jnp.einsum("lkwi,ik->lkw", hat, lost)
+    line = jnp.mean(jax.vmap(lambda f: _line_length(f, length))(F))
+    scale = 0.25 / (n * line)
+    over = jnp.any(w["overflow"])
+    return {"gamma_alpha": jnp.where(over, jnp.nan, scale * jnp.sum(
+                weight * jnp.sum(vt * well_lost, (0, 2)))),
+            "f_trapped": scale * jnp.sum(weight * jnp.sum(vt, (0, 2))),
+            "overflow": over}
 
 
 def _make_gamma_point_fn(m: Array, xn: Array, tabs: dict, iota: Array,
@@ -398,27 +556,16 @@ def _surface_rows(surfaces, ns: int) -> tuple[int, ...]:
     return rows
 
 
-#: Per-surface outputs of :func:`_gamma_c_rows`.  Everything else the bounce
-#: kernel builds stays inside the jit and is eliminated as dead code.
-_ROW_FIELDS = ("gamma_c", "excluded_fraction", "overflow_fraction",
-               "line_length", "pitch")
-
-
 def _sampling_grids(dtype, nalpha: int, num_transit: int,
-                    points_per_transit: int, num_pitch: int):
-    """Field-line-label, along-line, and pitch-level grids of one budget.
+                    points_per_transit: int):
+    """Field-line-label and along-line grids of one budget.
 
     The along-line grid is centred on the field-line label, not ``[0, L]``:
     the stellarator reflection maps ``(alpha, x) -> (-alpha, -x)`` and the
     alpha set is closed under negation, so a window symmetric in ``x`` makes
     the estimator exactly invariant under it -- and ``Gamma_c`` is even while
     the sine-parity spectra are odd, so ``d(Gamma_c)/d(sine)`` then vanishes
-    on a symmetric state as it must.  A one-sided window does not: measured,
-    it left a spurious symmetry-breaking gradient at 55% of the physical one.
-    The level nodes are an open midpoint rule, uniform in the reflecting
-    level ``1/lambda`` rather than ``lambda`` (the Unalmis et al.
-    pitch-sampling guidance); the open ends avoid the incomputable bounce
-    integral at the global maximum.
+    on a symmetric state as it must.
     """
     length = 2.0 * np.pi * int(num_transit)
     alpha = jnp.asarray(
@@ -426,35 +573,16 @@ def _sampling_grids(dtype, nalpha: int, num_transit: int,
     x = jnp.linspace(
         -0.5 * length, 0.5 * length,
         int(points_per_transit) * int(num_transit) + 1, dtype=dtype)
-    level_nodes = jnp.asarray(
-        (np.arange(int(num_pitch)) + 0.5) / int(num_pitch), dtype=dtype)
-    return length, alpha, x, level_nodes
-
-
-def _pitch_grid(bmag, level_nodes, num_pitch: int):
-    """``(pitch, pitch_weights)`` across the trapped range of ``bmag``.
-
-    Freeze the normalized extrema to preserve stellarator-reflection
-    gradients, but retain the common field scale: under B -> c B and
-    flux -> c flux, pitch weights and the line normalizer scale as 1/c,
-    leaving Gamma_c invariant. Shape derivatives of this adaptive
-    quadrature remain approximate.
-    """
-    mean_b = jnp.mean(bmag)
-    b_min = mean_b * jax.lax.stop_gradient(jnp.min(bmag) / mean_b)
-    b_max = mean_b * jax.lax.stop_gradient(jnp.max(bmag) / mean_b)
-    level = b_min + (b_max - b_min) * level_nodes
-    return 1.0 / level, (b_max - b_min) / int(num_pitch) / level**2
+    return length, alpha, x
 
 
 def _line_ingredients(ctx: dict, j: int, zeta0: Array, alpha: Array,
                       x: Array) -> dict[str, Array]:
     """Sampled Nemov drift-set arrays on one full-mesh row's field lines.
 
-    Returns the keyword arguments of :func:`gamma_c_from_fieldlines` /
-    :func:`gamma_c_smooth_from_fieldlines` (all ``(nline, nx)``) plus the
-    row ``iota``, so the hard diagnostic and the smooth surrogate share one
-    geometry evaluation.
+    Returns the keyword arguments of :func:`gamma_c_from_fieldlines` and
+    :func:`gamma_alpha_from_fieldlines` (all ``(nline, nx)``) plus the row
+    ``iota``, so both proxies share one geometry evaluation.
     """
     hs, psi_edge = ctx["hs"], ctx["psi_edge"]
     iota = 0.5 * (ctx["iotas"][j] + ctx["iotas"][j + 1])
@@ -491,328 +619,187 @@ def _line_ingredients(ctx: dict, j: int, zeta0: Array, alpha: Array,
     )
 
 
-def _rows_from_context(
-    ctx: dict,
-    zeta0: Array,
-    *,
-    rows: tuple[int, ...],
-    nalpha: int,
-    num_transit: int,
-    points_per_transit: int,
-    num_pitch: int,
-    quadrature_order: int,
-    max_wells: int,
-    map_rows: bool = False,
-) -> dict[str, Array]:
-    """``Gamma_c`` of the full-mesh rows ``rows`` of one spectral context.
+_OPTIONS = {
+    "c": dict(nalpha=16, num_transit=4, points_per_transit=32, pitch_nodes=4,
+              quadrature_order=64, max_levels=None, max_wells=None,
+              tangency_width=0.05, completeness=0.05),
+    "alpha": dict(nalpha=16, num_transit=4, points_per_transit=32,
+                  pitch_levels=64, quadrature_order=64, max_wells=None,
+                  tangency_width=0.05, completeness=0.05, threshold_width=0.05),
+}
+_OUTPUTS = {"c": ("gamma_c",), "alpha": ("gamma_alpha", "f_trapped")}
+_KERNELS = {"c": gamma_c_from_fieldlines, "alpha": gamma_alpha_from_fieldlines}
+_BOUNDARY = ("nalpha", "num_transit", "points_per_transit")
+
+
+def _resolve(kind: str, options: dict) -> tuple:
+    """Defaults + overrides as a hashable static tuple, validated."""
+    unknown = set(options) - set(_OPTIONS[kind])
+    if unknown:
+        raise TypeError(f"unknown option(s) {sorted(unknown)}; valid: {sorted(_OPTIONS[kind])}")
+    cfg = {**_OPTIONS[kind], **options}
+    if cfg["nalpha"] < 2 or (kind == "alpha" and cfg["nalpha"] < 4):
+        raise ValueError("nalpha must be >= 2 (>= 4 for Gamma_alpha)")
+    if cfg["num_transit"] < 1 or cfg["points_per_transit"] < 16:
+        raise ValueError("num_transit must be >= 1 and points_per_transit >= 16")
+    if min(cfg.get("pitch_nodes", 2), cfg.get("pitch_levels", 2), cfg["quadrature_order"]) < 2:
+        raise ValueError("pitch_nodes, pitch_levels and quadrature_order must be >= 2")
+    if not (cfg["tangency_width"] > 0 and cfg["completeness"] >= 0
+            and cfg.get("threshold_width", 1.0) > 0):
+        raise ValueError("tangency_width and threshold_width must be positive, completeness >= 0")
+    return tuple(sorted(cfg.items()))
+
+
+def _rows_from_context(ctx: dict, zeta0: Array, *, rows: tuple[int, ...],
+                       kind: str, cfg: tuple, map_rows: bool = False
+                       ) -> dict[str, Array]:
+    """Proxy of the full-mesh rows ``rows`` of one spectral context.
 
     ``ctx`` is the shared field-line context of
-    :func:`vmex.core.stability._ballooning_context` — either from a live
-    ``(state, runtime)`` pair or normalized from a WOUT file — so the live
-    optimization path and the read-only plotting path run the identical
-    numerics.  Everything that sets an array shape is static in the jitted
-    wrappers below.
+    :func:`vmex.core.stability._ballooning_context` -- from a live
+    ``(state, runtime)`` pair or from a WOUT file -- so the optimization and
+    the read-only plotting path run the identical numerics.
     """
-    length, alpha, x, level_nodes = _sampling_grids(
-        ctx["s"].dtype, nalpha, num_transit, points_per_transit, num_pitch)
+    setting = dict(cfg)
+    length, alpha, x = _sampling_grids(
+        ctx["s"].dtype, setting["nalpha"], setting["num_transit"],
+        setting["points_per_transit"])
+    options = {k: v for k, v in setting.items() if k not in _BOUNDARY + ("nfp",)}
+
     def row(j):
-        ing = _line_ingredients(ctx, j, jnp.asarray(zeta0, ctx["s"].dtype),
-                                alpha, x)
+        ing = _line_ingredients(ctx, j, jnp.asarray(zeta0, ctx["s"].dtype), alpha, x)
         iota = ing.pop("iota")
-        pitch, weights = _pitch_grid(ing["bmag"], level_nodes, num_pitch)
-        out = gamma_c_from_fieldlines(
-            **ing, length=length, pitch=pitch, pitch_weights=weights,
-            max_wells=max_wells, quadrature_order=quadrature_order)
-        return {**{name: out[name] for name in _ROW_FIELDS}, "iota": iota}
+        extra = dict(iota=iota, nfp=setting["nfp"]) if kind == "alpha" else {}
+        out = _KERNELS[kind](**ing, length=length, num_transit=setting["num_transit"],
+                             **extra, **options)
+        # The field-line map phi = x / iota is meaningless through iota ~ 0:
+        # poison the result instead of returning a plausible number.
+        return {**{k: jnp.where(jnp.abs(iota) > 1.0e-6, out[k], jnp.nan)
+                   for k in _OUTPUTS[kind]}, "iota": iota,
+                "overflow": out["overflow"].astype(ing["bmag"].dtype)}
 
     # WOUT diagnostics favor one small compilation; live optimization retains
     # the unrolled rows and their faster repeated execution.
-    stacked = (jax.lax.map(row, jnp.asarray(rows)) if map_rows else
+    stacked: dict[str, Array] = (jax.lax.map(row, jnp.asarray(rows)) if map_rows else
                jax.tree.map(lambda *xs: jnp.stack(xs), *(row(j) for j in rows)))
-    # The field-line map phi = x / iota is meaningless through iota ~ 0;
-    # poison the result instead of returning a plausible number.
-    iota_row = stacked["iota"]
-    stacked["gamma_c"] = jnp.where(
-        jnp.abs(iota_row) > 1.0e-6, stacked["gamma_c"], jnp.nan)
     stacked["s"] = ctx["s"][jnp.asarray(rows)]
-    stacked["iota"] = iota_row
     return stacked
 
 
-_ROW_STATICS = ("rows", "nalpha", "num_transit", "points_per_transit",
-                "num_pitch", "quadrature_order", "max_wells")
+_ROW_STATICS = ("rows", "kind", "cfg")
 
-#: Traced context entries consumed by :func:`_rows_from_context`; the
-#: remaining `_ballooning_context` keys (normalizations, pressure) are unused
-#: here, and ``lasym`` is Python control flow, so it rides as a static.
+#: Traced context entries consumed by :func:`_rows_from_context`; ``lasym`` is
+#: Python control flow, so it rides as a static.
 _CTX_KEYS = ("s", "hs", "psi_edge", "iotas", "phipf", "m", "xn",
              "rmnc", "zmns", "lmns", "rmns", "zmnc", "lmnc")
 
 
 @functools.partial(jax.jit, static_argnames=_ROW_STATICS)
-def _gamma_c_rows(
-    state: SpectralState, rt: SolverRuntime, zeta0: Array, *,
-    rows, nalpha, num_transit, points_per_transit, num_pitch,
-    quadrature_order, max_wells,
-) -> dict[str, Array]:
-    """Live-state ``Gamma_c`` rows, as one XLA executable.
-
-    Module-level rather than a ``jax.jit`` at the call site, so every boundary
-    iterate of an optimization stage reuses one compilation instead of
-    re-tracing the spectral field-line machinery.  Measured on a three-surface
-    nfp = 2 case: 0.96 s eager against 0.03 s here, values bit-identical.
-    """
-    return _rows_from_context(
-        _ballooning_context(state, rt), zeta0, rows=rows, nalpha=nalpha,
-        num_transit=num_transit, points_per_transit=points_per_transit,
-        num_pitch=num_pitch, quadrature_order=quadrature_order,
-        max_wells=max_wells)
+def _proxy_rows(state: SpectralState, rt: SolverRuntime, zeta0: Array, *,
+                rows, kind, cfg) -> dict[str, Array]:
+    """Live-state rows, one XLA executable per settings (module level so
+    every boundary iterate of an optimization stage reuses it)."""
+    return _rows_from_context(_ballooning_context(state, rt), zeta0,
+                              rows=rows, kind=kind, cfg=cfg)
 
 
 @functools.partial(jax.jit, static_argnames=_ROW_STATICS + ("lasym",))
-def _gamma_c_rows_from_tables(
-    tables: dict, zeta0: Array, *, lasym: bool,
-    rows, nalpha, num_transit, points_per_transit, num_pitch,
-    quadrature_order, max_wells,
-) -> dict[str, Array]:
-    """WOUT-context ``Gamma_c`` rows; one executable per (shapes, settings)."""
-    return _rows_from_context(
-        dict(tables, lasym=lasym), zeta0, rows=rows, nalpha=nalpha,
-        num_transit=num_transit, points_per_transit=points_per_transit,
-        num_pitch=num_pitch, quadrature_order=quadrature_order,
-        max_wells=max_wells, map_rows=True)
+def _gamma_c_rows_from_tables(tables: dict, zeta0: Array, *, lasym: bool,
+                              rows, kind, cfg) -> dict[str, Array]:
+    """WOUT-context rows; one executable per (shapes, settings)."""
+    return _rows_from_context(dict(tables, lasym=lasym), zeta0, rows=rows,
+                              kind=kind, cfg=cfg, map_rows=True)
 
 
-#: Per-surface outputs of the smooth surrogate rows.
-_SMOOTH_ROW_FIELDS = _ROW_FIELDS + ("epsilon",)
+def _evaluate(kind, state, rt, surfaces, zeta0, options):
+    cfg = _resolve(kind, options) + (("nfp", int(rt.resolution.nfp)),)
+    rows = _surface_rows(surfaces, int(np.shape(rt.setup.s_full)[0]))
+    out = _proxy_rows(state, rt, jnp.asarray(float(zeta0)),
+                      rows=rows, kind=kind, cfg=cfg)
+    return {**out, "surface_rows": rows}
 
 
-def _smooth_rows_from_context(
-    ctx: dict,
-    zeta0: Array,
-    *,
-    rows: tuple[int, ...],
-    nalpha: int,
-    num_transit: int,
-    points_per_transit: int,
-    num_pitch: int,
-    quadrature_order: int,
-    max_wells: int,
-    temperature: float,
-) -> dict[str, Array]:
-    """Smooth-surrogate rows on the same grids and geometry as the hard rows."""
-    length, alpha, x, level_nodes = _sampling_grids(
-        ctx["s"].dtype, nalpha, num_transit, points_per_transit, num_pitch)
-    results = []
-    iotas = []
-    for j in rows:
-        ing = _line_ingredients(ctx, j, jnp.asarray(zeta0, ctx["s"].dtype),
-                                alpha, x)
-        iotas.append(ing.pop("iota"))
-        pitch, weights = _pitch_grid(ing["bmag"], level_nodes, num_pitch)
-        results.append(gamma_c_smooth_from_fieldlines(
-            **ing, length=length, pitch=pitch, pitch_weights=weights,
-            max_wells=max_wells, quadrature_order=quadrature_order,
-            temperature=temperature))
-    stacked: dict[str, Array] = {
-        name: jnp.stack([out[name] for out in results])
-        for name in _SMOOTH_ROW_FIELDS
-    }
-    iota_row = jnp.stack(iotas)
-    stacked["gamma_c"] = jnp.where(
-        jnp.abs(iota_row) > 1.0e-6, stacked["gamma_c"], jnp.nan)
-    stacked["s"] = ctx["s"][jnp.asarray(rows)]
-    stacked["iota"] = iota_row
-    return stacked
-
-
-@functools.partial(
-    jax.jit, static_argnames=_ROW_STATICS + ("temperature",))
-def _gamma_c_smooth_rows(
-    state: SpectralState, rt: SolverRuntime, zeta0: Array, *,
-    rows, nalpha, num_transit, points_per_transit, num_pitch,
-    quadrature_order, max_wells, temperature,
-) -> dict[str, Array]:
-    """Live-state smooth-surrogate rows, one executable per settings.
-
-    ``temperature`` is static (an annealing stage changes it a handful of
-    times per optimization, and a concrete value lets XLA fold the smoothing
-    scales), everything shape-setting likewise.
-    """
-    return _smooth_rows_from_context(
-        _ballooning_context(state, rt), zeta0, rows=rows, nalpha=nalpha,
-        num_transit=num_transit, points_per_transit=points_per_transit,
-        num_pitch=num_pitch, quadrature_order=quadrature_order,
-        max_wells=max_wells, temperature=temperature)
-
-
-def _default_max_wells(num_transit, points_per_transit) -> int:
-    """Well slots per pitch level: 32 per transit, the most a rippled outer surface fills.
-
-    16 per transit overflowed (NaN rows) on high-ripple surfaces of the bundled
-    QI and omnigenity decks; 32 resolves them at unchanged values and a fifth more time.
-    """
-    return min(32 * int(num_transit), int(points_per_transit) * int(num_transit))
-
-
-def _validate_settings(nalpha, num_transit, points_per_transit, num_pitch):
-    if nalpha < 2:
-        raise ValueError("nalpha must be >= 2")
-    if num_transit < 1 or points_per_transit < 16:
-        raise ValueError("num_transit must be >= 1 and points_per_transit >= 16")
-    if num_pitch < 2:
-        raise ValueError("num_pitch must be >= 2")
-
-
-def gamma_c_from_wout(
-    wout,
-    *,
-    surfaces: Sequence[float] = (0.35, 0.6, 0.85),
-    nalpha: int = 9,
-    num_transit: int = 4,
-    points_per_transit: int = 64,
-    num_pitch: int = 32,
-    quadrature_order: int = 32,
-    max_wells: int | None = None,
-    zeta0: float = 0.0,
-) -> dict[str, Array]:
-    """Evaluate ``Gamma_c`` from a VMEC-compatible WOUT, without a solve.
-
-    ``wout`` is a :class:`~vmex.core.wout.WoutData` or a path accepted by
-    :func:`vmex.read_wout`.  The WOUT tables are normalized to the live-state
-    spectral context (the :mod:`vmex.core.turbulence` read-only route), so the
-    numerics — field lines, drift kernels, pitch quadrature — are identical to
-    :func:`gamma_c_state`; only the radial coefficient tables come from the
-    file instead of the solver state.  Same arguments and return contract as
-    :func:`gamma_c_state`.  Read-only: not the differentiable route.
-    """
+def _evaluate_wout(kind, wout, surfaces, zeta0, options):
     from .turbulence import _wout_ballooning_context
     from .wout import read_wout
 
     if isinstance(wout, (str, Path)):
         wout = read_wout(str(wout))
-    _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)
+    cfg = _resolve(kind, options) + (("nfp", int(wout.nfp)),)
     ctx = _wout_ballooning_context(wout)
     rows = _surface_rows(surfaces, int(ctx["ns"]))
     out = _gamma_c_rows_from_tables(
-        {key: ctx[key] for key in _CTX_KEYS},
-        jnp.asarray(float(zeta0)), lasym=bool(ctx["lasym"]), rows=rows,
-        nalpha=int(nalpha), num_transit=int(num_transit),
-        points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
-        quadrature_order=int(quadrature_order),
-        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells))
+        {key: ctx[key] for key in _CTX_KEYS}, jnp.asarray(float(zeta0)),
+        lasym=bool(ctx["lasym"]), rows=rows, kind=kind, cfg=cfg)
     return {**out, "surface_rows": rows}
 
 
-def gamma_c_state(
-    state: SpectralState,
-    rt: SolverRuntime,
-    *,
-    surfaces: Sequence[float] = (0.35, 0.6, 0.85),
-    nalpha: int = 9,
-    num_transit: int = 4,
-    points_per_transit: int = 64,
-    num_pitch: int = 32,
-    quadrature_order: int = 32,
-    max_wells: int | None = None,
-    zeta0: float = 0.0,
-) -> dict[str, Array]:
-    """Evaluate ``Gamma_c`` on flux surfaces of a converged equilibrium.
+_STATE_DOC = """
 
     ``surfaces`` are normalized-flux values mapped to the nearest interior
-    full-mesh rows (the surface-selection convention of
-    :func:`vmex.core.neoclassical.epsilon_effective_from_wout`).  Each
-    surface samples ``nalpha`` field lines over ``num_transit`` poloidal turns
-    at ``points_per_transit`` points per turn, centred on the field-line label
-    so the stellarator reflection is an exact invariance of the estimator; the
-    lambda integral uses ``num_pitch`` open-midpoint nodes across the trapped
-    range ``[1/B_max, 1/B_min]`` of the sampled lines.  Differentiation holds
-    the normalized grid shape fixed while retaining its common field scale
-    (see the node construction).  ``max_wells``
-    defaults to ``32 * num_transit`` slots per pitch level;
-    ``overflow_fraction`` reports any spill, which makes that surface's
-    ``gamma_c`` NaN. Returns per-surface arrays led by ``gamma_c``.
-
-    The absolute value carries roughly 10-20 % scatter at these resolutions --
-    it is a comparative proxy, and the resolution belongs in any quoted
-    number.  The numerics live in the jitted :func:`_gamma_c_rows`; only the
-    validation and the row selection happen here, because those set shapes.
-    """
-    _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)
-    rows = _surface_rows(surfaces, int(np.shape(rt.setup.s_full)[0]))
-    out = _gamma_c_rows(
-        state, rt, jnp.asarray(float(zeta0)), rows=rows, nalpha=int(nalpha),
-        num_transit=int(num_transit),
-        points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
-        quadrature_order=int(quadrature_order),
-        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells))
-    return {**out, "surface_rows": rows}
-
-
-def gamma_c_smooth_state(
-    state: SpectralState,
-    rt: SolverRuntime,
-    *,
-    surfaces: Sequence[float] = (0.35, 0.6, 0.85),
-    nalpha: int = 9,
-    num_transit: int = 4,
-    points_per_transit: int = 64,
-    num_pitch: int = 32,
-    quadrature_order: int = 32,
-    max_wells: int | None = None,
-    temperature: float = 0.15,
-    zeta0: float = 0.0,
-) -> dict[str, Array]:
-    """Smooth ``Gamma_c`` surrogate with approximate pitch-grid derivatives.
-
-    Same sampling and outputs as :func:`gamma_c_state`, with the smoothing
-    scale of :func:`gamma_c_smooth_from_fieldlines` returned as ``epsilon``.
-    Approach the hard value by refining the grid and annealing temperature;
-    validate forward descent and report the independent hard value.
-    """
-    _validate_settings(nalpha, num_transit, points_per_transit, num_pitch)
-    if not float(temperature) > 0.0:
-        raise ValueError("temperature must be positive")
-    rows = _surface_rows(surfaces, int(np.shape(rt.setup.s_full)[0]))
-    out = _gamma_c_smooth_rows(
-        state, rt, jnp.asarray(float(zeta0)), rows=rows, nalpha=int(nalpha),
-        num_transit=int(num_transit),
-        points_per_transit=int(points_per_transit), num_pitch=int(num_pitch),
-        quadrature_order=int(quadrature_order),
-        max_wells=_default_max_wells(num_transit, points_per_transit) if max_wells is None else int(max_wells),
-        temperature=float(temperature))
-    return {**out, "surface_rows": rows}
-
-
-class GammaC(_ResidualTerm):
-    """Composable fast-ion confinement proxy, one ``Gamma_c`` row per surface.
-
-    Nemov et al., Phys. Plasmas 15, 052501 (2008), eq. 61, organized as in
-    Velasco et al., Nucl. Fusion 61, 116059 (2021), eq. 16 — see the module
-    docstring for the formula and conventions.  ``residuals_state`` returns
-    ``sqrt(weight) * Gamma_c`` rows for VMEX's least-squares interface, so
-    the total cost is the weighted sum of ``Gamma_c**2``.  That square is
-    the least-squares form, not a physical scaling, and ``Gamma_c`` itself is
-    a proxy, not a loss law: Velasco et al. 2021, section 5.4, find the
-    prompt-loss fraction follows their ``|gamma_c*|`` variant (eq. 21) more
-    linearly and validate ``Gamma_alpha`` as the predictor.
-    Traceable in both gradient modes.
-
-    Hard well detection and branch selection make the sampled boundary
-    gradient sensitive to grid refinement; measured examples change sign.
-    Use :class:`GammaCSmooth` for optimization, checking forward descent
-    because its pitch-grid derivatives remain approximate. Recompute this
-    hard diagnostic on accepted results.
+    full-mesh rows (the convention of
+    :func:`vmex.core.neoclassical.epsilon_effective_from_wout`).  Each surface
+    samples ``nalpha`` equispaced field lines over ``num_transit`` poloidal
+    turns at ``points_per_transit`` points per turn, centred on the field-line
+    label so the stellarator reflection is an exact invariance of the
+    estimator.  Further ``options`` (defaults in ``{table}``) are those of
+    :func:`{kernel}`.  Returns per-surface arrays led by ``{name}``;
+    ``overflow`` flags rows whose level or well slots were exhausted (their
+    value is NaN, never a falsely low number).  Differentiable with
+    ``jax.grad`` and through the implicit equilibrium solve.
     """
 
-    name = "gamma_c"
 
-    def __init__(
-        self, surfaces=(0.35, 0.6, 0.85), *, weights: Iterable[float] | None = None,
-        nalpha: int = 9, num_transit: int = 4, points_per_transit: int = 64,
-        num_pitch: int = 32, quadrature_order: int = 32,
-        max_wells: int | None = None, zeta0: float = 0.0,
-    ):
+def gamma_c_state(state: SpectralState, rt: SolverRuntime, *,
+                  surfaces: Sequence[float] = (0.35, 0.6, 0.85),
+                  zeta0: float = 0.0, **options) -> dict[str, Array]:
+    """Nemov ``Gamma_c`` on flux surfaces of a converged equilibrium."""
+    return _evaluate("c", state, rt, surfaces, zeta0, options)
+
+
+def gamma_alpha_state(state: SpectralState, rt: SolverRuntime, *,
+                      surfaces: Sequence[float] = (0.35, 0.6, 0.85),
+                      zeta0: float = 0.0, **options) -> dict[str, Array]:
+    """Velasco ``Gamma_alpha`` on flux surfaces of a converged equilibrium."""
+    return _evaluate("alpha", state, rt, surfaces, zeta0, options)
+
+
+def gamma_c_from_wout(wout, *, surfaces: Sequence[float] = (0.35, 0.6, 0.85),
+                      zeta0: float = 0.0, **options) -> dict[str, Array]:
+    """``Gamma_c`` from a VMEC-compatible WOUT (object or path), without a solve."""
+    return _evaluate_wout("c", wout, surfaces, zeta0, options)
+
+
+def gamma_alpha_from_wout(wout, *, surfaces: Sequence[float] = (0.35, 0.6, 0.85),
+                          zeta0: float = 0.0, **options) -> dict[str, Array]:
+    """``Gamma_alpha`` from a VMEC-compatible WOUT (object or path), without a solve."""
+    return _evaluate_wout("alpha", wout, surfaces, zeta0, options)
+
+
+for _fn, _kind, _name, _table in (
+        (gamma_c_state, "c", "gamma_c", "``_OPTIONS['c']``"),
+        (gamma_alpha_state, "alpha", "gamma_alpha", "``_OPTIONS['alpha']``"),
+        (gamma_c_from_wout, "c", "gamma_c", "``_OPTIONS['c']``"),
+        (gamma_alpha_from_wout, "alpha", "gamma_alpha", "``_OPTIONS['alpha']``")):
+    _fn.__doc__ += _STATE_DOC.format(
+        table=_table, name=_name, kernel=_KERNELS[_kind].__name__)
+del _fn, _kind, _name, _table
+
+
+class _Proxy(_ResidualTerm):
+    """Composable least-squares term: one proxy row per flux surface.
+
+    ``residuals_state`` returns ``sqrt(weight) * value`` rows, so the total
+    cost is the weighted sum of squares (a least-squares form, not a physical
+    scaling).  Traceable in both gradient modes.
+    """
+
+    kind = ""
+    name = ""
+
+    def __init__(self, surfaces=(0.35, 0.6, 0.85), *,
+                 weights: Iterable[float] | None = None, zeta0: float = 0.0,
+                 **options):
         self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
         if (self.surfaces.size == 0 or np.any(~np.isfinite(self.surfaces))
                 or np.any((self.surfaces <= 0.0) | (self.surfaces >= 1.0))
@@ -825,74 +812,38 @@ class GammaC(_ResidualTerm):
                 raise ValueError("weights must have the same length as surfaces")
             if np.any(~np.isfinite(self.weights)) or np.any(self.weights < 0.0):
                 raise ValueError("weights must be finite and non-negative")
-        if min(int(nalpha), int(num_transit), int(points_per_transit),
-               int(num_pitch), int(quadrature_order)) <= 0:
-            raise ValueError("resolution arguments must be positive")
-        self.nalpha, self.num_transit = int(nalpha), int(num_transit)
-        self.points_per_transit = int(points_per_transit)
-        self.num_pitch = int(num_pitch)
-        self.quadrature_order = int(quadrature_order)
-        self.max_wells = None if max_wells is None else int(max_wells)
-        self.zeta0 = float(zeta0)
+        _resolve(self.kind, options)
+        self.options, self.zeta0 = options, float(zeta0)
 
     def compute_state(self, state: SpectralState, rt: SolverRuntime) -> dict[str, Array]:
-        """Return per-surface ``Gamma_c`` and sampling diagnostics."""
-        return gamma_c_state(
-            state, rt, surfaces=self.surfaces, nalpha=self.nalpha,
-            num_transit=self.num_transit,
-            points_per_transit=self.points_per_transit,
-            num_pitch=self.num_pitch, quadrature_order=self.quadrature_order,
-            max_wells=self.max_wells, zeta0=self.zeta0)
+        """Return the per-surface proxy and sampling diagnostics."""
+        return _evaluate(self.kind, state, rt, self.surfaces, self.zeta0, self.options)
 
     def residuals_state(self, state: SpectralState, rt: SolverRuntime) -> jnp.ndarray:
-        """Return ``sqrt(weight) * Gamma_c`` per surface (unweighted when ``weights`` is None)."""
-        gamma_c = self.compute_state(state, rt)["gamma_c"]
+        """Return ``sqrt(weight) * value`` per surface (unweighted when ``weights`` is None)."""
+        value = self.compute_state(state, rt)[self.name]
         if self.weights is None:
-            return gamma_c
-        return jnp.sqrt(jnp.asarray(self.weights, dtype=gamma_c.dtype)) * gamma_c
+            return value
+        return jnp.sqrt(jnp.asarray(self.weights, dtype=value.dtype)) * value
 
     def total_state(self, state: SpectralState, rt: SolverRuntime) -> Array:
-        """Return the weighted sum of ``Gamma_c**2`` over the surfaces."""
+        """Return the weighted sum of squares over the surfaces."""
         rows = self.residuals_state(state, rt)
         return jnp.vdot(rows, rows)
 
 
-class GammaCSmooth(GammaC):
-    """Smooth optimization surrogate of :class:`GammaC`.
+class GammaC(_Proxy):
+    """Nemov ``Gamma_c`` (module docstring), the weighted rows of :func:`gamma_c_state`.
 
-    Same rows, weights, and least-squares contract as :class:`GammaC`, using
-    :func:`gamma_c_smooth_state`. Frozen pitch-grid shape derivatives remain
-    approximate: check forward descent for each new configuration.
-    ``temperature`` controls the smoothing scale; refine the grid while
-    annealing it. The surrogate can substantially underestimate hard GammaC,
-    especially for shallow ripple wells, so recompute :class:`GammaC` on
-    accepted results.
+    Velasco et al. 2021, section 5.4, find the prompt-loss fraction follows
+    their ``|gamma_c*|`` variant (eq. 21) more linearly and validate
+    :class:`GammaAlpha` as the predictor.
     """
 
-    name = "gamma_c_smooth"
+    kind, name = "c", "gamma_c"
 
-    def __init__(
-        self, surfaces=(0.35, 0.6, 0.85), *, weights: Iterable[float] | None = None,
-        nalpha: int = 9, num_transit: int = 4, points_per_transit: int = 64,
-        num_pitch: int = 32, quadrature_order: int = 32,
-        max_wells: int | None = None, temperature: float = 0.15,
-        zeta0: float = 0.0,
-    ):
-        super().__init__(
-            surfaces, weights=weights, nalpha=nalpha, num_transit=num_transit,
-            points_per_transit=points_per_transit, num_pitch=num_pitch,
-            quadrature_order=quadrature_order, max_wells=max_wells,
-            zeta0=zeta0)
-        if not float(temperature) > 0.0:
-            raise ValueError("temperature must be positive")
-        self.temperature = float(temperature)
 
-    def compute_state(self, state: SpectralState, rt: SolverRuntime) -> dict[str, Array]:
-        """Return per-surface smooth ``Gamma_c`` and its smoothing scale."""
-        return gamma_c_smooth_state(
-            state, rt, surfaces=self.surfaces, nalpha=self.nalpha,
-            num_transit=self.num_transit,
-            points_per_transit=self.points_per_transit,
-            num_pitch=self.num_pitch, quadrature_order=self.quadrature_order,
-            max_wells=self.max_wells, temperature=self.temperature,
-            zeta0=self.zeta0)
+class GammaAlpha(_Proxy):
+    """Velasco ``Gamma_alpha`` (module docstring), the weighted rows of :func:`gamma_alpha_state`."""
+
+    kind, name = "alpha", "gamma_alpha"

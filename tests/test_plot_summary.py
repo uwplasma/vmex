@@ -563,11 +563,11 @@ def test_gamma_c_from_wout_matches_live_state(solved_case):
     kwargs = dict(surfaces=(0.3, 0.6), **plotting._GAMMA_C_DIAGNOSTIC)
     live = gammac.gamma_c_state(eq.state, eq.runtime, **kwargs)
     from_wout = gammac.gamma_c_from_wout(wout, **kwargs)
-    # measured on this deck: 2.8e-11 relative; the atol floor only covers
-    # exact-cancellation surfaces where Gamma_c is pure roundoff (~1e-28)
+    # the atol floor only covers the near-axisymmetric surface where Gamma_c
+    # is pure roundoff (~1e-13, 1e-10 on the other)
     np.testing.assert_allclose(
         np.asarray(from_wout["gamma_c"]), np.asarray(live["gamma_c"]),
-        rtol=1e-8, atol=1e-20)
+        rtol=1e-8, atol=1e-12)
     assert from_wout["surface_rows"] == live["surface_rows"]
 
 

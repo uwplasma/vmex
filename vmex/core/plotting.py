@@ -907,7 +907,7 @@ def _boozer_summary_data(
 #: the value carries the resolution scatter documented in
 #: :func:`vmex.core.gammac.gamma_c_state`).
 _GAMMA_C_DIAGNOSTIC = dict(
-    nalpha=5, num_transit=3, points_per_transit=48, num_pitch=16,
+    nalpha=8, num_transit=3, points_per_transit=32, pitch_nodes=3,
     quadrature_order=16)
 
 #: Radial targets of the summary ``Gamma_c`` profile (snapped to distinct

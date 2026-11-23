@@ -198,10 +198,10 @@ __all__ = [
     "quasi_isodynamic_residual",  # noqa: F822 - provided lazily by __getattr__ below
     "boozer_modes_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
     "quasi_isodynamic_residual_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
+    "GammaAlpha",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
-    "GammaCSmooth",  # noqa: F822 - provided lazily by __getattr__ below
+    "gamma_alpha_state",  # noqa: F822 - provided lazily by __getattr__ below
     "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
-    "gamma_c_smooth_state",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
@@ -215,7 +215,7 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
         return getattr(bootstrap, name)
     # gammac.py sits on the stability/turbulence field-line lane; the lazy
     # re-export keeps the fast-ion proxy import-light like the f_boot term.
-    if name in ("GammaC", "GammaCSmooth", "gamma_c_state", "gamma_c_smooth_state"):
+    if name in ("GammaAlpha", "GammaC", "gamma_alpha_state", "gamma_c_state"):
         from . import gammac
         return getattr(gammac, name)
     if name in ("quasi_isodynamic_residual", "boozer_modes_from_wout",

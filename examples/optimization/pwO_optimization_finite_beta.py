@@ -219,7 +219,7 @@ def stage_terms(beta, with_dkx, with_gamma_c):
         if MERCIER_MARGIN is not None:
             terms.append((mercier, 0.0, MERCIER_WEIGHT))
     if with_gamma_c:
-        terms.append((opt.GammaCSmooth(GAMMA_C_SURFACES), 0.0, scale * GAMMA_C_WEIGHT))
+        terms.append((opt.GammaC(GAMMA_C_SURFACES), 0.0, scale * GAMMA_C_WEIGHT))
     if with_dkx:
         terms.append((dkx_j_dot_B, 0.0, scale * DKX_WEIGHT))
     return terms

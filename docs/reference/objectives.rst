@@ -452,45 +452,34 @@ as a limit, as in ``(opt.edge_jacobian_ratio, opt.at_least(0.25), 100.0)``
 ratio, an ``|iota|`` floor, a mirror-ratio ceiling and an optional magnetic well; see
 :ref:`optimization-low-transport`.
 
-Fast-ion confinement (Gamma_c)
-------------------------------
+Fast-ion confinement (Gamma_c, Gamma_alpha)
+-------------------------------------------
 
 :class:`~vmex.core.gammac.GammaC` returns one ``Gamma_c`` row per flux
 surface — the Nemov fast-ion proxy (Nemov et al. 2008, eq. 61, in the
 organization of Velasco et al. 2021, eq. 16; the sibling of DESC's
 ``GammaC``), so the least-squares cost is the weighted sum of
-``Gamma_c**2``.  The square is the least-squares form, not a physical
-scaling, and ``Gamma_c`` is a proxy rather than a loss law: Velasco et al.
-2021 (section 5.4) find the prompt-loss fraction follows their
-``|gamma_c*|`` variant (eq. 21) more linearly, and validate ``Gamma_alpha``
-as the predictor.  **Use it as the reported value,
-never as the gradient objective**: its discretized boundary derivative is
-approximate and can flip sign under grid refinement (the measured ladder is pinned
-in ``tests/test_gammac.py``).  For optimization use
-:class:`~vmex.core.gammac.GammaCSmooth` — the same wells and bounce
-quadrature with the two branch-noise structures regularized (separatrix
-kernel floor + superbanana corner floor). Its normalized pitch-grid shape
-derivatives remain approximate: check actual forward descent and sampling
-refinement for each configuration, then recompute the hard value on the
-accepted result. Physics, formula, and the numerical policy are on
-:doc:`/explanation/confinement`:
+``Gamma_c**2``.  ``Gamma_c`` is a proxy rather than a loss law: Velasco et
+al. 2021 (section 5.4) validate ``Gamma_alpha`` as the predictor of the
+prompt-loss fraction, and :class:`~vmex.core.gammac.GammaAlpha` returns that
+quantity (eq. 25, ripple wells ignored) on the same wells, between zero and
+the trapped fraction.  Both are differentiable through the implicit solve;
+use ``forward_ftol=1e-12`` so the adjoint is accepted.  Nemov's tangency
+factor is smoothed by ``tangency_width`` (it tends to his value as the width
+goes to zero) and wells cut by the ends of the finite line are completed
+from the complete wells (``completeness``); both and the convergence
+numbers are on :doc:`/explanation/confinement`:
 
 .. code-block:: python
 
-   from vmex.core.gammac import GammaC, GammaCSmooth
+   from vmex.core.gammac import GammaAlpha, GammaC
 
-   gamma_c = GammaCSmooth(
-       [0.35, 0.6, 0.85], nalpha=9, num_transit=4, temperature=0.15)
+   gamma_c = GammaC([0.35, 0.6, 0.85], nalpha=16, num_transit=4)
    result = opt.least_squares(
        [(qs, 0.0, 1.0), (gamma_c, 0.0, 1.0)],
-       inp, max_mode=6, jac="implicit")
-   report = GammaC([0.35, 0.6, 0.85])(result.equilibrium)   # hard value
+       inp, max_mode=6, jac="implicit", forward_ftol=1e-12)
+   report = GammaAlpha([0.35, 0.6, 0.85])(result.equilibrium)
 
-``temperature`` sets both smoothing floors as a fraction of the trapped
-range; annealing = re-optimizing at a lower value with a finer budget.
-The surrogate value sits below the hard one (it cannot see wells
-shallower than its floor — the near-omnigenous QA ripple most of all)
-while preserving the tokamak << QA << unoptimized-3D ordering.
 Stellarator-symmetric states with ``iota != 0`` on the target surfaces
 (surfaces through ``iota ~ 0`` return NaN rather than a plausible number).
 Superbanana layers make the objective demanding on ``nalpha``/``num_pitch``;
@@ -768,11 +757,11 @@ Which objectives differentiate how
    * - :class:`~vmex.core.gammac.GammaC`
      - yes
      - yes
-     - traceable field-line drift kernels on tapered bounded traces
-   * - :class:`~vmex.core.gammac.GammaCSmooth`
+     - traceable spline bounce kernel, exact bounce points and breakpoints
+   * - :class:`~vmex.core.gammac.GammaAlpha`
      - yes
      - yes
-     - smooth drift surrogate; approximate pitch-grid shape derivatives
+     - Velasco loss fraction with smoothed thresholds
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes

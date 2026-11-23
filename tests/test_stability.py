@@ -820,7 +820,7 @@ def test_every_field_line_lane_reaches_an_asymmetric_state(lasym_finite_beta_eq)
     assert float(np.min(np.asarray(geom["bmag"]))) > 0.0
     out = gammac.gamma_c_state(eq.state, eq.runtime, surfaces=(0.5,), nalpha=4,
                                num_transit=2, points_per_transit=32,
-                               num_pitch=8, quadrature_order=16)
+                               pitch_nodes=3, quadrature_order=16)
     assert np.all(np.isfinite(np.asarray(out["gamma_c"])))
 
 

@@ -941,46 +941,59 @@ validated against finite differences of the drift-kinetic identities
 and :math:`\partial_s J \propto -\tau_b\,\overline{\mathbf v_M\cdot\nabla\alpha}`
 and against the equilibrium's own ``wout`` tables.
 
-The pitch integral samples the reflecting level :math:`1/\lambda`
-uniformly with an open midpoint rule (the Unalmis et al. pitch-sampling
-guidance), and wells sliding across the ends of the bounded trace are
-faded by a half-transit taper applied to the normalizing
-:math:`\int\mathrm dl/B` as well — an unbiased window on the ergodic
-limit that removes end-of-trace discontinuities. Superbanana layers —
-where the tangential drift :math:`v_p` reverses and
-:math:`\gamma_c \to \pm 1` — are physical and are kept; resolving them
-sets the ``nalpha``/``num_pitch`` budget, they dominate the residual
-resolution noise of boundary gradients, and ``excluded_fraction`` reports
-any well-slot overflow so an under-provisioned evaluation is visible.
-Axisymmetry sends
-:math:`\Gamma_c \to 0` exactly (:math:`\partial_\alpha J = 0`), which the
-tests anchor together with the QA-versus-unoptimized ordering.
+The field line is a cubic Hermite spline of the sampled ingredients, split
+at its stationary points into monotone pieces so that every bounce point of
+every well is found exactly (a safeguarded Newton solve whose last step
+carries the implicit-function derivative).  The pitch integral is split at
+the critical levels of each line — the values of its local extrema and its
+end values — and the widest gaps are bisected until the level slots are
+used; between slots the well topology is constant, the nodes are
+Gauss-Legendre on a smootherstep map that flattens the logarithm at barrier
+tops, and the moving breakpoints are differentiated exactly.  The earlier
+fixed pitch grid with linear interpolation put the quadrature nodes on the
+wrong side of these breakpoints and was off by 2 to 5 times on nfp = 4
+boundaries; the drift integrals vary on scales much finer than the gap
+between critical levels (a bounce point sweeping a plateau of :math:`B`, a
+zero of the poloidal drift), which is why the bisections matter.  Wells cut
+by the ends of the finite line enter the normalizing bounce time, and their
+:math:`\gamma_c^2` is borrowed from the complete wells of the same level
+(``completeness`` floors that weight) — this removes the downward bias of
+short lines and the jump when the last complete well leaves the window.
+Axisymmetry sends :math:`\Gamma_c \to 0` exactly, and a constant drift
+angle gives :math:`\Gamma_c = \gamma^2\,(\pi/2\sqrt 2)\,f_{\mathrm{trapped}}`
+(both anchored in ``tests/test_gammac.py``).
 
-**The hard value is not a gradient objective.** The discretized
-:class:`~vmex.core.gammac.GammaC` sampled gradient can change sign under refinement:
-hard well detection and hard branch selection make the discretized
-:math:`\Gamma_c` piecewise in the boundary coefficients with
-grid-dependent breakpoints, and the measured li383 refinement ladder flips
-sign three times (``tests/test_gammac.py``).  Two structures carry the
-noise, both identified by direct gradient decomposition: a pitch node
-landing at distance :math:`d` from a barrier top inherits the
-:math:`1/d` level-curvature of the logarithmically divergent bounce time,
-and a well cell whose radial *and* tangential bounce-averaged drifts
-cancel simultaneously (a superbanana corner) contributes
-:math:`\mathrm d(\arctan(v_r/v_p))/\mathrm dp \sim 1/\|(v_r, v_p)\|` with
-arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
-exactly these two structures on the same wells and bounce quadrature — a
-kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
-:math:`\delta` a field-dependent fraction of the trapped range with live derivatives
-(which also removes the birth/death jump of the well-connection graph of
-Ochs 2025, since a newborn well's floored bounce time starts at zero
-rather than the finite oscillator period), and a per-well corner floor
-that compares the drift cancellation against the well's own
-absolute-value bounce integrals. Both classes freeze normalized pitch-grid
-shape derivatives, so even the smooth gradient is approximate. Check actual
-forward descent and sampling refinement for each configuration. The surrogate
-can underestimate shallow ripple wells; anneal ``temperature`` with a finer
-budget and report the independent hard value.
+**Nemov's tangency factor is discontinuous.**  The surface-tangency factor
+:math:`T = |\nabla\rho|\,\Vert e_\alpha\Vert` is a point value at the lowest
+point of a well, and a well with several dips of nearly equal depth — every
+quasisymmetric or omnigenous field has them — switches its lowest point
+abruptly between dips while :math:`T` varies by factors of several along a
+line.  The exact hard :math:`\Gamma_c` is therefore discontinuous in the
+boundary there (changes of 40 % between 1e-3 steps were measured).
+:class:`~vmex.core.gammac.GammaC` replaces the point value by the Boltzmann
+average :math:`\exp(-(B-B_{\min})/(w\,(b-B_{\min})))` over the well, with
+``tangency_width`` :math:`w`; it tends to Nemov's value as
+:math:`w \to 0` (Laplace) and is smooth for :math:`w > 0`.  The default
+:math:`w = 0.05` is the smallest width the default 64-node sine map resolves;
+the tables in the resolution section give the value against :math:`w`.
+Near a quasisymmetric optimum :math:`\Gamma_c` is proportional to the
+quasisymmetry error itself (the superbanana resonances have area
+:math:`\propto |v_r|`), so it has a cusp there rather than a minimum with
+zero slope: use finite differences away from the exact optimum and the
+least-squares form (``GammaC.total``) in optimizers.  The reverse-mode
+gradient needs a tight forward solve (``forward_ftol=1e-12``); a looser
+solve makes the adjoint miss its acceptance and the gradient is rejected
+rather than returned.
+
+:class:`~vmex.core.gammac.GammaAlpha` implements the Velasco et al. 2021
+(section 4.2, eq. 25) loss fraction on the same wells: every well is
+assigned the label :math:`\alpha` of its bottom reduced into the first field
+period, the signed :math:`\gamma_c^* = (2/\pi)\arctan(v_r/|v_p|)` and the
+sign of the poloidal drift of the complete wells are binned on a periodic
+:math:`\alpha` grid, and an orbit is lost when its precession meets an
+outward superbanana (:math:`\gamma_c^* > 0.2`) before an inward one, with
+smoothstep thresholds of width ``threshold_width``.  It lies between zero and
+the trapped fraction (eq. 24), which it also returns.
 
 .. _confinement-resolution:
 
@@ -1017,11 +1030,11 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - ``mboz=nboz=14``, ``nphi=101``, ``nalpha=29``, ``n_bounce=31``
      - 0.98, 34 %
      - 0.08 s against 0.25 s
-   * - :class:`~vmex.core.gammac.GammaCSmooth`
-     - ``nalpha=5``, 3 transits, 32 points, 24 pitch, 16 nodes
-     - hard :class:`~vmex.core.gammac.GammaC` at 13 lines, 6 transits, 96 points, 48 pitch, 48 nodes
-     - 0.98, 12 % (hard value)
-     - 0.5 s against 1.5 s (default)
+   * - :class:`~vmex.core.gammac.GammaC`
+     - ``nalpha=8``, 3 transits, 32 points, 3 nodes, 32-node sine map
+     - the default (16 lines, 4 transits, 4 nodes, 64-node sine map) or finer
+     - see the convergence table below
+     - 4 s per value on 3 surfaces (laptop)
    * - NEO effective ripple
      - not in the loop
      - ``diagnostic_neo_config()`` (32 x 32, 24 particles, 20 steps per period)
@@ -1034,6 +1047,128 @@ set above is 34 % from the converged value yet ranks equilibria at 0.98, so
 report the validation set. The sampling noise of :math:`\Gamma_c` is real:
 shifting the field-line origin changes the hard value by 5 to 13 % and can
 reorder near-equal candidates; between distinct designs the order is stable.
+
+**Convergence of Gamma_c.** Value of :class:`~vmex.core.gammac.GammaC` at
+:math:`s = 0.5` on six solved equilibria (QA, QH and QI optimized, an nfp = 4
+ellipse, a near-axisymmetric QA with its toroidal modes scaled by 0.05),
+varying one budget around the default (16 lines, 4 transits, 32 points per
+transit, 4 pitch nodes, 64-node sine map, 192 level slots) and quoted
+relative to the default; the last line is the default against a reference of
+24 lines, 8 transits, 48 points, 6 nodes and a 128-node sine map.
+
+.. list-table:: Gamma_c against its budgets (default = 1)
+   :header-rows: 1
+
+   * - Budget
+     - QA
+     - QH
+     - QI
+     - nfp 4 ellipse
+     - near-axisymmetric
+   * - 8 lines
+     - 0.98
+     - 1.06
+     - 1.02
+     - 0.80
+     - 0.99
+   * - 32 lines
+     - 1.01
+     - 1.00
+     - 1.01
+     - 1.13
+     - 0.95
+   * - 2 / 8 transits
+     - 0.86 / 1.01
+     - 0.98 / 1.00
+     - 0.96 / 0.98
+     - 0.93 / 1.08
+     - 0.71 / 0.97
+   * - 16 / 64 points per transit
+     - 0.93 / 1.00
+     - 0.96 / 1.01
+     - 2.2 / 0.75
+     - 0.99 / 1.00
+     - 0.88 / 1.23
+   * - 3 / 6 pitch nodes
+     - 1.00 / 1.00
+     - 1.00 / 1.00
+     - 1.01 / 1.00
+     - 1.00 / 1.00
+     - 1.00 / 1.00
+   * - sine map 32 / 128
+     - 1.00 / 1.00
+     - 1.09 / 1.03
+     - 1.03 / 1.00
+     - 0.98 / 0.99
+     - 1.00 / 1.00
+   * - ``tangency_width`` 0.02 / 0.01
+     - 1.17 / 1.24
+     - 1.07 / 1.09
+     - 1.05 / 1.08
+     - 1.04 / 1.07
+     - 0.98 / 0.97
+   * - default against reference
+     - -1 %
+     - -4 %
+     - +27 %
+     - -14 %
+     - +12 %
+
+The pitch nodes, the sine map and the number of lines converge on QA and QH to
+a few percent; the QI, the ellipse and the near-axisymmetric case do not reach
+1 %: their shallow ripple wells move with the sampling of the field line
+(points per transit, lines), so report the budget with the number.  The
+tangency width is a modelling parameter, not a discretization: it moves the
+value by 10 to 25 % between 0.05 and 0.01 and is not converged in the table
+because the 64-node sine map cannot resolve narrower widths.
+On a laptop one value on three surfaces takes about 4 s warm and a value
+with its reverse-mode gradient about 40 s.
+
+**Gradient against finite differences.** Reverse mode through the implicit
+solve (``forward_ftol=1e-12``) against central differences after a tight
+warm-started re-solve (least-squares slope over five points, steps 3e-5 and
+1e-4 of the coefficient scale), summed over :math:`s = 0.25, 0.5, 0.75`,
+mode-1 boundary coefficients:
+
+.. list-table:: Reverse-mode against finite difference
+   :header-rows: 1
+
+   * - Start, coefficient
+     - Reverse mode
+     - Finite difference (3e-5, 1e-4)
+   * - nfp 2 ellipse, 1
+     - -23.58
+     - -23.47, -20.58
+   * - nfp 2 ellipse, 2
+     - -10.81
+     - -10.54, -9.71
+   * - nfp 2 ellipse, 3
+     - -18.50
+     - -18.30, -17.98
+   * - nfp 4 seed, 0
+     - -3.85
+     - -3.88, -2.89
+   * - nfp 4 seed, 3
+     - 12.89
+     - 12.47, 12.47
+   * - nfp 4 seed, 4
+     - -2.91
+     - -2.95, -2.19
+   * - nfp 2 seed, 3
+     - 19.62
+     - 21.14, 21.06
+   * - nfp 2 seed, 1
+     - 31.86
+     - 3.55, 17.33
+   * - nfp 4 seed, 1
+     - 25.10
+     - 9.70, 7.07
+
+The first seven agree to 1 to 8 % at the smaller step; the last two do not:
+the value itself is noisy at about 1e-4 of its size at these steps (a handful
+of level choices flip), the finite difference is not converged in the step
+there, and the reverse-mode value is unconfirmed.  Components whose gradient is
+below 1 are dominated by that noise.
 
 **Which metric predicts the alpha loss.** Across the 39 optimized equilibria
 the Spearman coefficient between the metric and the alpha loss is 0.93 for

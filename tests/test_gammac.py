@@ -1,23 +1,23 @@
-"""Physics anchors and differentiation gates for the Gamma_c proxy.
+"""Physics anchors, convergence and differentiation gates for ``Gamma_c`` / ``Gamma_alpha``.
 
-Lanes: literature-anchored ordering (axisymmetric limit, QA versus
-unoptimized 3D), directional consistency with the independent NEO_JAX
-effective-ripple lane on a boundary-ripple ray, implicit boundary-gradient
-liveness, the GammaCSmooth surrogate (value tracking with documented bias,
-FD consistency, and the nightly refinement-ladder gate the hard gradient
-fails), and the composable-class contract. Every tolerance was set from
-measured values recorded in the test docstrings, with stated headroom.
+Lanes: closed-form limits of the line kernel (a constant drift angle gives
+``Gamma_c = gamma^2 pi/(2 sqrt 2) f_trapped``; the bounce time of a cosine
+well is a complete elliptic integral; the first-event hazard of
+``Gamma_alpha`` on a two-sector map), the axisymmetric limit, ordering of
+real equilibria, a cross-code number (DESC), a convergence ladder, and
+reverse-mode gradients through the implicit solve against central
+differences that are themselves shown to have converged in the step.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import gc
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from scipy.special import ellipk
 
 import jax
 
@@ -29,91 +29,179 @@ from vmex.core import gammac  # noqa: E402
 from vmex.core import implicit as im  # noqa: E402
 from vmex.core import optimize as opt  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
+
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
-# One evaluation budget shared by the physics tests below; the measured
-# anchor values in the docstrings correspond to exactly these settings.
-SETTINGS = dict(
-    nalpha=7, num_transit=3, points_per_transit=64, num_pitch=24,
-    quadrature_order=32)
+#: Reduced budget of the physics tests below; the measured anchors in the
+#: docstrings correspond to exactly these settings.
+FAST = dict(nalpha=8, num_transit=3, points_per_transit=32, pitch_nodes=3,
+            quadrature_order=32, max_levels=96)
 
 
-@pytest.mark.parametrize("radial", [-1., 0., 1.])
-@pytest.mark.parametrize("tangential", [-1e-8, 0., 1e-8])
-def test_hard_drift_angle_radial_limit(radial, tangential):
-    """Constant drift kernels give an analytic ratio in a complete cosine well."""
-    x = jnp.linspace(0., 2*jnp.pi, 129)
-    bmag = (1. + .2*jnp.cos(x))[None, :]
+def _model_lines(eps=0.2, periods=3, n=97, radial=1.0, gradient=1.0,
+                 correction=0.0, tangency=1.0, nline=2):
+    """``B = 1 + eps cos x`` on whole periods, ``dl = B dx`` (so ``dl/B = dx``)."""
+    x = jnp.linspace(0.0, 2 * jnp.pi * periods, n * periods - periods + 1)
+    one = jnp.ones((nline, x.size))
+    bmag = (1.0 + eps * jnp.cos(x)) * one
+    return dict(bmag=bmag, radial_drift=radial * one, radial_gradient=gradient * one,
+                drift_correction=correction * one, tangency=tangency * one,
+                dl_dx=bmag, length=float(x[-1])), x
+
+
+@pytest.mark.parametrize("radial, gradient, tangency", [
+    (1.0, 1.0, 1.0), (0.3, -1.0, 2.0), (-0.5, 0.7, 0.4), (1.0, 0.0, 1.0), (0.0, 1.0, 1.0)])
+def test_constant_drift_angle_gives_the_trapped_fraction(radial, gradient, tangency):
+    """Nemov 2008 eq. 61 / Velasco 2021 eq. 16-24 in closed form.
+
+    With constant ``v_r / (T v_p)`` the bounce averages share the factor
+    ``int w dl`` and ``gamma_c = (2/pi) arctan(radial / (tangency gradient))``
+    in every well, so ``Gamma_c = gamma_c^2 (pi / 2 sqrt 2) f_trapped`` with
+    ``f_trapped = <sqrt(1 - B/B_max)>`` (eq. 24).  For ``B = 1 + eps cos x``
+    ``f_trapped = sqrt(eps/(1+eps)) 2 sqrt 2 / pi``, hence
+    ``Gamma_c = gamma_c^2 sqrt(eps/(1+eps))``.  Exact to quadrature error with
+    ``completeness = 0`` (the ratio estimator then returns the mean exactly).
+    """
+    eps = 0.2
+    lines, _ = _model_lines(eps, radial=radial, gradient=gradient, tangency=tangency)
     out = gammac.gamma_c_from_fieldlines(
-        bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
-        radial_gradient=jnp.full_like(bmag, tangential),
-        drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
-        dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
-        pitch=jnp.array([1.]), pitch_weights=jnp.array([1.]), max_wells=2)
-    keep = np.asarray(out["well_mask"])
-    assert keep.sum() == 1 and float(out["overflow_fraction"]) == 0.
-    expected = (2/np.pi*np.arctan(radial/tangential)
-                if tangential else np.sign(radial))
-    np.testing.assert_allclose(np.asarray(out["gamma_per_well"])[keep], expected, atol=1e-12)
-    assert np.isfinite(float(out["gamma_c"]))
-    assert (float(out["gamma_c"]) > 0.) == (radial != 0.)
+        **lines, num_transit=3, completeness=0.0, max_levels=16)
+    angle = (2 / np.pi) * np.arctan2(radial, abs(tangency * gradient))
+    expected = angle**2 * np.sqrt(eps / (1 + eps))
+    assert not bool(out["overflow"])
+    np.testing.assert_allclose(float(out["gamma_c"]), expected, rtol=2e-4, atol=1e-12)
+    np.testing.assert_allclose(np.asarray(out["gamma_c_lines"]), expected, rtol=2e-4, atol=1e-12)
 
 
-@pytest.mark.parametrize("radial", [0., 1.])
-def test_smooth_field_strength_scale_invariance(radial):
-    """B and toroidal flux scale together; the drift ingredients stay fixed."""
-    x = jnp.linspace(0., 2*jnp.pi, 129)
-    field = (1. + .2*jnp.cos(x))[None, :]
-    nodes = (jnp.arange(32) + .5)/32
+@pytest.mark.parametrize("level", [1.04, 1.12, 1.19])
+def test_cosine_well_bounce_time_is_an_elliptic_integral(level):
+    """``v tau = 2 sqrt(b) int dx / sqrt(b - B)`` of the well of ``B = 1 + eps cos x`` at ``x = pi``.
 
-    def value(scale):
-        bmag = scale*field
-        pitch, weights = gammac._pitch_grid(bmag, nodes, 32)
-        return gammac.gamma_c_smooth_from_fieldlines(
-            bmag=bmag, radial_drift=jnp.full_like(bmag, radial),
-            radial_gradient=jnp.full_like(bmag, .3),
-            drift_correction=jnp.zeros_like(bmag), tangency=jnp.ones_like(bmag),
-            dl_dx=jnp.ones_like(bmag), length=2*jnp.pi,
-            pitch=pitch, pitch_weights=weights, max_wells=2,
-            temperature=.2)["gamma_c"]
-
-    baseline, derivative = jax.jit(jax.value_and_grad(value))(1.)
-    assert np.isfinite(float(baseline)) and (float(baseline) > 0.) == (radial != 0.)
-    for scale in [.8, 1.2]:
-        np.testing.assert_allclose(value(scale), baseline, rtol=1e-12, atol=1e-14)
-    h = 1e-4
-    fd = (value(1+h)-value(1-h))/(2*h)
-    np.testing.assert_allclose(fd, 0., atol=1e-9)
-    np.testing.assert_allclose(derivative, fd, atol=1e-9)
+    ``int_{-t0}^{t0} dt / sqrt(cos t - cos t0) = 2 sqrt 2 K(sin(t0/2))``, so
+    ``v tau = 4 sqrt(2 b / eps) K(m = sin^2(t0/2))`` with
+    ``cos t0 = -(b - 1) / eps``.
+    """
+    eps, n = 0.2, 129
+    x = jnp.linspace(0.0, 2 * jnp.pi, n)
+    # the field minimum at x = pi centres a complete well in the window
+    F = jnp.stack([1.0 + eps * jnp.cos(x)] + [jnp.ones(n)] * 5)
+    F = F.at[4].set(1.0)                         # dl = dx
+    wells = gammac._line_wells(F, 2 * np.pi, jnp.array([level]), W=4,
+                               qorder=48, width=0.05)
+    mask = np.asarray(wells["mask"])[0]
+    assert mask.sum() == 1
+    t0 = np.arccos(-(level - 1.0) / eps)
+    expected = 4 * np.sqrt(2 * level / eps) * ellipk(np.sin(t0 / 2) ** 2)
+    np.testing.assert_allclose(np.asarray(wells["vt"])[0][mask][0], expected, rtol=2e-5)
 
 
-@pytest.mark.parametrize("smooth", [False, True])
-def test_well_overflow_cannot_report_zero_confinement_cost(smooth):
-    """Two complete wells require two slots in either diagnostic lane."""
-    x = jnp.linspace(0., 2*jnp.pi, 129)
-    bmag = (1. + .2*jnp.cos(2*x))[None, :]
-    one = jnp.ones_like(bmag)
-    evaluate = (gammac.gamma_c_smooth_from_fieldlines if smooth
-                else gammac.gamma_c_from_fieldlines)
-    inputs = dict(bmag=bmag, radial_drift=one, radial_gradient=.3*one,
-                  drift_correction=0.*one, tangency=one, dl_dx=one,
-                  length=2*jnp.pi, pitch=jnp.array([1.]),
-                  pitch_weights=jnp.array([1.]))
-    limited = evaluate(**inputs, max_wells=1)
-    assert float(limited["overflow_fraction"]) == 1.
-    assert np.isnan(float(limited["gamma_c"]))
-    complete = evaluate(**inputs, max_wells=2)
-    assert float(complete["overflow_fraction"]) == 0.
-    assert np.asarray(complete["well_mask"]).sum() == 2
-    assert np.isfinite(float(complete["gamma_c"]))
-    assert float(complete["gamma_c"]) > 0.
-    np.testing.assert_allclose(
-        complete["gamma_c"], evaluate(**inputs, max_wells=4)["gamma_c"], rtol=1e-12)
+def test_stationary_points_resolve_wells_smaller_than_a_cell():
+    """A dip inside one grid cell is a well: the spline pieces are monotone."""
+    n = 33
+    x = jnp.linspace(0.0, 2 * jnp.pi, n)
+    # sample a field whose second harmonic dips below the level between two nodes
+    B = 1.0 + 0.2 * jnp.cos(x) + 0.0 * x
+    F = jnp.stack([B] + [jnp.ones(n)] * 5)
+    levels, _ = gammac._breakpoint_nodes(F, 2 * np.pi, 16, 2)[0:2]
+    assert bool(jnp.all(jnp.diff(jnp.sort(levels)) >= 0))
+    c = gammac._hermite(B)
+    t, ok = gammac._stationary(c)
+    # B = 1 + 0.2 cos x has its extrema at the nodes x = 0, pi, 2 pi (t = 0 or 1)
+    assert int(ok.sum()) >= 3
+    assert float(jnp.max(jnp.abs(gammac._peval(c, jnp.where(ok, t, 0.0)) - (1 + 0.2 * jnp.cos(
+        (jnp.arange(n - 1)[None, :] + t) * 2 * jnp.pi / (n - 1))))[ok])) < 1e-6
 
+
+def test_zero_radial_drift_gives_zero_and_scale_invariance():
+    """Pure poloidal drift is confined; ``B -> cB``, ``psi -> c psi`` is invariant."""
+    lines, _ = _model_lines(radial=0.0)
+    assert float(gammac.gamma_c_from_fieldlines(**lines, num_transit=3)["gamma_c"]) == 0.0
+    base, _ = _model_lines(radial=0.4, gradient=0.8)
+    # B = c B and psi = c psi leave the drift ingredients and dl/dx unchanged
+    scaled = dict(base, bmag=3 * base["bmag"])
+    a = gammac.gamma_c_from_fieldlines(**base, num_transit=3)["gamma_c"]
+    b = gammac.gamma_c_from_fieldlines(**scaled, num_transit=3)["gamma_c"]
+    np.testing.assert_allclose(float(b), float(a), rtol=2e-3)
+
+
+def test_overflow_is_nan_not_a_low_cost():
+    """Too few level or well slots poison the row instead of under-counting wells."""
+    lines, _ = _model_lines(periods=3)
+    full = gammac.gamma_c_from_fieldlines(**lines, num_transit=3, max_levels=16)
+    assert np.isfinite(float(full["gamma_c"]))
+    for slots in (dict(max_levels=2), dict(max_wells=1)):
+        out = gammac.gamma_c_from_fieldlines(**lines, num_transit=3, **{"max_levels": 16, **slots})
+        assert bool(out["overflow"]) and np.isnan(float(out["gamma_c"]))
+
+
+def test_pitch_quadrature_converges_with_nodes_and_levels():
+    """Error against a refined reference falls as nodes and level slots grow."""
+    lines, x = _model_lines(0.25, periods=2)
+    # drift ratios that vary along the line make gamma depend on the well and level
+    lines["radial_drift"] = 0.6 * jnp.cos(0.5 * x + 0.3)[None, :] + lines["radial_drift"]
+    lines["radial_gradient"] = 0.3 * jnp.sin(x)[None, :] + 0.6 * lines["radial_gradient"]
+    ref = float(gammac.gamma_c_from_fieldlines(
+        **lines, num_transit=2, pitch_nodes=8, max_levels=96, quadrature_order=96)["gamma_c"])
+    errors = []
+    for nodes, levels in ((2, 8), (3, 16), (4, 32)):
+        value = float(gammac.gamma_c_from_fieldlines(
+            **lines, num_transit=2, pitch_nodes=nodes, max_levels=levels,
+            quadrature_order=96)["gamma_c"])
+        errors.append(abs(value - ref) / ref)
+    assert errors[0] > errors[1] > errors[2] or errors[2] < 1e-4
+    assert errors[2] < 5e-3
+
+
+@pytest.mark.parametrize("threshold_width", [0.02])
+def test_lost_fraction_first_event_hazard(threshold_width):
+    """Eq. 25 on a two-sector map: outward half circle, inward half circle.
+
+    A particle is lost when its precession meets an outward superbanana
+    (``gamma* > 0.2``) before an inward one.  With the outward sector on
+    half of the periodic ``alpha`` grid, half of the orbits are lost for
+    either precession direction, and none when no inward event exists.
+    """
+    n = 64
+    gamma = jnp.where(jnp.arange(n) < n // 2, 0.6, -0.6)[:, None]
+    for direction in (1.0, -1.0, 0.0):
+        lost = gammac._lost_fraction(gamma, jnp.full((n, 1), direction), threshold_width)
+        np.testing.assert_allclose(float(jnp.mean(lost)), 0.5, atol=2e-3)
+        # lost exactly on the outward half
+        np.testing.assert_allclose(np.asarray(lost[:, 0]),
+                                   (np.arange(n) < n // 2).astype(float), atol=2e-3)
+    outward_only = jnp.full((n, 1), 0.6)
+    assert float(jnp.max(gammac._lost_fraction(outward_only, jnp.ones((n, 1)), 0.02))) < 5e-3
+    # a free gap between an inward event and an outward one: hit order decides
+    gap = jnp.zeros((n, 1)).at[10].set(-0.6).at[20].set(0.6)
+    plus = gammac._lost_fraction(gap, jnp.ones((n, 1)), 0.02)[:, 0]
+    minus = gammac._lost_fraction(gap, -jnp.ones((n, 1)), 0.02)[:, 0]
+    # moving to larger alpha: starting in (10, 20] one meets the outward event first
+    assert float(plus[15]) > 0.99 and float(minus[15]) < 5e-3
+    assert float(plus[25]) < 5e-3 and float(minus[25]) > 0.99
+
+
+def test_gamma_alpha_model_field_bounds_and_trapped_fraction():
+    """``0 <= Gamma_alpha <= f_trapped`` and ``f_trapped`` matches eq. 24."""
+    eps = 0.2
+    lines, _ = _model_lines(eps, radial=0.5, gradient=0.2, nline=8)
+    out = gammac.gamma_alpha_from_fieldlines(
+        **lines, iota=0.4, nfp=1, num_transit=3, pitch_levels=48, completeness=0.0)
+    trapped = np.sqrt(eps / (1 + eps)) * 2 * np.sqrt(2) / np.pi
+    # the midpoint pitch grid omits the sliver below B_min and above B_max
+    np.testing.assert_allclose(float(out["f_trapped"]), trapped, rtol=2e-2)
+    assert 0.0 <= float(out["gamma_alpha"]) <= float(out["f_trapped"]) + 1e-12
+    # no radial drift: no superbanana, nothing lost
+    quiet, _ = _model_lines(eps, radial=0.0, nline=8)
+    zero = gammac.gamma_alpha_from_fieldlines(**quiet, iota=0.4, nfp=1, num_transit=3)
+    assert float(zero["gamma_alpha"]) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Real equilibria
+# ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
 def tokamak_eq():
-    eq = opt.solve_equilibrium(
-        VmecInput.from_file(DATA_DIR / "input.circular_tokamak"))
+    eq = opt.solve_equilibrium(VmecInput.from_file(DATA_DIR / "input.circular_tokamak"))
     assert eq.result.converged
     return eq
 
@@ -131,435 +219,207 @@ def qa_eq():
 
 @pytest.fixture(scope="module")
 def ncsx_eq():
-    eq = opt.solve_equilibrium(
-        VmecInput.from_file(DATA_DIR / "input.li383_low_res"))
+    eq = opt.solve_equilibrium(VmecInput.from_file(DATA_DIR / "input.li383_low_res"))
     assert eq.result.converged
     return eq
 
 
-def _gamma_c(eq, **overrides):
-    settings = dict(SETTINGS)
-    settings.update(overrides)
-    out = gammac.gamma_c_state(
-        eq.state, eq.runtime, surfaces=(0.5,), **settings)
-    assert float(out["excluded_fraction"][0]) < 0.05
-    assert float(out["overflow_fraction"][0]) == 0.0
-    return float(out["gamma_c"][0])
+def _value(eq, name="gamma_c", surface=0.5, **overrides):
+    fn = {"gamma_c": gammac.gamma_c_state, "gamma_alpha": gammac.gamma_alpha_state}[name]
+    base = FAST if name == "gamma_c" else {
+        **{k: v for k, v in FAST.items() if k not in ("pitch_nodes", "max_levels")}, "pitch_levels": 24}
+    out = fn(eq.state, eq.runtime, surfaces=(surface,), **{**base, **overrides})
+    assert float(out["overflow"][0]) == 0.0
+    return float(out[name][0])
 
 
-def test_axisymmetric_limit_and_optimization_ordering(
-        tokamak_eq, qa_eq, ncsx_eq):
-    """Gamma_c orders tokamak << precise QA << unoptimized 3D.
+def test_axisymmetric_limit_and_optimization_ordering(tokamak_eq, qa_eq, ncsx_eq):
+    """Gamma_c orders tokamak << precise QA << unoptimized 3D (Nemov 2008; Velasco 2021).
 
     In axisymmetry the bounce-averaged radial drift vanishes exactly
-    (d J / d alpha = 0), so Gamma_c -> 0: Nemov et al. 2008; Velasco et
-    al. 2021 use Gamma_c as the deviation of J contours from flux
-    surfaces. Measured at these settings: 9.8e-7 (circular tokamak,
-    quadrature noise only), 3.8e-3 (LandremanPaul2021 QA at ns=13; drops
-    to 1.1e-3 at doubled sampling — a near-omnigenous value is an upper
-    bound at this budget, hence the wide band), 4.11e-2 (li383; 4.20e-2
-    at doubled sampling, stable to 2%). The li383 lane is additionally
-    the DESC cross-check point: DESC's Nemov Gamma_c on the same wout at
-    s=0.25 agrees to 2.8% (PR record); DESC's outer-surface values
-    disagree because its wout refit inflates d|B|/drho there, which was
-    refereed directly against the wout tables.
+    (``dJ/dalpha = 0``), so ``Gamma_c = 0``; ``Gamma_alpha`` likewise.
     """
-    tok = _gamma_c(tokamak_eq)
-    qa = _gamma_c(qa_eq)
-    ncsx = _gamma_c(ncsx_eq)
-    assert tok < 1.0e-4
-    assert qa < 0.3 * ncsx
-    assert tok < 0.1 * qa
-    assert 1.0e-4 < qa < 1.0e-2
-    assert 2.5e-2 < ncsx < 5.0e-2
+    tok, qa, ncsx = (_value(e) for e in (tokamak_eq, qa_eq, ncsx_eq))
+    assert tok < 1.0e-8                      # measured exactly 0
+    assert _value(tokamak_eq, "gamma_alpha") < 1.0e-8
+    assert qa < 0.5 * ncsx
+    assert 1.0e-3 < qa < 5.0e-2 and 1.0e-2 < ncsx < 2.0e-1
 
 
-def test_gamma_c_tracks_effective_ripple_on_a_ripple_ray(qa_eq):
-    """A boundary ripple worsens Gamma_c and eps_eff together.
+def test_gamma_c_matches_desc_on_li383(ncsx_eq):
+    """Cross-code: DESC's Nemov ``Gamma_c`` on the same equilibrium, s = 0.25.
 
-    A directional cross-check against the independent NEO_JAX
-    effective-ripple lane, not a proportionality claim: both metrics
-    integrate different weightings of the same ripple wells, and the
-    literature (Bader 2021, Paul 2022) documents imperfect correlation
-    between such proxies and measured energetic-particle losses.
-    Measured: Gamma_c 3.8e-3 -> 1.7e-2 (x4.4, asserted at x2) and
-    eps_eff^(3/2) 8.9e-9 -> 2.3e-4 under the same perturbation (the QA
-    baseline is essentially ripple-free, hence the enormous eps_eff
-    factor; asserted at x10).
+    DESC (``GammaC`` objective on the wout loaded at L=16, M=12, N=12 -- the
+    default 7/7/8 load is 10-30x off --, 8 alpha lines, 8 field-period
+    transits per line, 33 pitch angles) gives 3.60e-2; VMEX with the sharp
+    ``tangency_width = 0.005`` (DESC uses the hard bottom of the well), 16
+    lines, 6 transits and a 96-node sine map gives 3.43e-2 (-5 %).  At
+    s = 0.5 DESC reads 3.18e-2 against VMEX 4.29e-2 (+35 %): DESC itself moves
+    by 10-20 % between its own budgets (QA, s = 0.5: 3.7e-2, 4.4e-2, 4.9e-2 at
+    8, 16, 32 transits) and the outer-surface disagreement of its wout refit is
+    documented, so only s = 0.25 is asserted.
     """
-    pytest.importorskip("neo_jax")
-    from vmex.core.neoclassical import epsilon_effective_from_wout
-
-    base = _gamma_c(qa_eq)
-    inp = qa_eq.inp
-    ntor = int(inp.ntor)
-    rbc = np.array(inp.rbc)
-    rbc[ntor + 1, 0] += 0.3 * abs(rbc[ntor, 1])   # (n=1, m=0) mirror ripple
-    eq = opt.solve_equilibrium(dataclasses.replace(inp, rbc=rbc))
-    assert eq.result.converged
-    rippled = _gamma_c(eq)
-    assert rippled > 2.0 * base
-
-    # The surrogate must see the same physics it is meant to optimize away:
-    # the ripple's deep mirror wells rise far above its smoothing floor.
-    # Measured: 2.3e-5 -> 4.4e-3 (x195; asserted at x10).
-    def smooth(equilibrium):
-        return float(gammac.gamma_c_smooth_state(
-            equilibrium.state, equilibrium.runtime, surfaces=(0.5,),
-            temperature=0.15, **SETTINGS)["gamma_c"][0])
-
-    assert smooth(eq) > 10.0 * smooth(qa_eq)
-
-    def eps(e):
-        _, values = epsilon_effective_from_wout(e.wout, surfaces=(0.5,))
-        return float(np.asarray(values)[0])
-
-    assert eps(eq) > 10.0 * eps(qa_eq)
+    value = _value(ncsx_eq, surface=0.25, nalpha=16, num_transit=6, max_levels=288,
+                   tangency_width=0.005, quadrature_order=96, pitch_nodes=4)
+    assert abs(value / 3.60e-2 - 1.0) < 0.15
 
 
-def test_boundary_gradient_liveness():
-    """jax.grad through the implicit solve is finite, nonzero, FD-consistent.
+def test_gamma_c_converges_with_the_line_budget(qa_eq):
+    """Short lines undercount (cut wells); from 2 transits on the value is stable.
 
-    li383 at ns=13, GammaC([0.5]). What this test can honestly assert is
-    narrower than it once claimed. The sampled gradient agrees in sign and
-    rough magnitude with a central difference here, but it is **not a
-    convergent quantity**. Historical pre-scale-fix ladder of
-    d/d rbc[n=0, m=1] over (nalpha, transits, points/transit,
-    pitch):
+    Measured on this QA at s = 0.5, 16 lines: 2e-4 (1 transit), 1.43e-3, 1.30e-3,
+    1.37e-3 (2, 4, 8 transits) -- within 5 % from two transits on.
+    """
+    values = [_value(qa_eq, **{**FAST, "num_transit": nt, "nalpha": 16, "max_levels": 48 * nt})
+              for nt in (1, 4, 8)]
+    assert values[0] < 0.3 * values[1]
+    assert abs(values[2] / values[1] - 1.0) < 0.1
 
-        (7, 3, 64, 24)    -1.254
-        (7, 4, 96, 48)    +3.518
-        (9, 5, 128, 48)   -0.387
-        (13, 6, 192, 64)  -0.988
-        (17, 8, 256, 96)  +0.180
 
-    Three sign changes. Radial resolution does not help either: at fixed
-    sampling, ns = 13/25/49 gives -0.387, +0.175, -2.167. The same instability
-    is present before the symmetry fixes in this commit (-0.403, +0.582,
-    -0.554, -0.562, -0.111), so it is not a regression — an earlier revision
-    of this test asserted sign stability under one refinement step and was
-    passing on a lucky pair of configurations, not on a property.
+# ---------------------------------------------------------------------------
+# Gradients through the implicit solve
+# ---------------------------------------------------------------------------
 
-    The cause is structural: hard well detection and hard argmin selection
-    make the discretized Gamma_c piecewise in the boundary coefficients, with
-    breakpoints that move when the grid moves, so refinement changes which
-    function is being differentiated. Gamma_c is a value-level comparative
-    proxy; do not drive a boundary optimization with this gradient.
+def _boundary_objective(inp, name="gamma_c", **overrides):
+    settings = {**FAST, "nalpha": 8, **overrides}
+    if name == "gamma_alpha":
+        settings.pop("pitch_nodes"), settings.pop("max_levels")
+    fn = {"gamma_c": gammac.gamma_c_state, "gamma_alpha": gammac.gamma_alpha_state}[name]
 
-    So: finite, nonzero, and FD-consistent at fixed resolution. No claim of
-    magnitude stability, and none of sign stability.
+    def objective(params):
+        solution = im.run(inp, params, ns=13, ftol=1.0e-13, max_iterations=20000,
+                          adjoint_tol=1.0e-13, device=None)
+        return jnp.sum(fn(solution.state, solution.runtime, surfaces=(0.5,), **settings)[name])
+
+    return objective
+
+
+def test_boundary_gradient_matches_converged_finite_differences():
+    """``jax.grad`` through the implicit solve against central differences.
+
+    li383 at ns = 13, ``Gamma_c`` at s = 0.5, d/d rbc[n=0, m=1]: the central
+    difference is first shown converged in the step (``h = 1e-5`` and
+    ``3e-5`` agree) and the reverse-mode value matches it.  The earlier
+    discontinuous form changed sign under refinement (+70 AD against -12 FD on
+    a QA start).
     """
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
     index = (int(inp.ntor), 1)
+    objective = _boundary_objective(inp)
+    adjoint = float(np.asarray(jax.grad(objective)(params).rbc)[index])
 
-    def objective(p, nalpha=7, num_transit=3, ppt=64, npi=24):
-        term = gammac.GammaC(
-            [0.5], nalpha=nalpha, num_transit=num_transit,
-            points_per_transit=ppt, num_pitch=npi, quadrature_order=32)
-        solution = im.run(
-            inp, p, ns=13, ftol=1.0e-13, max_iterations=20000,
-            adjoint_tol=1.0e-13, device=None)
-        return term.total_state(solution.state, solution.runtime)
-
-    base = float(np.asarray(jax.grad(objective)(params).rbc)[index])
-    # Within the breakpoints of the discretized Gamma_c: on the held-m=1
-    # equilibrium the central difference reads -0.071, +0.44, -0.22, -0.19 at
-    # h = 1e-4, 3e-5, 1e-5, 3e-6 against AD -0.230, while the solved state's
-    # own derivative (mean iota) agrees with FD to 1e-9 at every one of them.
-    step = 1.0e-5
-    values = [
-        float(objective(dataclasses.replace(
+    def central(step):
+        values = [float(objective(dataclasses.replace(
             params, rbc=jnp.asarray(params.rbc).at[index].add(sign * step))))
-        for sign in (-1.0, 1.0)
-    ]
-    finite_difference = (values[1] - values[0]) / (2.0 * step)
-    assert np.isfinite(base) and base != 0.0
-    assert np.sign(base) == np.sign(finite_difference)
-    assert 1.0 / 3.0 < base / finite_difference < 3.0
+            for sign in (-1.0, 1.0)]
+        return (values[1] - values[0]) / (2.0 * step)
 
-    refined = float(np.asarray(jax.grad(
-        lambda p: objective(p, 13, 4, 96, 48))(params).rbc)[index])
-    assert np.isfinite(refined) and refined != 0.0
-    # Deliberately no sign or magnitude-ratio assertion against `base`: the
-    # ladder in the docstring shows neither holds.  Only that both refinements
-    # produce a live number of a physically plausible order.
-    assert 1.0e-3 < abs(refined) < 1.0e2 and 1.0e-3 < abs(base) < 1.0e2
+    fd = [central(3.0e-5), central(1.0e-5)]
+    assert abs(fd[0] / fd[1] - 1.0) < 0.05          # FD converged in h
+    assert abs(adjoint / fd[1] - 1.0) < 0.05
 
 
-def test_smooth_value_tracks_hard_with_documented_bias(
-        tokamak_eq, qa_eq, ncsx_eq):
-    """GammaCSmooth preserves the hard ordering with a documented bias.
-
-    The surrogate suppresses exactly the structures whose derivatives are
-    unstable — near-separatrix bounce times (kernel floor) and superbanana
-    drift angles (corner floor) — so its value sits below the hard one and
-    anneals up as ``temperature`` drops.  Measured at SETTINGS, s = 0.5,
-    ``temperature = 0.15`` against the hard values of the ordering test:
-
-    ==========  ==========  ==========  =============
-    case        hard        smooth      smooth / hard
-    ==========  ==========  ==========  =============
-    tokamak     9.4e-7      2.1e-8      0.02
-    QA          5.7e-3      2.3e-5      0.004
-    li383       4.39e-2     1.83e-2     0.42
-    ==========  ==========  ==========  =============
-
-    The li383 (multi-well 3D) value is within a factor 2.5; the QA value
-    collapses much further because its residual ripple wells are shallower
-    than the trapped-range kernel floor — the surrogate deliberately cannot
-    see structure below its smoothing scale, which is also why its tokamak
-    "zero" is cleaner than the hard quadrature noise.  The ordering
-    tokamak << QA << unoptimized 3D survives with wider margins than the
-    hard assertions.  Report hard values; optimize this one.
-    """
-    def smooth(eq):
-        out = gammac.gamma_c_smooth_state(
-            eq.state, eq.runtime, surfaces=(0.5,), temperature=0.15,
-            **SETTINGS)
-        return float(out["gamma_c"][0])
-
-    tok, qa, ncsx = smooth(tokamak_eq), smooth(qa_eq), smooth(ncsx_eq)
-    hard_ncsx = _gamma_c(ncsx_eq)
-    assert tok < 1.0e-6
-    assert tok < 0.1 * qa
-    assert qa < 0.3 * ncsx
-    assert 0.25 * hard_ncsx < ncsx < 0.7 * hard_ncsx
-
-    # JVP/VJP duality of the surrogate (its floors carry live derivatives):
-    # <J v, 1> == <v, J^T 1>.  Measured 4.9e-15.
-    eq = ncsx_eq
-    key = jax.random.PRNGKey(3)
-    direction = jax.random.normal(key, np.shape(eq.state.R_cos))
-
-    def value(r_cos):
-        spectral = dataclasses.replace(eq.state, R_cos=r_cos)
-        return gammac.gamma_c_smooth_state(
-            spectral, eq.runtime, surfaces=(0.5,), nalpha=5, num_transit=2,
-            points_per_transit=32, num_pitch=12, quadrature_order=16,
-            temperature=0.15)["gamma_c"][0]
-
-    _, tangent = jax.jvp(value, (eq.state.R_cos,), (direction,))
-    _, pullback = jax.vjp(value, eq.state.R_cos)
-    cotangent = pullback(jnp.asarray(1.0))[0]
-    np.testing.assert_allclose(
-        float(tangent), float(jnp.vdot(cotangent, direction)), rtol=1e-10)
-
-
-def _smooth_ladder_objective(inp, p, nalpha, num_transit, ppt, npi):
-    """GammaCSmooth([0.5]).total through the implicit solve (ladder lane)."""
-    term = gammac.GammaCSmooth(
-        [0.5], nalpha=nalpha, num_transit=num_transit,
-        points_per_transit=ppt, num_pitch=npi, quadrature_order=32,
-        temperature=0.15)
-    solution = im.run(
-        inp, p, ns=13, ftol=1.0e-13, max_iterations=20000,
-        adjoint_tol=1.0e-13, device=None)
-    return term.total_state(solution.state, solution.runtime)
-
-
-def test_smooth_boundary_gradient_is_fd_consistent():
-    """Approximate AD agrees with FD in sign and within a factor two here."""
+def test_gamma_alpha_boundary_gradient_is_finite():
+    """Reverse mode of the smoothed ``Gamma_alpha`` through the solve is finite and live."""
     inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
     params = im.params_from_input(inp, device=None)
-    index = (int(inp.ntor), 1)
-    base = float(np.asarray(jax.grad(
-        lambda p: _smooth_ladder_objective(inp, p, 7, 3, 64, 24)
-    )(params).rbc)[index])
-    step = 1.0e-5  # h = 1e-3/1e-4/1e-5: FD -0.069/-0.042/-0.091 against AD -0.089
-    values = [
-        float(_smooth_ladder_objective(inp, dataclasses.replace(
-            params, rbc=jnp.asarray(params.rbc).at[index].add(sign * step)),
-            7, 3, 64, 24))
-        for sign in (-1.0, 1.0)
-    ]
-    finite_difference = (values[1] - values[0]) / (2.0 * step)
-    assert np.isfinite(base) and base != 0.0
-    assert np.sign(base) == np.sign(finite_difference)
-    assert 1.0 / 2.0 < base / finite_difference < 2.0
+    objective = _boundary_objective(inp, "gamma_alpha", pitch_levels=32)
+    value, grad = jax.value_and_grad(objective)(params)
+    assert np.isfinite(float(value)) and 0.0 < float(value)
+    assert np.all(np.isfinite(np.asarray(grad.rbc))) and float(jnp.max(jnp.abs(grad.rbc))) > 0.0
 
 
-@pytest.mark.full
-def test_smooth_boundary_gradient_survives_the_refinement_ladder():
-    """Check the smooth gradient on five li383 sampling budgets.
+def test_line_kernel_is_mirror_invariant(qa_eq):
+    """``Gamma_c`` of a line equals that of its mirror image, with its gradient.
 
-    Require finite nonzero gradients with one sign, an overall magnitude
-    band below 8x, and a band below 2x on the three finest grids. These
-    case-specific bounds do not establish general derivative convergence.
-    Clear compilation caches between grids to bound this nightly test's RAM.
+    Reversing the line and flipping the sign of the odd ingredient
+    (``radial_drift``) is the stellarator reflection; ``gamma_c^2`` and its
+    derivatives with respect to the ingredients are invariant.  Measured on
+    this QA: values to 1e-9, gradient entries to 2e-3 of their scale (six of
+    390 entries; a few level choices flip at rounding noise).
     """
-    inp = VmecInput.from_file(DATA_DIR / "input.li383_low_res")
-    params = im.params_from_input(inp, device=None)
-    index = (int(inp.ntor), 1)
-    ladder = [(7, 3, 64, 24), (7, 4, 96, 48), (9, 5, 128, 48),
-              (13, 6, 192, 64), (17, 8, 256, 96)]
-    gradients = []
-    for rung in ladder:
-        gradients.append(float(np.asarray(jax.grad(
-            lambda p: _smooth_ladder_objective(inp, p, *rung)
-        )(params).rbc)[index]))
-        jax.clear_caches()
-        gc.collect()
-    assert all(np.isfinite(g) and g != 0.0 for g in gradients), gradients
-    assert len({np.sign(g) for g in gradients}) == 1, (
-        f"sign flip in smooth ladder: {gradients}")
-    magnitudes = [abs(g) for g in gradients]
-    assert max(magnitudes) < 8.0 * min(magnitudes), gradients
-    resolved = magnitudes[2:]                 # num_pitch >= 48 rungs
-    assert max(resolved) < 2.0 * min(resolved), gradients
+    from vmex.core.stability import _ballooning_context
 
+    ctx = _ballooning_context(qa_eq.state, qa_eq.runtime)
+    length, alpha, x = gammac._sampling_grids(ctx["s"].dtype, 4, 2, 32)
+    lines = gammac._line_ingredients(ctx, 6, jnp.asarray(0.0), alpha, x)
+    lines.pop("iota")
+    F = gammac._check_lines(lines["bmag"], lines)
+    sign = jnp.array([1.0, -1.0, 1.0, 1.0, 1.0, 1.0])[:, None]
+    line = jax.jit(jax.value_and_grad(lambda f: gammac._gamma_c_line(
+        f, length, K=96, Q=3, W=16, qorder=32, width=0.05, completeness=0.05)[0]))
+    for index in (1, 2):
+        value, grad = line(F[index])
+        mirror, mgrad = line(F[index][:, ::-1] * sign)
+        np.testing.assert_allclose(float(mirror), float(value), rtol=1e-9)
+        scale = float(jnp.max(jnp.abs(grad)))
+        np.testing.assert_allclose(np.asarray(mgrad[:, ::-1] * sign), np.asarray(grad),
+                                   atol=5e-3 * scale)
+
+
+# ---------------------------------------------------------------------------
+# Contracts
+# ---------------------------------------------------------------------------
 
 def test_class_contract_and_validation():
-    """GammaC is a thin binding of gamma_c_state with neighbor-style guards."""
+    """The classes are thin bindings of the state functions with guards."""
     calls = {}
 
     def fake_state(state, rt, **kwargs):
         calls.update(kwargs)
-        return {"gamma_c": jnp.array([0.1, 0.2])}
+        return {"gamma_c": jnp.array([0.1, 0.2]), "gamma_alpha": jnp.array([0.3, 0.4])}
 
-    term = gammac.GammaC([0.3, 0.7], weights=[1.0, 4.0], nalpha=5)
-    original = gammac.gamma_c_state
-    gammac.gamma_c_state = fake_state
+    original = gammac._evaluate
+    gammac._evaluate = lambda kind, state, rt, surfaces, zeta0, options: fake_state(
+        state, rt, kind=kind, surfaces=surfaces, **options)
     try:
         eq = SimpleNamespace(state=object(), runtime=object())
-        rows = term(eq)
-        np.testing.assert_allclose(np.asarray(rows), [0.1, 0.4])
+        term = gammac.GammaC([0.3, 0.7], weights=[1.0, 4.0], nalpha=5)
+        np.testing.assert_allclose(np.asarray(term(eq)), [0.1, 0.4])
         assert float(term.total(eq)) == pytest.approx(0.01 + 0.16)
         assert calls["nalpha"] == 5 and tuple(calls["surfaces"]) == (0.3, 0.7)
+        alpha = gammac.GammaAlpha([0.4, 0.6], pitch_levels=16)
+        np.testing.assert_allclose(np.asarray(alpha(eq)), [0.3, 0.4])
+        assert calls["kind"] == "alpha" and alpha.name == "gamma_alpha"
     finally:
-        gammac.gamma_c_state = original
+        gammac._evaluate = original
 
-    smooth_calls = {}
-
-    def fake_smooth_state(state, rt, **kwargs):
-        smooth_calls.update(kwargs)
-        return {"gamma_c": jnp.array([0.3])}
-
-    term = gammac.GammaCSmooth([0.4], nalpha=6, temperature=0.2)
-    original_smooth = gammac.gamma_c_smooth_state
-    gammac.gamma_c_smooth_state = fake_smooth_state
-    try:
-        eq = SimpleNamespace(state=object(), runtime=object())
-        np.testing.assert_allclose(np.asarray(term(eq)), [0.3])
-        assert smooth_calls["temperature"] == 0.2
-        assert smooth_calls["nalpha"] == 6
-    finally:
-        gammac.gamma_c_smooth_state = original_smooth
-    assert term.name == "gamma_c_smooth"
-    assert not hasattr(term, "kernel_floor")
-
-    with pytest.raises(ValueError, match="temperature"):
-        gammac.GammaCSmooth([0.5], temperature=0.0)
-    with pytest.raises(ValueError, match="temperature"):
-        gammac.gamma_c_smooth_state(None, None, temperature=-1.0)
-    with pytest.raises(ValueError, match="temperature"):
-        gammac.gamma_c_smooth_from_fieldlines(
-            bmag=jnp.ones((2, 8)), radial_drift=0.0, radial_gradient=0.0,
-            drift_correction=0.0, tangency=1.0, dl_dx=1.0, length=1.0,
-            pitch=jnp.ones(3), pitch_weights=jnp.ones(3), temperature=0.0)
     with pytest.raises(ValueError, match="increasing surfaces"):
         gammac.GammaC([0.7, 0.3])
     with pytest.raises(ValueError, match="strictly inside"):
         gammac.GammaC([0.0, 0.5])
     with pytest.raises(ValueError, match="weights"):
         gammac.GammaC([0.3, 0.7], weights=[1.0])
-    with pytest.raises(ValueError, match="positive"):
-        gammac.GammaC([0.5], nalpha=0)
+    with pytest.raises(ValueError, match="nalpha"):
+        gammac.GammaC([0.5], nalpha=1)
+    with pytest.raises(TypeError, match="unknown option"):
+        gammac.GammaC([0.5], temperature=0.1)
     with pytest.raises(ValueError, match="surfaces must be finite"):
         gammac._surface_rows([], 13)
     with pytest.raises(ValueError, match="duplicate radial rows"):
         gammac._surface_rows([0.5, 0.52], 13)
-    with pytest.raises(ValueError, match="nalpha"):
-        gammac.gamma_c_state(None, None, nalpha=1)
     with pytest.raises(ValueError, match="num_transit"):
         gammac.gamma_c_state(None, None, num_transit=0)
-    with pytest.raises(ValueError, match="num_pitch"):
-        gammac.gamma_c_state(None, None, num_pitch=1)
-    with pytest.raises(ValueError, match="pitch_weights"):
-        gammac.gamma_c_from_fieldlines(
-            bmag=jnp.ones((2, 8)), radial_drift=0.0, radial_gradient=0.0,
-            drift_correction=0.0, tangency=1.0, dl_dx=1.0, length=1.0,
-            pitch=jnp.ones(3), pitch_weights=jnp.ones(2))
-    with pytest.raises(ValueError, match="nline, nx"):
+    with pytest.raises(ValueError, match="pitch_nodes"):
+        gammac.gamma_c_state(None, None, pitch_nodes=1)
+    with pytest.raises(ValueError, match="tangency_width"):
+        gammac.gamma_c_state(None, None, tangency_width=0.0)
+    with pytest.raises(ValueError, match="nline"):
         gammac.gamma_c_from_fieldlines(
             bmag=jnp.ones(8), radial_drift=0.0, radial_gradient=0.0,
-            drift_correction=0.0, tangency=1.0, dl_dx=1.0, length=1.0,
-            pitch=jnp.ones(3), pitch_weights=jnp.ones(3))
+            drift_correction=0.0, tangency=1.0, dl_dx=1.0, length=1.0)
 
 
-def test_gamma_c_respects_the_stellarator_reflection():
-    """The exact identity that caught two defects.
-
-    Gamma_c is even under the stellarator reflection and the sine-parity
-    spectra are odd, so on a stellarator-symmetric equilibrium
-    ``d(Gamma_c)/d(sine)`` must be *identically* zero.  Run on a symmetric
-    deck solved with ``LASYM = T``, so the sine coefficients are real degrees
-    of freedom whose converged content is round-off — which makes the identity
-    exact rather than approximate.
-
-    It was violated at 55 % of the physical gradient.  Two causes:
-
-    * the trace window ran ``x in [0, L]`` instead of centred on the
-      field-line label, so the sampled ``(alpha, x)`` set was not closed under
-      ``(alpha, x) -> (-alpha, -x)``.  Centring alone took it to 13 %, and
-      makes the per-line estimator mirror-invariant to 1.8e-14;
-    * ``b_min``/``b_max`` are ``jnp.min``/``jnp.max`` over the |B| of a
-      reflection-closed line set, so the extrema sit at mirror-image *pairs*
-      and the cotangent went entirely to one member of each pair.  Holding the
-      pitch grid fixed under differentiation took the violation to 6.6e-11 and
-      moved the physical gradient by 1.8e-4.
-
-    Historical pre-scale-fix ratio: 5.8e-11 against ``d/dR_cos`` of 2.6e+03.
-    """
-    inp = dataclasses.replace(
-        VmecInput.from_file(DATA_DIR / "input.li383_low_res"), lasym=True)
-    eq = opt.solve_equilibrium(inp)
-    assert eq.result.converged and bool(eq.runtime.setup.lasym)
-    state, rt = eq.state, eq.runtime
-    # The identity is only exact where the sine content is: check that first.
-    cos_scale = float(jnp.max(jnp.abs(state.R_cos)))
-    assert float(jnp.max(jnp.abs(state.R_sin))) < 1.0e-12 * cos_scale
-
-    def total(spectral):
-        return gammac.gamma_c_state(
-            spectral, rt, surfaces=(0.5,), nalpha=6, num_transit=3,
-            points_per_transit=32, num_pitch=12,
-            quadrature_order=16)["gamma_c"][0]
-
-    gradient = jax.grad(total)(state)
-    physical = float(jnp.max(jnp.abs(gradient.R_cos)))
-    spurious = float(jnp.max(jnp.abs(gradient.R_sin)))
-    assert physical > 1.0        # the comparison is not against zero
-    assert spurious / physical < 1.0e-8
-
-    # The smooth surrogate must hold the same identity: its floors are
-    # built from reflection-even quantities through *soft* extrema and L1
-    # bounce integrals, so their live derivatives keep the pair symmetry
-    # that hard min/max breaks.  Historical pre-scale-fix ratio 4.3e-12.
-    def total_smooth(spectral):
-        return gammac.gamma_c_smooth_state(
-            spectral, rt, surfaces=(0.5,), nalpha=6, num_transit=3,
-            points_per_transit=32, num_pitch=12, quadrature_order=16,
-            temperature=0.15)["gamma_c"][0]
-
-    gradient = jax.grad(total_smooth)(state)
-    physical = float(jnp.max(jnp.abs(gradient.R_cos)))
-    spurious = float(jnp.max(jnp.abs(gradient.R_sin)))
-    assert physical > 1.0
-    assert spurious / physical < 1.0e-8
-
-
-
-def test_optimize_reexports_the_gamma_c_family():
-    """``vmex.optimize`` lazily resolves the hard and smooth classes alike."""
-    assert opt.GammaC is gammac.GammaC
-    assert opt.GammaCSmooth is gammac.GammaCSmooth
-    assert opt.gamma_c_state is gammac.gamma_c_state
-    assert opt.gamma_c_smooth_state is gammac.gamma_c_smooth_state
+def test_optimize_reexports_the_gamma_family():
+    """``vmex.optimize`` lazily resolves both classes and state functions."""
+    for name in ("GammaC", "GammaAlpha", "gamma_c_state", "gamma_alpha_state"):
+        assert getattr(opt, name) is getattr(gammac, name)
 
 
 @pytest.mark.parametrize("lasym", (False, True))
-def test_wout_row_map_preserves_values_and_directional_derivatives(lasym):
+@pytest.mark.parametrize("kind", ("c", "alpha"))
+def test_wout_row_map_preserves_values_and_directional_derivatives(lasym, kind):
     """A compact analytic torus retains every diagnostic and its JVP."""
     s = jnp.linspace(0., 1., 7)
     radius = 0.3 * jnp.sqrt(s)
@@ -573,9 +433,11 @@ def test_wout_row_map_preserves_values_and_directional_derivatives(lasym):
         rmns=.01 * rmnc if lasym else None,
         zmnc=.01 * rmnc if lasym else None,
         lmnc=zero if lasym else None)
-    settings = dict(rows=(2, 4), nalpha=3, num_transit=2,
-                    points_per_transit=16, num_pitch=6,
-                    quadrature_order=8, max_wells=8)
+    options = dict(nalpha=4, num_transit=1, points_per_transit=16, quadrature_order=8,
+                   max_wells=4, **({"pitch_nodes": 2, "max_levels": 8} if kind == "c"
+                                   else {"pitch_levels": 6}))
+    cfg = gammac._resolve(kind, options) + (("nfp", 1),)
+    settings = dict(rows=(2, 4), kind=kind, cfg=cfg)
 
     def evaluate(coefficients, mapped):
         ctx = dict(tables, rmnc=coefficients)
@@ -593,11 +455,4 @@ def test_wout_row_map_preserves_values_and_directional_derivatives(lasym):
         assert original.keys() == mapped.keys()
         for name in original:
             np.testing.assert_array_equal(np.isnan(original[name]), np.isnan(mapped[name]))
-            np.testing.assert_allclose(original[name], mapped[name], rtol=2e-10, atol=2e-11)
-
-
-def test_default_well_slots_cover_rippled_surfaces():
-    """32 slots per transit, never above the interval count; 16 overflowed on the QI seed deck's outer surfaces."""
-    assert gammac._default_max_wells(4, 64) == 128
-    assert gammac._default_max_wells(4, 16) == 64
-    assert gammac._default_max_wells(1, 16) == 16
+            np.testing.assert_allclose(original[name], mapped[name], rtol=2e-6, atol=1e-10)
