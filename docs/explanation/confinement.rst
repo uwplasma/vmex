@@ -873,7 +873,7 @@ The Nemov effective ripple is the geometric coefficient that sets the
 low-collisionality :math:`1/\nu` transport scale,
 :math:`D_{11}\propto\epsilon_{\mathrm{eff}}^{3/2}/\nu`; the functions return
 :math:`\epsilon_{\mathrm{eff}}^{3/2}` (NEO's ``epstot``), and
-:math:`\epsilon_{\mathrm{eff}}` is that value to the power 2/3.  VMEX evaluates
+:math:`\epsilon_{\mathrm{eff}}` is that value to the power 2/3.  NEO_JAX evaluates
 Nemov's bounce integrals (Phys. Plasmas 6, 4622 (1999), in the form of Unalmis
 et al. eq. 2.12 and ``desc.compute._neoclassical``) along Boozer field lines
 with exact bounce points, so the value is a smooth function of the equilibrium
@@ -889,7 +889,7 @@ that is differentiable in forward and reverse mode through the implicit solve:
 
 The value is interpolated linearly in ``s`` between the two half-mesh rows
 that bracket each surface (never snapped to the nearest row).  The resolution is a
-:class:`~vmex.core.neoclassical.RippleBudget`; the default is within 1 % of a
+:class:`neo_jax.RippleBudget`; the default is within 1 % of a
 budget three times larger on six boundaries and a QI spectrum, and fewer than
 16 field lines can be 5 to 12 % off.  Against NEO_JAX at a very fine resolution the value
 agrees to 0.04 to 0.3 % on non-quasi-symmetric configurations, and with Fortran
@@ -899,7 +899,7 @@ default-resolution values (``theta_n=32``) are limited by spline noise below
 :math:`\epsilon_{\mathrm{eff}}^{3/2}\sim10^{-5}`: a good QA, such as the
 ``LandremanPaul2021_QA_lowres`` deck, has :math:`\epsilon_{\mathrm{eff}}^{3/2}
 \approx 10^{-8}`, which the bounce integrals and a very fine NEO run agree on.
-NEO_JAX remains in :func:`~vmex.core.neoclassical.screen_transport`, the
+The Fortran-faithful NEO_JAX integrator is also what :func:`~vmex.core.neoclassical.screen_transport` uses, as the
 independent forward screen that accepts or rejects candidates in the pwO
 examples.
 

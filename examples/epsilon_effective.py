@@ -3,16 +3,17 @@
 
 ``epsilon_eff^(3/2)`` measures the neoclassical transport a stellarator's field
 ripple drives in the 1/nu regime. VMEX evaluates Nemov's bounce integrals along
-Boozer field lines directly from the solver state (Boozer transform included, no
+Boozer field lines (NEO_JAX) directly from the solver state (Boozer transform included, no
 ``boozmn`` or WOUT file), so the same call is a differentiable objective: see
 ``test_neoclassical.py`` for its gradient with respect to boundary coefficients.
 
 A quasi-axisymmetric field has a very small ripple (about 1e-8 for this deck),
 so the profile there is a statement about the residual symmetry breaking and is
-not monotonic in s.  The value is converged to about 0.1 % in the default budget
-(``nalpha`` field lines, ``nturn``/``next`` transits, ``nper`` nodes per field
-period, ``nquad`` nodes per well); it agrees with a converged NEO_JAX run to
-0.3 % on non-quasi-symmetric fields.
+not monotonic in s.  The default ``neo_jax.RippleBudget`` holds 1 % on non-quasi-symmetric
+fields (raise it below about 1e-7); it agrees with converged NEO_JAX, xneo and DESC runs to
+0.2 to 3 %.
+
+Needs the optional ``neoclassical`` extra: ``pip install "vmex[neoclassical]"``.
 """
 
 from pathlib import Path

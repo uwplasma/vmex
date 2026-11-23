@@ -1,4 +1,6 @@
-"""Effective ripple: bounce-integral value, anchors, cross-code reference and gradients; NEO screen adapter."""
+"""Effective-ripple adapter (state and wout to NEO_JAX, radial interpolation, gradient through the solve) and the NEO screen.
+
+The bounce-integral physics tests live in NEO_JAX (``tests/unit/test_ripple.py``)."""
 
 from __future__ import annotations
 
@@ -10,7 +12,6 @@ import numpy as np
 import pytest
 
 from vmex.core import neoclassical
-from vmex.core.neoclassical import RippleBudget
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 
@@ -101,117 +102,23 @@ def test_transport_screen_rejects_an_invalid_surface_instead_of_a_partial_profil
     assert calls["runs"] == calls["neo_calls"] == 1
 
 
-NFP = 2
-
-
-def _torus(modes, iota=0.41, current=0.0, r=0.2, R0=5.0):
-    """Large-aspect-ratio Boozer surface: |B| = 1 + sum a cos(m theta - n phi); circular section."""
-    xm = np.array([0, 1] + [m for m, _, _ in modes], float)
-    xn = np.array([0, 0] + [n for _, n, _ in modes], float)
-    b, rm, zs = np.zeros(xm.size), np.zeros(xm.size), np.zeros(xm.size)
-    b[0], rm[0], rm[1], zs[1] = 1.0, R0, r, r
-    b[2:] = [a for _, _, a in modes]
-    return dict(nfp_b=NFP, ixm_b=xm, ixn_b=xn, iota_b=np.array([iota]), buco_b=np.array([current]),
-                bvco_b=np.array([R0]), rmnc_b=rm[None], zmns_b=zs[None], pmns_b=0 * zs[None],
-                bmnc_b=b[None], s_b=np.array([0.5]))
-
-
-def _eps(booz, budget=None):
-    return float(neoclassical.epsilon_effective_3_2_from_boozer(booz, budget)[1][0])
-
-
-def test_quasi_symmetric_fields_have_no_ripple_and_a_perturbation_scales_quadratically():
-    """A single helicity (tokamak-like QA or QH, with a net current) gives exactly zero.
-
-    With ``B = B(m theta - n phi)`` the geodesic integral ``I_1`` is the integral
-    of an exact derivative between bounce points, so ``epsilon_eff`` vanishes
-    (Nemov et al. 1999); a symmetry-breaking perturbation of relative size
-    ``lam`` then gives ``epsilon_eff^(3/2) ~ lam^2``.
-    """
-    base = _eps(_torus([(1, 0, -0.1), (1, NFP, -0.02)]))
-    for modes, current in (([(1, 0, -0.1)], 0.0), ([(1, NFP, -0.1)], 0.3)):
-        assert _eps(_torus(modes, current=current)) < 1e-7 * base
-    values = [_eps(_torus([(1, 0, -0.1), (1, NFP, -0.005 * lam)])) / lam**2 for lam in (1, 2)]
-    np.testing.assert_allclose(values[1], values[0], rtol=0.05)
-
-
-def test_value_is_invariant_to_angle_shifts_and_field_scale():
-    """Shifting the Boozer angles (sine partners appear) or scaling ``B`` leaves the ripple unchanged."""
-    booz = _torus([(1, 0, -0.1), (1, NFP, -0.03), (2, NFP, 0.01)], current=0.2)
-    reference = _eps(booz)
-    c, d = 0.7, 0.4
-    delta = booz["ixm_b"] * c - booz["ixn_b"] * d
-    shifted = dict(booz)
-    for cos_key, sin_key in (("bmnc_b", "bmns_b"), ("rmnc_b", "rmns_b"), ("zmnc_b", "zmns_b"), ("pmnc_b", "pmns_b")):
-        fc, fs = booz.get(cos_key, 0 * booz["bmnc_b"]), booz.get(sin_key, 0 * booz["bmnc_b"])
-        shifted[cos_key] = fc * np.cos(delta) + fs * np.sin(delta)
-        shifted[sin_key] = fs * np.cos(delta) - fc * np.sin(delta)
-    np.testing.assert_allclose(_eps(shifted), reference, rtol=2e-2)
-    scaled = dict(booz, bmnc_b=2.5 * booz["bmnc_b"], bvco_b=2.5 * booz["bvco_b"], buco_b=2.5 * booz["buco_b"])
-    np.testing.assert_allclose(_eps(scaled), reference, rtol=1e-6)
-
-
-def test_matches_fortran_xneo_neo_jax_and_desc_and_converges_in_the_budget():
-    """Cross-code numbers on two stored Boozer spectra and convergence in the budget.
-
-    QI spectrum (nfp = 4, iota ~ -1.3, finite beta): STELLOPT xneo (Fortran, 128 x 128 spline,
-    96 particles, 80 steps per period, acc_req 1e-3; NaN at the third surface, where the standard
-    64 x 64 run gives 4.5405e-4) and NEO_JAX at the same resolution.  Rotating ellipse (nfp = 2,
-    vacuum): xneo (that run at s = 0.25 is NaN, so the 64 x 64 run's 1.1828e-2) and DESC
-    (L=16, M=12, Y_B=192, 100 field-period transits, 64 quadrature nodes, 256 pitch).  DESC is not
-    compared on the QI spectrum: it includes the pressure term of the geodesic curvature.
-    """
-    with np.load(DATA_DIR.parent.parent / "tests" / "data" / "boozer_nfp4_QI_finite_beta.npz") as data:
-        booz = {key: data[key] for key in data.files}
-    booz["mode_first"] = True
-    s, values = neoclassical.epsilon_effective_3_2_from_boozer(booz)
-    np.testing.assert_allclose(s, [0.43, 0.49, 0.55], rtol=0, atol=1e-12)
-    np.testing.assert_allclose(values, [5.1933e-4, 4.7918e-4, 4.5405e-4], rtol=0.03)
-    np.testing.assert_allclose(values, [5.2224e-4, 4.7922e-4, 4.5097e-4], rtol=0.03)
-    one = {**booz, **{k: np.asarray(booz[k])[:, 1:2] for k in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b")},
-           **{k: np.asarray(booz[k])[1:2] for k in ("iota_b", "buco_b", "bvco_b", "s_b")}}
-    np.testing.assert_allclose(_eps(one, RippleBudget(48, 6, 6, 48, 8, 64)), 4.7918e-4, rtol=3e-3)
-    with np.load(DATA_DIR.parent.parent / "tests" / "data" / "boozer_ellipse_nfp2.npz") as data:
-        ellipse = {key: data[key] for key in data.files}
-    values = neoclassical.epsilon_effective_3_2_from_boozer(ellipse)[1]
-    np.testing.assert_allclose(values, [1.1828e-2, 1.6702e-2, 2.1461e-2], rtol=0.02)
-    np.testing.assert_allclose(values, [1.2128e-2, 1.6863e-2, 2.1762e-2], rtol=0.03)
-
-
-def test_gradient_forward_reverse_and_finite_difference_agree():
-    """``jvp``, ``grad`` and central differences agree for the spectrum, ``iota`` and the current."""
-    import jax
-
-    booz = _torus([(1, 0, -0.1), (1, NFP, -0.03), (2, NFP, 0.01)], current=0.2)
-    amp = jax.numpy.asarray(booz["bmnc_b"][0])
-
-    def f(a, iota, current):
-        b = dict(booz, bmnc_b=a[None], iota_b=iota[None], buco_b=current[None])
-        return neoclassical.epsilon_effective_3_2_from_boozer(b, RippleBudget(n_lines=16, n_well=32))[1][0]
-
-    x0 = (amp, jax.numpy.asarray(0.41), jax.numpy.asarray(0.2))
-    grads = jax.jit(jax.grad(f, argnums=(0, 1, 2)))(*x0)
-    direction = (jax.numpy.asarray(np.random.default_rng(1).normal(size=amp.size)) * 1e-2, 1.0, 1.0)
-    forward = jax.jvp(f, x0, direction)[1]
-    reverse = sum(float(np.vdot(g, t)) for g, t in zip(grads, direction))
-    np.testing.assert_allclose(forward, reverse, rtol=1e-5)
-    h = 1e-4
-    plus = f(*[x + h * t for x, t in zip(x0, direction)])
-    minus = f(*[x - h * t for x, t in zip(x0, direction)])
-    np.testing.assert_allclose((plus - minus) / (2 * h), reverse, rtol=5e-3)
-
-
 def test_half_mesh_bracketing_interpolates_linearly_in_s():
     s_half = (np.arange(10) + 0.5) / 10
     targets = [0.3, 0.35, 0.01, 0.99]
     rows, lo, hi, w = neoclassical._bracket(s_half, targets)
     values = np.arange(rows.size, dtype=float) ** 2
-    np.testing.assert_allclose(neoclassical._interpolate(values, lo, hi, w),
-                               np.interp(targets, s_half[rows], values))
+    np.testing.assert_allclose((1 - w) * values[lo] + w * values[hi], np.interp(targets, s_half[rows], values))
+
+
+@pytest.fixture(scope="module", autouse=False)
+def ripple_backend():
+    neo = pytest.importorskip("neo_jax")
+    if not hasattr(neo, "effective_ripple_3_2"):
+        pytest.skip("the effective ripple needs neo-jax >= 1.2.0")
 
 
 @pytest.fixture(scope="module")
-def qa_equilibrium():
+def qa_equilibrium(ripple_backend):
     import vmex as vj
     from vmex import optimize as opt
 
@@ -264,7 +171,7 @@ def test_boundary_gradient_matches_finite_differences_after_a_tight_resolve(qa_e
 
 
 @pytest.mark.full  # ~3 min: an asymmetric solve, two ripple routes and re-solved central differences
-def test_asymmetric_equilibrium_value_routes_and_gradient():
+def test_asymmetric_equilibrium_value_routes_and_gradient(ripple_backend):
     """A solved LASYM equilibrium (QA deck plus a small asymmetric boundary): finite, route-independent, differentiable."""
     import re
 

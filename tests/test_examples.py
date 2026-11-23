@@ -470,6 +470,9 @@ def test_epsilon_effective_example_uses_the_traceable_state_route() -> None:
 
 
 def test_epsilon_effective_example(tmp_path):
+    neo = pytest.importorskip("neo_jax")
+    if not hasattr(neo, "effective_ripple_3_2"):
+        pytest.skip("the effective ripple needs neo-jax >= 1.2.0")
     out = _run_example(EXAMPLES / "epsilon_effective.py", tmp_path, timeout=600)
     values = re.search(r"epsilon_eff\^\(3/2\) = \[(.+?)\]", out, re.S)
     assert values is not None, out
