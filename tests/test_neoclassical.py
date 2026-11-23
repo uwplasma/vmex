@@ -218,30 +218,32 @@ def test_state_and_wout_routes_agree_and_a_good_qa_has_a_tiny_ripple(qa_equilibr
     np.testing.assert_allclose(from_state, from_wout, rtol=0.1)
 
 
-@pytest.mark.full  # ~2 min: warm-started re-solves for central differences
 def test_boundary_gradient_matches_finite_differences_after_a_tight_resolve(qa_equilibrium):
     """Reverse mode through the implicit solve vs central differences of re-solved equilibria.
 
     The objective is the sum of ``epsilon_eff^(3/2)`` over three surfaces of the
-    cmp61 nfp = 2 rotating-ellipse-like start (``QA`` deck with a perturbed boundary).
+    QA deck, differentiated with respect to its eight lowest boundary modes.
     """
     import jax
     import jax.numpy as jnp
 
     from vmex import optimize as opt
 
-    inp = qa_equilibrium.input if hasattr(qa_equilibrium, "input") else None
-    if inp is None:
-        pytest.skip("equilibrium does not expose its input")
+    inp = qa_equilibrium.inp
     surfaces = (0.25, 0.5, 0.75)
     loss = lambda st, rt: jnp.sum(neoclassical.epsilon_effective_3_2_from_state(st, rt, surfaces))  # noqa: E731
-    problem = opt.VmecProblem.from_loss(inp, loss, max_mode=1, use_ess=True, restart_from=qa_equilibrium)
+    probe = opt.VmecProblem.from_loss(inp, loss, max_mode=1, use_ess=True, restart_from=qa_equilibrium)
+    sub0 = probe.subproblem(max_mode=1, x=probe.x0)
+    # move off the sharp QA minimum (there a central difference only sees curvature), re-solve, restart there
+    inp1 = probe.input_from_x(sub0.embed(np.asarray(sub0.x0) + 0.01 * np.asarray(sub0.scales)))
+    base = opt.solve_equilibrium(inp1, initial_state=qa_equilibrium.state, forward_ftol=1e-13, forward_max_iterations=20000)
+    problem = opt.VmecProblem.from_loss(inp1, loss, max_mode=1, use_ess=True, restart_from=base)
     sub = problem.subproblem(max_mode=1, x=problem.x0)
     x0, scales = np.asarray(sub.x0), np.asarray(sub.scales)
     _, grad = sub.value_and_grad(x0)
 
     def value(x):
-        eq = opt.solve_equilibrium(problem.input_from_x(sub.embed(x)), initial_state=qa_equilibrium.state,
+        eq = opt.solve_equilibrium(problem.input_from_x(sub.embed(x)), initial_state=base.state,
                                    forward_ftol=1e-13, forward_max_iterations=20000)
         return float(jax.jit(loss)(eq.state, eq.runtime))
 
