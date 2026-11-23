@@ -177,12 +177,13 @@ def _wells(cB, cQ, pcs, h, b, GI, nstart, ramp, nwell, nquad):
     return jnp.where(ok, win * I1**2 / jnp.where(ok, I2, 1.0), 0.0).sum(), down.sum() > nwell
 
 
-def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, nquad, nsurf, ramp=0.25):
-    """``epsilon_eff^(3/2)`` of one Boozer surface; NaN if a capacity (wells, critical values) overflows."""
+def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, nquad, nsurf, ramp=0.25, nwell=None, ncrit=None):
+    """``epsilon_eff^(3/2)`` of one Boozer surface; NaN if more wells start than fit in one pitch node."""
     n = nfp * (nturn + next) * nper
     nstart = nfp * nturn * nper
     L, h = 2 * jnp.pi * nturn, 2 * jnp.pi * (nturn + next) / n
-    nwell, ncrit, GI = 2 * nfp * nturn + 4, 4 * nfp * (nturn + next), G + iota * cur
+    nwell, ncrit = nwell or 2 * nfp * nturn + 4, ncrit or 4 * nfp * (nturn + next)
+    GI = G + iota * cur
     # surface quantities on a (theta, field period) grid
     th = jnp.arange(nsurf) * 2 * jnp.pi / nsurf
     TH, PH = jnp.meshgrid(th, th / nfp, indexing="ij")
@@ -211,16 +212,16 @@ def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, n
         # critical values of B: the stationary points (envelope theorem: t carries no derivative)
         cand = jnp.concatenate([jnp.where(ta < 1, _peval(cB, jax.lax.stop_gradient(ta)), jnp.nan),
                                 jnp.where(tb < 1, _peval(cB, jax.lax.stop_gradient(tb)), jnp.nan)])
-        isc = ~jnp.isnan(cand)
-        ic = jnp.nonzero(isc, size=ncrit, fill_value=0)[0]
-        top = Bn.max()
-        crit = jnp.sort(jnp.concatenate([jnp.where(jnp.arange(ncrit) < isc.sum(), cand[ic], top),
-                                         Bn[:1], Bn[-1:], top[None]]))
+        top, ncand = Bn.max(), (~jnp.isnan(cand)).sum()
+        cs = jnp.sort(jnp.where(jnp.isnan(cand), top, cand))
+        # keep every critical value, or ncrit of them evenly spread in rank when a nearly flat |B| has more
+        pick = jnp.where(ncand > ncrit, jnp.round(jnp.linspace(0.0, 1.0, ncrit) * (ncand - 1)), jnp.arange(ncrit)).astype(int)
+        crit = jnp.sort(jnp.concatenate([cs[jnp.minimum(pick, cand.size - 1)], Bn[:1], Bn[-1:], top[None]]))
         lo, hi = crit[:-1], crit[1:]
         bq = (lo[:, None] + (hi - lo)[:, None] * sg).ravel()
         wb = ((hi - lo)[:, None] * dsg * wpitch).ravel()
         val, over = jax.vmap(lambda b: _wells(cB, cQ, pcs, h, b, GI, nstart, ramp * L, nwell, nquad))(bq)
-        return (wb * val / bq**3).sum() * 2 * jnp.pi / (L * (1 - ramp)), over.any() | (isc.sum() > ncrit)
+        return (wb * val / bq**3).sum() * 2 * jnp.pi / (L * (1 - ramp)), over.any()
 
     alpha = (jnp.arange(nalpha) + 0.5) * 2 * jnp.pi / nalpha
     S, over = jax.lax.map(jax.checkpoint(line), alpha)
@@ -241,8 +242,11 @@ def epsilon_effective_3_2_from_boozer(booz: Any, **budget):
     extension, ``nper`` nodes per field period, ``nq`` pitch nodes per interval
     of critical values, ``nquad`` nodes per well, ``nsurf`` surface grid.  The
     value changes by ~0.1% when ``nalpha``, ``nturn``, ``next``, ``nper``,
-    ``nq`` or ``nquad`` double; a surface that overflows the well or
-    critical-value capacity returns NaN.
+    ``nq`` or ``nquad`` double; a surface with more wells starting at one pitch
+    than the capacity ``nwell`` (``2 nfp nturn + 4``, overridable) returns NaN.
+    ``ncrit`` (default ``4 nfp (nturn + next)``) bounds the critical values of
+    each line; a nearly flat ``|B|`` with more of them keeps ``ncrit`` spread
+    evenly in rank.
     """
     kw = {**_BUDGET, **budget}
     t = (lambda a: jnp.asarray(a).T) if booz.get("mode_first") else jnp.asarray  # noqa: E731
