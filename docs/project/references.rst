@@ -183,7 +183,7 @@ Confinement objectives and optimization:
 39. V. V. Nemov et al., “Poloidal motion of trapped particle orbits in
     real-space coordinates,” *Physics of Plasmas* 15, 052501 (2008),
     doi:10.1063/1.2912456 — defines the :math:`\Gamma_c` fast-ion proxy
-    (eq. 61) evaluated by :class:`~vmex.core.gammac.GammaC`.
+    (eq. 61), in the Boozer form of Velasco et al. (2021), evaluated by :class:`~vmex.core.fastion.GammaC`.
 
 40. J. L. Velasco et al. and the W7-X Team, “A model for the fast evaluation
     of prompt losses of energetic ions in stellarators,” *Nuclear Fusion* 61,

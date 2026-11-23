@@ -107,7 +107,7 @@ The modules without a VMEC2000 counterpart group as follows:
   drivers and optimizer-neutral callables), :mod:`~vmex.core.monitoring`.
 - **Objectives and diagnostics:** :mod:`~vmex.core.omnigenity`,
   :mod:`~vmex.core.qi`, :mod:`~vmex.core.maxj`, :mod:`~vmex.core.bounce`,
-  :mod:`~vmex.core.gammac`, :mod:`~vmex.core.bootstrap`,
+  :mod:`~vmex.core.fastion`, :mod:`~vmex.core.bootstrap`,
   :mod:`~vmex.core.stability`, :mod:`~vmex.core.turbulence`,
   :mod:`~vmex.core.neoclassical`, :mod:`~vmex.core.boozer`,
   :mod:`~vmex.core.boozer_tables`, :mod:`~vmex.core.statephysics`.
