@@ -3763,11 +3763,13 @@ def implicit_state_pullback_multi_rhs(
         x_star = _device_pin(cfg, x_star)
         dof_mask = _device_pin(cfg, dof_mask)
         gbar_batch = _device_pin(cfg, gbar_batch)
-        return _device_pin(cfg, _implicit_state_pullback_multi_rhs_impl(
-            params, cfg, x_star, dof_mask, gbar_batch,
-            solver=solver, active_fields=active_fields,
-            probe_chunk_size=probe_chunk_size,
-            response_chunk_size=response_chunk_size))
+        return _device_pin(cfg, _nan_unless(
+            _anchor_certified(cfg, params, x_star, dof_mask),
+            _implicit_state_pullback_multi_rhs_impl(
+                params, cfg, x_star, dof_mask, gbar_batch,
+                solver=solver, active_fields=active_fields,
+                probe_chunk_size=probe_chunk_size,
+                response_chunk_size=response_chunk_size)))
 
 
 def _block_state_pullback(

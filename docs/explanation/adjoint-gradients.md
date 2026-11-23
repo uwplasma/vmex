@@ -107,7 +107,11 @@ A fixed-boundary state whose anchor still ends above `refine_tol` has no
 certified derivative: `solve_implicit` returns NaN for its reverse and forward
 tangents, `solve_implicit_status` reports status 3, the optimizers treat the
 trial as a failed one, and the anchor residual of the latest refinement is
-`anchor_residual` in the solve statistics.
+`anchor_residual` in the solve statistics. The batched pullback
+`implicit_state_pullback_multi_rhs` returns NaN in the same case. With
+`refine_tol = numpy.inf` the check is skipped and the previous behaviour is
+kept. The free-boundary implicit lane has its own anchor and status and is
+not gated by this check.
 
 Public optimization factories expose the same `refine_tol`. Its default is
 a refinement target, not a universal observable-accuracy certificate. Qualify
