@@ -802,11 +802,19 @@ def scipy_least_squares(fun: Callable, x0: Any, *, jac: Callable, callback: Call
     wrapped ``jac`` passes ``callback`` the accepted ``x``, ``fun``, ``cost``
     and ``nit`` (rejected trials are not reported), and a ``StopIteration``
     ends the run with ``status = -2`` as in SciPy 1.16.
+
+    On SciPy < 1.16 the callback always receives an ``OptimizeResult`` (never
+    a bare ``x``), also with ``method="lm"``; ``cost`` is ``0.5 * |f|**2``
+    whatever ``loss`` is; only ``StopIteration`` stops the run (a true return
+    value does not); ``jac`` must return a dense array; and a stopped result
+    has ``nit`` but no ``active_mask``.
     """
     from scipy.optimize import OptimizeResult
     from scipy.optimize import least_squares
 
-    if callback is None or "callback" in inspect.signature(least_squares).parameters:
+    if callback is None:
+        return least_squares(fun, x0, jac=jac, **kwargs)
+    if "callback" in inspect.signature(least_squares).parameters:
         return least_squares(fun, x0, jac=jac, callback=callback, **kwargs)
     last = {"x": None, "f": None, "nfev": 0, "njev": 0}
 

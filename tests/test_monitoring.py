@@ -651,6 +651,7 @@ def test_scipy_least_squares_passes_the_callback_on_scipy_without_it(monkeypatch
                         lambda fun, x0, **kw: real(fun, x0, **kw))  # SciPy 1.15 signature
     full, seen = run(None)
     np.testing.assert_allclose(full.x, native.x)
+    np.testing.assert_allclose(scipy_least_squares(fun, [-1.2, 1.0], jac=jac).x, native.x)  # no callback
     accepted = [c for i, (x, c) in enumerate(native_seen)
                 if i == 0 or not np.array_equal(x, native_seen[i - 1][0])]
     if "callback" in inspect.signature(real).parameters:  # same accepted iterates as SciPy 1.16
