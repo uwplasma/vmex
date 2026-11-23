@@ -1169,6 +1169,17 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     np.testing.assert_allclose(problem.jax_fun(problem.x0), jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_value, jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_gradient, jax_gradient, rtol=1e-12)
+    gmres_problem = opt.VmecProblem.from_tuples(
+        inp,
+        [(opt.aspect_ratio, 4.0, 4.0), (elongation_excess, 0.0, 1.0)],
+        max_mode=1,
+        implicit_jacobian_method="forward_gmres",
+        use_ess=False,
+    )
+    np.testing.assert_allclose(
+        jax.grad(gmres_problem.jax_fun)(jax.numpy.asarray(problem.x0)),
+        jax_gradient, rtol=1e-6,
+    )
     # Concrete calls reuse the host lane; the traced program (a user's
     # jax.jit) must still agree with it.
     with jax.disable_jit(False):
