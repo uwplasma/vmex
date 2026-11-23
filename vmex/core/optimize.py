@@ -2913,22 +2913,18 @@ def _least_squares_implicit(
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state, data)
 
-        def column(args):
-            tp_stack, rhs = args
-            tp = tangent_of(tp_stack)
+        def response(rhs):
             dz, krylov = imp._adjoint_solve(
                 Fz, rhs, cfg, rtol=data["jac_tol"],
                 max_restarts=certify_maxiter)
-            report = imp._linear_response_report(
+            return dz, imp._linear_response_report(
                 krylov, rhs, cfg, rtol=data["jac_tol"])
-            return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
-        # Right-hand sides by lax.map (see _implicit_evolved_tangent_multi_rhs).
+        # Right-hand sides and columns by lax.map (see _implicit_evolved_tangent_multi_rhs).
         rhs_batch = jax.lax.map(lambda t: rhs_of(tangent_of(t)), tangent_stack)
-        cols, dz_cols, krylov = chunk_map(
-            column, (tangent_stack, rhs_batch), chunk_size=tangent_chunk
-        )
+        dz_cols, krylov = chunk_map(response, rhs_batch, chunk_size=tangent_chunk)
+        cols = jax.lax.map(lambda a: column_of(a[1], tangent_of(a[0])), (tangent_stack, dz_cols))
         return jnp.transpose(cols), dz_cols, _linear_response_summary(krylov)
 
     # Amortized block-tridiagonal variant.  The *raw* residual formulation
