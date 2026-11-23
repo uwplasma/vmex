@@ -899,6 +899,9 @@ default-resolution values (``theta_n=32``) are limited by spline noise below
 :math:`\epsilon_{\mathrm{eff}}^{3/2}\sim10^{-5}`: a good QA, such as the
 ``LandremanPaul2021_QA_lowres`` deck, has :math:`\epsilon_{\mathrm{eff}}^{3/2}
 \approx 10^{-8}`, which the bounce integrals and a very fine NEO run agree on.
+The value assumes force balance: for near-omnigenous fields it needs the equilibrium solved to ``ftol`` 1e-12 or
+tighter.  On the nfp = 4 QI deck (s = 0.49) the effective ripple is :math:`\epsilon_{\mathrm{eff}}^{3/2}` = 3.4e-3,
+1.4e-3, 5.2e-4, 4.81e-4, 4.80e-4 for ``ftol`` 1e-6, 1e-8, 1e-10, 1e-12, 1e-14, so 1e-10 is 8 % high and 1e-12 is 0.3 % high.
 The Fortran-faithful NEO_JAX integrator is also what :func:`~vmex.core.neoclassical.screen_transport` uses, as the
 independent forward screen that accepts or rejects candidates in the pwO
 examples.
