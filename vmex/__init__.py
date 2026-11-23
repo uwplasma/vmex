@@ -97,9 +97,9 @@ links to the module that documents it.
 **Post-processing and plotting**
 
 - :func:`~vmex.core.boozer.run_booz_xform` — Boozer transform (booz_xform_jax)
-- :func:`~vmex.core.neoclassical.epsilon_effective_from_wout` /
-  :func:`~vmex.core.neoclassical.epsilon_effective_from_boozer` — optional
-  NEO_JAX effective-ripple profile
+- :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state` /
+  :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_wout` — differentiable
+  effective-ripple profile ``epsilon_eff**(3/2)`` (Nemov bounce integrals)
 - :func:`~vmex.core.gammac.gamma_c_from_wout` — fast-ion ``Gamma_c`` profile
   from any compatible wout, without a solve
 - :func:`~vmex.core.tracing.essos_vmec_field` — hand a solved equilibrium to
@@ -292,10 +292,10 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
     "plot_optimization_movie": (".core.plotting", "plot_optimization_movie"),
     "plot_optimization_objects": (".core.plotting", "plot_optimization_objects"),
     "run_booz_xform": (".core.boozer", "run_booz_xform"),
-    "epsilon_effective_from_boozer": (
-        ".core.neoclassical", "epsilon_effective_from_boozer"),
-    "epsilon_effective_from_wout": (
-        ".core.neoclassical", "epsilon_effective_from_wout"),
+    "epsilon_effective_3_2_from_state": (
+        ".core.neoclassical", "epsilon_effective_3_2_from_state"),
+    "epsilon_effective_3_2_from_wout": (
+        ".core.neoclassical", "epsilon_effective_3_2_from_wout"),
     "gamma_c_from_wout": (".core.gammac", "gamma_c_from_wout"),
     # alpha-particle tracing (ESSOS)
     "AlphaTracingResult": (".core.tracing", "AlphaTracingResult"),

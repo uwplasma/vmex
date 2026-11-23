@@ -64,7 +64,7 @@ or pick what you need:
 |---|---|---|
 | `pip install "vmex[coils]"` | `essos>=0.22.0` | ESSOS coil fields, `vmex --coils` free boundary, single-stage plasma and coil optimization, field-line and alpha-particle tracing |
 | `pip install "vmex[freeb]"` | `virtual-casing-jax>=0.0.17` | the virtual-casing exterior field of the plasma (`VmecExtender`) |
-| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | effective ripple `ε_eff` from a WOUT or Boozer spectrum (`vmex.epsilon_effective_from_wout`), the `--plot` ripple panel and `vmex --neoclassical` |
+| `pip install "vmex[neoclassical]"` | `neo-jax>=1.1.1`, `dkx>=2.14.0` | the NEO_JAX transport screen (`vmex.core.neoclassical.screen_transport`) and `vmex --neoclassical`; the differentiable effective ripple `vmex.epsilon_effective_3_2_from_state` needs no extra |
 | `pip install "vmex[turbulence]"` | `gkx>=2.6.0` (with `jax>=0.10.1`) | gyrokinetic turbulence-proxy objectives (`vmex.core.turbulence`) and `vmex --turbulence` |
 | `pip install "vmex[alfven]"` | `alfvex>=1.2.0`, `matplotlib` | shear-Alfven continuum gaps and a gap eigenmode with `vmex --alfven` |
 | `pip install "vmex[optimizers]"` | `jaxopt`, `optax` | the JAXopt and Optax optimization drivers |
@@ -681,7 +681,7 @@ python examples/take_fixed_boundary_gradients.py
 | ESSOS coils and a free-boundary beta scan | `python examples/free_boundary_essos_coils.py` | `vmex[coils]` |
 | Free boundary from an MGRID table | `python examples/free_boundary_mgrid.py` | core; first `python tools/fetch_assets.py --bundle reference-nc` |
 | Field lines outside a finite-beta plasma | `python examples/vmex_fieldline_tracing_finite_beta.py` | `vmex[coils,freeb]` |
-| Effective ripple | `python examples/epsilon_effective.py` | `vmex[neoclassical]` |
+| Effective ripple | `python examples/epsilon_effective.py` | core |
 | Independent-case ensembles | `python examples/parallel_ensemble_scan.py` | core |
 | Open mirrors | `mirror/mirror_fixed_boundary_nonaxisymmetric.py`, `mirror/mirror_free_boundary_beta_scan.py`, `mirror/mirror_exterior_field.py` | core; the beta scan needs `vmex[coils]`; the exterior field needs a `virtual-casing-jax` with `virtual_casing_jax.mirror` |
 | Research force-balance polishing | `python examples/force_balance_polishing.py` | core |

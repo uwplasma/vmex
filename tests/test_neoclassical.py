@@ -1,10 +1,8 @@
-"""Thin VMEX-to-NEO_JAX effective-ripple adapter checks."""
+"""Effective ripple: bounce-integral value, anchors, cross-code reference and gradients; NEO screen adapter."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -102,183 +100,156 @@ def test_transport_screen_rejects_an_invalid_surface_instead_of_a_partial_profil
     assert calls["runs"] == calls["neo_calls"] == 1
 
 
-def test_epsilon_effective_boozer_adapter_preserves_surface_labels(monkeypatch):
-    values = np.array([1.0e-4, 2.0e-4])
-    calls = {}
-
-    def run_neo(booz, **kwargs):
-        calls.update(kwargs)
-        return SimpleNamespace(eps_eff=values)
-
-    monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (lambda: None, run_neo))
-    s, actual = neoclassical.epsilon_effective_from_boozer(
-        {"s_b": np.array([0.25, 0.75])}, config=object())
-    np.testing.assert_allclose(s, [0.25, 0.75])
-    np.testing.assert_allclose(actual, values)
-    assert calls == {
-        "config": calls["config"], "use_jax": True, "progress": False,
-        "jax_surface_scan": True}
+NFP = 2
 
 
-def test_epsilon_effective_reads_both_neo_result_and_surface_conventions(monkeypatch):
-    """NEO_JAX names the profile ``eps_eff`` or ``epsilon_effective``.
+def _torus(modes, iota=0.41, current=0.0, r=0.2, R0=5.0):
+    """Large-aspect-ratio Boozer surface: |B| = 1 + sum a cos(m theta - n phi); circular section."""
+    xm = np.array([0, 1] + [m for m, _, _ in modes], float)
+    xn = np.array([0, 0] + [n for _, n, _ in modes], float)
+    b, rm, zs = np.zeros(xm.size), np.zeros(xm.size), np.zeros(xm.size)
+    b[0], rm[0], rm[1], zs[1] = 1.0, R0, r, r
+    b[2:] = [a for _, _, a in modes]
+    return dict(nfp_b=NFP, ixm_b=xm, ixn_b=xn, iota_b=np.array([iota]), buco_b=np.array([current]),
+                bvco_b=np.array([R0]), rmnc_b=rm[None], zmns_b=zs[None], pmns_b=0 * zs[None],
+                bmnc_b=b[None], s_b=np.array([0.5]))
 
-    ``BoozerData`` carries its own surface labels in ``es``; a mapping without
-    ``s_b`` has none, and the adapter then falls back to surface indices so a
-    plot never mislabels the radial axis.
+
+def _eps(booz, **budget):
+    return float(neoclassical.epsilon_effective_3_2_from_boozer(booz, **budget)[1][0])
+
+
+def test_quasi_symmetric_fields_have_no_ripple_and_a_perturbation_scales_quadratically():
+    """A single helicity (tokamak-like QA or QH, with a net current) gives exactly zero.
+
+    With ``B = B(m theta - n phi)`` the geodesic integral ``I_1`` is the integral
+    of an exact derivative between bounce points, so ``epsilon_eff`` vanishes
+    (Nemov et al. 1999); a symmetry-breaking perturbation of relative size
+    ``lam`` then gives ``epsilon_eff^(3/2) ~ lam^2``.
     """
-    values = np.array([3.0e-5, 4.0e-5])
-    monkeypatch.setattr(
-        neoclassical, "_neo_imports",
-        lambda: (lambda: None,
-                 lambda booz, **_kwargs: SimpleNamespace(
-                     epsilon_effective=values)))
-    surfaces, actual = neoclassical.epsilon_effective_from_boozer(
-        SimpleNamespace(es=np.array([0.1, 0.9])))
-    np.testing.assert_allclose(surfaces, [0.1, 0.9])
-    np.testing.assert_allclose(actual, values)
-
-    surfaces, _ = neoclassical.epsilon_effective_from_boozer({"bmnc_b": None})
-    np.testing.assert_allclose(surfaces, [0.0, 1.0])
+    base = _eps(_torus([(1, 0, -0.1), (1, NFP, -0.02)]))
+    for modes, current in (([(1, 0, -0.1)], 0.0), ([(1, NFP, -0.1)], 0.3)):
+        assert _eps(_torus(modes, current=current)) < 1e-9 * base
+    values = [_eps(_torus([(1, 0, -0.1), (1, NFP, -0.005 * lam)])) / lam**2 for lam in (1, 2)]
+    np.testing.assert_allclose(values[1], values[0], rtol=0.05)
 
 
-def test_epsilon_effective_default_is_library_safe():
-    """A diagnostic call must not clear process-wide JAX caches by default.
+def test_value_is_invariant_to_angle_shifts_and_field_scale():
+    """Shifting the Boozer angles (sine partners appear) or scaling ``B`` leaves the ripple unchanged."""
+    booz = _torus([(1, 0, -0.1), (1, NFP, -0.03), (2, NFP, 0.01)], current=0.2)
+    reference = _eps(booz)
+    c, d = 0.7, 0.4
+    delta = booz["ixm_b"] * c - booz["ixn_b"] * d
+    shifted = dict(booz)
+    for cos_key, sin_key in (("bmnc_b", "bmns_b"), ("rmnc_b", "rmns_b"), ("zmnc_b", "zmns_b"), ("pmnc_b", "pmns_b")):
+        fc, fs = booz.get(cos_key, 0 * booz["bmnc_b"]), booz.get(sin_key, 0 * booz["bmnc_b"])
+        shifted[cos_key] = fc * np.cos(delta) + fs * np.sin(delta)
+        shifted[sin_key] = fs * np.cos(delta) - fc * np.sin(delta)
+    np.testing.assert_allclose(_eps(shifted), reference, rtol=3e-3)
+    scaled = dict(booz, bmnc_b=2.5 * booz["bmnc_b"], bvco_b=2.5 * booz["bvco_b"], buco_b=2.5 * booz["buco_b"])
+    np.testing.assert_allclose(_eps(scaled), reference, rtol=1e-6)
 
-    Cache release is memory *policy* and belongs to the caller (the CLI does
-    it after all requested diagnostics); a library default of ``True`` would
-    silently discard every warm executable of the surrounding program.
+
+def test_matches_converged_neo_on_the_qi_fixture_and_converges_in_the_budget():
+    """Cross-code number and convergence on the nfp = 4 QI summary spectrum (iota ~ -1.3).
+
+    The NEO_JAX values (``theta_n = phi_n = 128``, 96 particles, 80 steps per
+    period, ``acc_req = 1e-3``) move by < 0.3 % against a ``theta_n = 64``
+    run; the default budget agrees with them to 2 %, a 3x larger budget to 0.3 %.
     """
-    import inspect
-
-    signature = inspect.signature(neoclassical.epsilon_effective_from_wout)
-    assert signature.parameters["clear_jax_caches"].default is False
-
-
-def test_diagnostic_config_is_the_bounded_summary_resolution(monkeypatch):
-    """Summary figures ask NEO for a radial trend, not a transport number.
-
-    The bounded settings (Nemov PoP 6, 4622 (1999) integrates along field
-    lines until ``acc_req`` is met) resolve the summary Boozer spectrum
-    without aliasing; publication numbers pass their own ``NeoConfig``.
-    """
-    monkeypatch.setattr(
-        neoclassical, "_neo_imports", lambda: (SimpleNamespace, None))
-    config = neoclassical.diagnostic_neo_config()
-    assert (config.theta_n, config.phi_n, config.npart) == (32, 32, 24)
-    assert (config.nstep_per, config.nstep_min, config.nstep_max) == (20, 200, 500)
-    assert config.acc_req == 0.02
-def test_diagnostic_config_matches_converged_neo_on_the_qi_deck():
-    """The ``--plot`` resolution reproduces converged NEO without aliasing dips.
-
-    The fixture is the summary Boozer transform (``mboz=16, nboz=12``) of the
-    solved ``examples/data/input.nfp4_QI_finite_beta`` deck on s = 0.43, 0.49,
-    0.55.  A 16 x 16 NEO spline grid aliases its m = 13-15 harmonics and gave
-    5.9e-7 and 1.7e-9 on the outer surfaces of this trio.  The reference is
-    NEO_JAX's default ``NeoConfig``, which moves by less than 5% when any
-    resolution control is doubled.
-    """
-    pytest.importorskip("neo_jax")
-    with np.load(Path(__file__).parent / "data" / "boozer_nfp4_QI_finite_beta.npz") as data:
+    with np.load(DATA_DIR.parent.parent / "tests" / "data" / "boozer_nfp4_QI_finite_beta.npz") as data:
         booz = {key: data[key] for key in data.files}
-    s, values = neoclassical.epsilon_effective_from_boozer(
-        booz, config=neoclassical.diagnostic_neo_config())
+    booz["mode_first"] = True
+    s, values = neoclassical.epsilon_effective_3_2_from_boozer(booz)
     np.testing.assert_allclose(s, [0.43, 0.49, 0.55], rtol=0, atol=1e-12)
-    np.testing.assert_allclose(values, [5.239e-4, 4.838e-4, 4.557e-4], rtol=0.05)
+    np.testing.assert_allclose(values, [5.2224e-4, 4.7922e-4, 4.5097e-4], rtol=0.03)
+    one = {**booz, **{k: np.asarray(booz[k])[:, 1:2] for k in ("rmnc_b", "zmns_b", "pmns_b", "bmnc_b")},
+           **{k: np.asarray(booz[k])[1:2] for k in ("iota_b", "buco_b", "bvco_b", "s_b")}}
+    fine = _eps(one, nalpha=48, nturn=6, next=6, nper=48, nq=8, nquad=64)
+    np.testing.assert_allclose(fine, 4.7922e-4, rtol=3e-3)
 
 
-@pytest.mark.parametrize("lasym", [False, True])
-def test_epsilon_effective_from_wout_snaps_surfaces_and_negates_the_nu_table(
-    monkeypatch, lasym,
-):
-    """The in-memory adapter is a pure relabelling of a booz_xform run.
+def test_gradient_forward_reverse_and_finite_difference_agree():
+    """``jvp``, ``grad`` and central differences agree for the spectrum, ``iota`` and the current."""
+    import jax
 
-    NEO's Boozer toroidal-angle table ``pmns_b`` is booz_xform's ``numns_b``
-    with the opposite sign (NEO_JAX ``BoozerData``; booz_xform stores
-    ``nu = phi_B - phi``), and requested surfaces are snapped to the Boozer
-    surfaces that were actually transformed rather than interpolated.
+    booz = _torus([(1, 0, -0.1), (1, NFP, -0.03), (2, NFP, 0.01)], current=0.2)
+    amp = jax.numpy.asarray(booz["bmnc_b"][0])
+
+    def f(a, iota, current):
+        b = dict(booz, bmnc_b=a[None], iota_b=iota[None], buco_b=current[None])
+        return neoclassical.epsilon_effective_3_2_from_boozer(b, nalpha=16, nquad=32)[1][0]
+
+    x0 = (amp, jax.numpy.asarray(0.41), jax.numpy.asarray(0.2))
+    grads = jax.jit(jax.grad(f, argnums=(0, 1, 2)))(*x0)
+    direction = (jax.numpy.asarray(np.random.default_rng(1).normal(size=amp.size)) * 1e-2, 1.0, 1.0)
+    forward = jax.jvp(f, x0, direction)[1]
+    reverse = sum(float(np.vdot(g, t)) for g, t in zip(grads, direction))
+    np.testing.assert_allclose(forward, reverse, rtol=1e-8)
+    h = 1e-4
+    plus = f(*[x + h * t for x, t in zip(x0, direction)])
+    minus = f(*[x - h * t for x, t in zip(x0, direction)])
+    np.testing.assert_allclose((plus - minus) / (2 * h), reverse, rtol=5e-3)
+
+
+def test_half_mesh_bracketing_interpolates_linearly_in_s():
+    s_half = (np.arange(10) + 0.5) / 10
+    targets = [0.3, 0.35, 0.01, 0.99]
+    rows, lo, hi, w = neoclassical._bracket(s_half, targets)
+    values = np.arange(rows.size, dtype=float) ** 2
+    np.testing.assert_allclose(neoclassical._interpolate(values, lo, hi, w),
+                               np.interp(targets, s_half[rows], values))
+
+
+@pytest.fixture(scope="module")
+def qa_equilibrium():
+    import vmex as vj
+    from vmex import optimize as opt
+
+    return opt.solve_equilibrium(vj.VmecInput.from_file(DATA_DIR / "input.LandremanPaul2021_QA_lowres"))
+
+
+def test_state_and_wout_routes_agree_and_a_good_qa_has_a_tiny_ripple(qa_equilibrium):
+    """Both Boozer routes give ~1e-8 for this QA (a NEO default run returns noise there)."""
+    eq, surfaces = qa_equilibrium, [0.3, 0.6]
+    from_state = np.asarray(neoclassical.epsilon_effective_3_2_from_state(eq.state, eq.runtime, surfaces))
+    from_wout = np.asarray(neoclassical.epsilon_effective_3_2_from_wout(eq.wout, surfaces))
+    assert np.all((from_state > 1e-9) & (from_state < 1e-7))
+    np.testing.assert_allclose(from_state, from_wout, rtol=0.1)
+
+
+@pytest.mark.full  # ~2 min: warm-started re-solves for central differences
+def test_boundary_gradient_matches_finite_differences_after_a_tight_resolve(qa_equilibrium):
+    """Reverse mode through the implicit solve vs central differences of re-solved equilibria.
+
+    The objective is the sum of ``epsilon_eff^(3/2)`` over three surfaces of the
+    cmp61 nfp = 2 rotating-ellipse-like start (``QA`` deck with a perturbed boundary).
     """
-    import booz_xform_jax
+    import jax
+    import jax.numpy as jnp
 
-    numns = np.array([[0.1, -0.2], [0.3, -0.4]])
-    captured = {}
+    from vmex import optimize as opt
 
-    class FakeBoozXform:
-        asym = lasym
-        rmns_b = zmnc_b = bmns_b = np.full((2, 2), .03)
-        numnc_b = numns
-        s_in = np.linspace(0.05, 0.95, 10)
-        nfp = 3
-        xm_b, xn_b = np.array([0, 1]), np.array([0, 3])
-        iota = np.linspace(0.4, 0.5, 10)
-        Boozer_I, Boozer_G = np.array([0.0, 0.0]), np.array([2.0, 2.0])
-        rmnc_b, zmns_b = np.ones((2, 2)), np.zeros((2, 2))
-        numns_b, bmnc_b = numns, np.array([[1.0, 0.05], [1.0, 0.06]])
-        s_b = np.array([0.25, 0.75])
+    inp = qa_equilibrium.input if hasattr(qa_equilibrium, "input") else None
+    if inp is None:
+        pytest.skip("equilibrium does not expose its input")
+    surfaces = (0.25, 0.5, 0.75)
+    loss = lambda st, rt: jnp.sum(neoclassical.epsilon_effective_3_2_from_state(st, rt, surfaces))  # noqa: E731
+    problem = opt.VmecProblem.from_loss(inp, loss, max_mode=1, use_ess=True, restart_from=qa_equilibrium)
+    sub = problem.subproblem(max_mode=1, x=problem.x0)
+    x0, scales = np.asarray(sub.x0), np.asarray(sub.scales)
+    _, grad = sub.value_and_grad(x0)
 
-        def __init__(self, **kwargs):
-            captured["init"] = kwargs
+    def value(x):
+        eq = opt.solve_equilibrium(problem.input_from_x(sub.embed(x)), initial_state=qa_equilibrium.state,
+                                   forward_ftol=1e-13, forward_max_iterations=20000)
+        return float(jax.jit(loss)(eq.state, eq.runtime))
 
-        def read_wout_data(self, wout):
-            captured["wout"] = wout
-
-        def run(self):
-            captured["surfs"] = list(self.compute_surfs)
-
-    def run_neo(booz, **_kwargs):
-        captured["booz"] = booz
-        return SimpleNamespace(eps_eff=np.array([1.0e-4, 2.0e-4]))
-
-    monkeypatch.setattr(booz_xform_jax, "Booz_xform", FakeBoozXform)
-    monkeypatch.setattr(neoclassical, "_neo_imports", lambda: (dict, run_neo))
-
-    wout = SimpleNamespace(lasym=lasym)
-    s, values = neoclassical.epsilon_effective_from_wout(
-        wout, surfaces=(0.24, 0.26, 0.77), mboz=8, nboz=6)
-
-    assert captured["init"] == {"verbose": 0, "mboz": 8, "nboz": 6}
-    assert captured["wout"] is wout
-    # 0.24 and 0.26 snap to the same transformed surface: three requests, two runs
-    assert captured["surfs"] == [2, 7]
-    booz = captured["booz"]
-    assert booz["ns_b"] == 2 and booz["nfp_b"] == 3
-    assert booz["mode_first"] is True and booz["asym"] is lasym
-    if lasym:
-        np.testing.assert_allclose(booz["pmnc_b"], -numns)
-        for key in ("rmns_b", "zmnc_b", "bmns_b"):
-            np.testing.assert_allclose(booz[key], .03)
-    np.testing.assert_allclose(booz["pmns_b"], -numns)
-    np.testing.assert_allclose(booz["iota_b"], FakeBoozXform.iota[[2, 7]])
-    np.testing.assert_allclose(s, FakeBoozXform.s_b)
-    np.testing.assert_allclose(values, [1e-4, 2e-4])
-
-
-@pytest.mark.full
-def test_epsilon_effective_matches_neo_reference():
-    """The in-memory adapter retains the summary QA profile.
-
-    These values are within 1.4% of NEO_JAX's default ``NeoConfig`` on the
-    same surfaces; the earlier 16 x 16 summary grid pinned values 7-20x larger.
-    """
-    pytest.importorskip("neo_jax")
-    script = f"""
-import json
-import vmex as vj
-from vmex import optimize as opt
-from vmex.core import neoclassical
-equilibrium = opt.solve_equilibrium(vj.VmecInput.from_file({str(DATA_DIR / 'input.LandremanPaul2021_QA_lowres')!r}))
-s, values = neoclassical.epsilon_effective_from_wout(
-    equilibrium.wout, surfaces=[0.2, 0.5, 0.8],
-    config=neoclassical.diagnostic_neo_config())
-print(json.dumps([list(map(float, s)), list(map(float, values))]))
-"""
-    completed = subprocess.run(
-        [sys.executable, "-c", script], check=True, capture_output=True,
-        text=True, timeout=90)
-    s, values = json.loads(completed.stdout.splitlines()[-1])
-    np.testing.assert_allclose(s, [0.19387755, 0.5, 0.80612245], rtol=0, atol=1e-7)
-    np.testing.assert_allclose(
-        values, [1.90173919e-8, 1.09848947e-8, 1.84568599e-8], rtol=5e-5)
+    k = int(np.argmax(np.abs(np.asarray(grad) * scales)))
+    e = np.zeros_like(x0)
+    e[k] = 1e-3 * scales[k]
+    fd = (value(x0 + e) - value(x0 - e)) / 2e-3
+    np.testing.assert_allclose(fd, float(grad[k]) * scales[k], rtol=0.05)
 
 
 def test_neo_summary_subset_keeps_all_sine_partners():
@@ -295,50 +266,6 @@ def test_neo_summary_subset_keeps_all_sine_partners():
     assert subset["ns_b"] == 3 and subset["mode_first"] and subset["asym"]
     for key in keys:
         np.testing.assert_array_equal(subset[key], data[key][:, [0, 2, 4]])
-
-
-# Under the stellarator reflection (theta, zeta, Z) -> (-theta, -zeta, -Z) the
-# sine partner of a cosine-led table and the cosine partner of a sine-led one
-# change sign; the mirrored equilibrium has the same effective ripple.
-_MIRROR = ("rmns", "zmnc", "lmnc", "bmns", "bsubumns", "bsubvmns")
-
-
-@pytest.mark.full  # nightly: two solves, five NEO evaluations
-def test_epsilon_effective_lasym_identities():
-    """End to end through booz_xform_jax and NEO_JAX with every sine partner.
-
-    NEO's field-line integration at the diagnostic accuracy turns round-off in
-    the Boozer tables into ~1 % changes, so identities hold to 3 %; the
-    asymmetry itself moves the ripple 45x (measured), far outside that.
-    """
-    import dataclasses
-    import re
-
-    neo_jax = pytest.importorskip("neo_jax")
-    if "bmns" not in neo_jax.BoozerData.__dataclass_fields__:
-        pytest.skip("NEO_JAX without sine Boozer spectra")
-    import vmex as vj
-    from vmex import optimize as opt
-
-    def ripple(wout):
-        return neoclassical.epsilon_effective_from_wout(
-            wout, surfaces=[0.25, 0.5, 0.8], config=neoclassical.diagnostic_neo_config())[1]
-
-    text = (DATA_DIR / "input.LandremanPaul2021_QA_lowres").read_text()
-    symmetric = opt.solve_equilibrium(vj.VmecInput.from_indata_text(text), verbose=False).wout
-    padded = dataclasses.replace(symmetric, lasym=True, **{
-        name: 0 * np.asarray(getattr(symmetric, partner)) for name, partner in zip(
-            _MIRROR, ("rmnc", "zmns", "lmns", "bmnc", "bsubumnc", "bsubvmnc"))})
-    np.testing.assert_allclose(ripple(padded), ripple(symmetric), rtol=3e-2)
-
-    text = re.sub(r"LASYM\s*=\s*\S+", "", text, flags=re.I).replace(
-        "&INDATA", "&INDATA\n  LASYM = T\n  RBS(1,1) = 0.02\n  ZBC(1,1) = 0.02\n  RBS(0,1) = 0.01", 1)
-    asymmetric = opt.solve_equilibrium(vj.VmecInput.from_indata_text(text), verbose=False).wout
-    mirrored = dataclasses.replace(asymmetric, **{
-        name: -np.asarray(getattr(asymmetric, name)) for name in _MIRROR})
-    reference = ripple(asymmetric)
-    np.testing.assert_allclose(ripple(mirrored), reference, rtol=3e-2)
-    assert np.all(reference > 10 * ripple(dataclasses.replace(asymmetric, lasym=False)))
 
 
 @pytest.mark.parametrize("trial, expected", [
