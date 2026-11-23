@@ -1028,10 +1028,10 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - 0.98, 12 % (hard value)
      - 0.5 s against 1.5 s (default)
    * - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state`
-     - default budget (16 lines, 4 + 4 transits, 32 nodes per period)
-     - every budget parameter doubled
-     - 1.00, 0.1 %
-     - 5 s against 15 s (reverse mode, 3 surfaces)
+     - default budget (24 lines, 4 + 4 transits, 32 nodes per period, 48 per well)
+     - 48 lines, 6 + 6 transits, 48 nodes per period, 64 per well
+     - 0.5 % largest error over 18 surfaces of six boundaries
+     - 3.8 s value and 6 s value plus gradient (3 surfaces, 8 dofs, nfp = 2)
 
 The constructed-QI residual is limited by its field-line sampling, not by the
 Boozer resolution (``mboz`` 6 to 24 change it by less than 0.5 %); the sampling
