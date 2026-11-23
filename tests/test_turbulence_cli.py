@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from vmex._compat import load_toml
 from vmex.core import gk_run
 from vmex.core.cli import main
 
@@ -34,13 +31,13 @@ def test_ky_scan_points_sit_on_the_gkx_grid(tmp_path):
     ky = gk_run.ky_grid(cfg)
     assert ky[0] == pytest.approx(0.1) and ky[-1] == pytest.approx(1.0)
     np.testing.assert_allclose(ky / 0.1, np.rint(ky / 0.1), atol=1e-12)
-    deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
+    deck = load_toml(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
                                            nonlinear=False).read_text())
     assert deck["grid"]["y0"] == pytest.approx(10.0)
     assert (deck["grid"]["Ny"] - 1) // 3 >= 10  # highest scan ky is a resolved mode
     assert deck["geometry"]["torflux"] == 0.5 and deck["physics"]["adiabatic_electrons"] is True
     kinetic = dataclasses.replace(cfg, kinetic_electrons=True)
-    deck = tomllib.loads(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", kinetic,
+    deck = load_toml(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", kinetic,
                                            nonlinear=True).read_text())
     assert [s["name"] for s in deck["species"]] == ["ion", "electron"]
     assert deck["physics"]["nonlinear"] is True and deck["physics"]["adiabatic_electrons"] is False
@@ -52,11 +49,11 @@ def test_defaults_deck_and_settings_block(tmp_path):
     assert (cfg.nx, cfg.ny, cfg.nz, cfg.npol, cfg.nl, cfg.nm, cfg.t_max, cfg.t_sat_min) == (
         96, 96, 24, 3.0, 4, 8, 800.0, 300.0)
     out = tmp_path / "x.out.nc"
-    deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
+    deck = load_toml(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
                                            nonlinear=True).read_text())
     assert deck["grid"]["Nz"] == deck["grid"]["ntheta"] == 72 and deck["geometry"]["npol"] == 3.0
     assert deck["grid"]["boundary"] == "fix aspect" and deck["time"]["saturation_t_min"] == 300.0
-    old = tomllib.loads(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
+    old = load_toml(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
                                           saturation=False).read_text())
     assert "saturation_t_min" not in old["time"]
     text = "\n".join(gk_run.settings_block(Path("wout_x.nc"), cfg, backend="GKX test, cpu", out=out, geom=GEOM,
@@ -73,7 +70,7 @@ def test_kinetic_electron_deck_follows_gkx_example(tmp_path):
     cfg = gk_run.TurbulenceSettings(kinetic_electrons=True)
     assert (cfg.nx, cfg.ny, cfg.nz) == (16, 16, 16)
     for nonlinear in (False, True):
-        deck = tomllib.loads(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", cfg,
+        deck = load_toml(gk_run.write_deck(tmp_path / "k.toml", tmp_path / "wout_x.nc", cfg,
                                                nonlinear=nonlinear).read_text())
         assert ("cfl" in deck["time"]) is (not nonlinear)  # linear time route: 0.2 of the CFL step
         ion, ele = deck["species"]

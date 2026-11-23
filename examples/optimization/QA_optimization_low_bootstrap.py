@@ -15,6 +15,10 @@ much higher cost per Jacobian. The Redl mismatch row stays, so the current
 profile is still fitted to Redl.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks; dkx does not install on Python 3.10")
+
 import os
 from dataclasses import replace
 from pathlib import Path

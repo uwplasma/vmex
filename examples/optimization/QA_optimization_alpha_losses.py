@@ -28,6 +28,10 @@ independent check, so at this budget quasi-axisymmetry does the work and the
 alpha stage only refines within the noise. Needs ``pip install "vmex[coils]"``.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import os
 import time
 from dataclasses import replace

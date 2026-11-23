@@ -1090,6 +1090,7 @@ def test_uncertified_jacobian_falls_back_or_raises_with_evidence():
     )
 
 
+@pytest.mark.skipif(jax.__version_info__ < (0, 7), reason="JAX 0.6 solves every implicit Jacobian in reverse mode")
 def test_least_squares_implicit_jac_solver_block(monkeypatch):
     """The R25.2 block-tridiagonal Jacobian (``jac_solver="block"``: colored
     jvp probes, one :func:`solvax.block_thomas_factor`, GMRES-certified

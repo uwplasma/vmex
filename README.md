@@ -47,7 +47,7 @@ end to end and writes its figures to `./vmex_test/`.
 
 Python 3.10, 3.11, 3.12 and 3.13 are tested. JAX 0.11 needs Python 3.12 or newer, JAX 0.7 and
 later need 3.11, and SciPy 1.16 needs 3.11, so an older interpreter resolves an older JAX and
-SciPy; 3.12 or newer is recommended. The `coils`, `neoclassical`, `turbulence` and `all` extras need Python 3.11 or newer.
+SciPy; 3.12 or newer is recommended. ESSOS, GKX and DKX need Python 3.11 or newer, so on 3.10 the `coils` and `turbulence` extras install nothing and `neoclassical` and `all` skip them; the commands and examples that use them say so.
 
 ### Optional packages for the full capabilities
 

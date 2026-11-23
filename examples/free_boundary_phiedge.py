@@ -14,6 +14,10 @@ tabulated once into an in-memory ``MgridField``; the plasma is a vacuum.
 The figure shows each iterate: its metric against PHIEDGE, and its LCFS.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import os
 import time
 from dataclasses import replace

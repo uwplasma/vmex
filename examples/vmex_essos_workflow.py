@@ -34,6 +34,10 @@ Runtime: 2--4 min for the full script (two NS ladders), 1--2 min under
 ``VMEX_EXAMPLES_CI=1`` (single coarse grid, no figure).
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import dataclasses
 import os
 from pathlib import Path

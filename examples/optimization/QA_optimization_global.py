@@ -11,6 +11,10 @@ local one starts, so the numbers worth comparing are the basin costs printed
 per hop and the polished cost at the end.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

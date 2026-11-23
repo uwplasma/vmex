@@ -17,6 +17,10 @@ Outputs are named ``QA_DMerc_*`` so they do not overwrite the ones
 ``QA_optimization.py`` writes with the same working directory.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "SciPy 1.16 least_squares callbacks")
+
 import os
 from dataclasses import replace
 from pathlib import Path

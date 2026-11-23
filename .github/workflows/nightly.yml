@@ -58,15 +58,19 @@ jobs:
           retention-days: 7
 
   example-python-matrix:
-    # The oldest and newest supported Pythons run the canonical optimization
-    # example; the PR lanes run Python 3.12 only.
-    name: QA optimization example (Python ${{ matrix.python }})
+    # The oldest and newest supported Pythons each run an example; the PR
+    # lanes run Python 3.12 only.  Python 3.10 cannot run the optimization
+    # examples (SciPy 1.16 callbacks), so it runs the TOML example; the CI
+    # workflow's nightly parity lanes cover the rest of the suite on 3.10.
+    name: Example (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.13"]
+        include:
+          - {python: "3.10", test: "tests/test_examples.py::test_run_from_toml"}
+          - {python: "3.13", test: "tests/test_examples.py::test_qs_optimization_examples[QA]"}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -75,11 +79,11 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install . pytest
-      - name: Run the QA optimization example
+      - name: Run the example
         env:
           JAX_PLATFORMS: cpu
           MPLBACKEND: Agg
-        run: pytest -q -o addopts= "tests/test_examples.py::test_qs_optimization_examples[QA]"
+        run: pytest -q -o addopts= "${{ matrix.test }}"
 
   minimum-integrations:
     # floors: every declared floor pinned exactly -- latest-version jobs cannot

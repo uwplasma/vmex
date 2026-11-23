@@ -17,6 +17,10 @@ Grad-Shafranov solution of the same coil set (a plasma bounded by a smooth flux 
 wall), so the solved LCFS lies on that solution's flux surface.  The static equilibrium is not claimed vertically
 stable."""
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 import os
 
 import jax

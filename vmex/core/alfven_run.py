@@ -10,16 +10,12 @@ FAX enables 64-bit floats when imported, so it is imported only here, after the 
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 from netCDF4 import Dataset
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # Python 3.10
-    import tomli as tomllib
+from .._compat import load_toml
 
 __all__ = ["run_alfven"]
 
@@ -35,7 +31,7 @@ def run_alfven(wout_path, outdir, *, config=None, density=None, ion_mass=None, n
     require_optional("alfvex", "vmex --alfven")
     import fax  # after the solve: importing FAX enables x64
 
-    raw = tomllib.loads(Path(config).read_text()) if config else {}
+    raw = load_toml(Path(config).read_text()) if config else {}
     case = fax.load(raw)  # validates the schema, rejecting unknown keys
     pick = lambda table, key, default: case[table][key] if key in raw.get(table, {}) else default  # noqa: E731
     mboz, nboz = pick("geometry", "mboz", 12), pick("geometry", "nboz", 12)

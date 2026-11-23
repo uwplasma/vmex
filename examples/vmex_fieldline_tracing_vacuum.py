@@ -5,6 +5,10 @@ The commented ``Coils.from_simsopt`` line accepts a SIMSOPT coil JSON without
 changing the VMEX exterior-field or ESSOS tracing workflow.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 from dataclasses import replace
 import os
 from pathlib import Path

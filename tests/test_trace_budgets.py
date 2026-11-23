@@ -528,6 +528,7 @@ print("REPORT:", json.dumps(report))
 """
 
 
+@pytest.mark.skipif(jax.__version_info__ < (0, 7), reason="JAX 0.6 compiles each eager operation as its own program")
 def test_jax_lanes_reuse_host_executables_and_full_jit_reference_agrees():
     """One cold subprocess (~1-2 min: a host derivative and one full-jit compile).
 

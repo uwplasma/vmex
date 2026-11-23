@@ -1,0 +1,21 @@
+# Circular tokamak, R0 = 6, a = 2, one field period, zero pressure.
+# The keys are those of the structured JSON deck; a boundary harmonic is a
+# {m, n, value} table.
+nfp = 1
+mpol = 8
+ntor = 0
+delt = 0.9
+tcon0 = 2.0
+ns_array = [10, 17]
+ftol_array = [1.0e-14, 1.0e-14]
+niter_array = [500, 1000]
+nstep = 200
+phiedge = 67.86
+ncurr = 0
+curtor = 1.0
+am = [0.0]
+ai = [0.9, -0.65]
+raxis_c = [0.0]
+zaxis_s = [0.0]
+rbc = [{m = 0, n = 0, value = 6.0}, {m = 1, n = 0, value = 2.0}]
+zbs = [{m = 1, n = 0, value = 2.0}]

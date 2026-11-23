@@ -18,6 +18,10 @@ Outside the CI smoke run, the phi=0 Poincare panel pair is
 also written to the working directory as lossless WebP.
 """
 
+from vmex._compat import require_python
+
+require_python((3, 11), "essos does not install on Python 3.10")
+
 from dataclasses import replace
 import os
 from pathlib import Path
