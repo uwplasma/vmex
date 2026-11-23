@@ -888,12 +888,13 @@ that is differentiable in forward and reverse mode through the implicit solve:
    # from a file: vj.epsilon_effective_3_2_from_wout(wout, surfaces=[...])
 
 The value is interpolated linearly in ``s`` between the two half-mesh rows
-that bracket each surface (never snapped to the nearest row).  Budget keywords
-(``nalpha``, ``nturn``, ``next``, ``nper``, ``nq``, ``nquad``) are listed in
-:func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_boozer`; doubling
-any one changes the value by about 0.1 %, except ``nalpha`` below 16, which
-can be 5 to 12 % off.  Against NEO_JAX at a very fine resolution the value
-agrees to 0.04 to 0.3 % on non-quasi-symmetric configurations.  NEO's
+that bracket each surface (never snapped to the nearest row).  The resolution is a
+:class:`~vmex.core.neoclassical.RippleBudget`; the default is within 1 % of a
+budget three times larger on six boundaries and a QI spectrum, and fewer than
+16 field lines can be 5 to 12 % off.  Against NEO_JAX at a very fine resolution the value
+agrees to 0.04 to 0.3 % on non-quasi-symmetric configurations, and with Fortran
+xneo and with DESC at converged resolution to 0.2 to 3 % (DESC includes the pressure term of the
+geodesic curvature, so it is compared on vacuum fields only).  NEO's
 default-resolution values (``theta_n=32``) are limited by spline noise below
 :math:`\epsilon_{\mathrm{eff}}^{3/2}\sim10^{-5}`: a good QA, such as the
 ``LandremanPaul2021_QA_lowres`` deck, has :math:`\epsilon_{\mathrm{eff}}^{3/2}
@@ -1028,10 +1029,10 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - 0.98, 12 % (hard value)
      - 0.5 s against 1.5 s (default)
    * - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state`
-     - default budget (24 lines, 4 + 4 transits, 32 nodes per period, 48 per well)
-     - 48 lines, 6 + 6 transits, 48 nodes per period, 64 per well
-     - 0.5 % largest error over 18 surfaces of six boundaries
-     - 3.8 s value and 6 s value plus gradient (3 surfaces, 8 dofs, nfp = 2)
+     - default budget (16 lines, 3 + 3 transits, 16 nodes per period, 4 pitch nodes, 32 per well)
+     - 48 lines, 6 + 6 transits, 48 nodes per period, 8 pitch nodes, 64 per well
+     - 0.6 % largest error over 24 surfaces (six boundaries, a QI spectrum); gradient 1.3 % in norm
+     - 1.3 s value and 4.9 s value plus gradient (3 surfaces, nfp = 2, four cores)
 
 The constructed-QI residual is limited by its field-line sampling, not by the
 Boozer resolution (``mboz`` 6 to 24 change it by less than 0.5 %); the sampling

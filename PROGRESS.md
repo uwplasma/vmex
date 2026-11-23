@@ -1,0 +1,1 @@
+- budget chosen: RippleBudget defaults n_lines16 n_transits3 n_extension3 nodes_per_period16 n_pitch4 n_well32 (root iters 12): max err 0.6% over 24 surfaces, 1.14 s vs 2.77 s/surface; verifying gradient (gc3_*.log) and perf2_*.log

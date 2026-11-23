@@ -25,11 +25,11 @@ In Boozer coordinates :math:`\mathrm d\ell/B = (G+\iota I)\,\mathrm d\varphi/B^2
 with ``iota``, ``G``, ``I``; ``<|grad psi|>`` and ``V' = 4 pi^2 <sqrt(g)>`` follow
 from the Boozer ``R, Z`` and angle shift.
 
-Algorithm.  ``nalpha`` field lines :math:`\theta=\alpha+\iota\varphi` start the
-wells over ``nturn`` toroidal transits (a well belongs to the line whose window
+Algorithm.  ``n_lines`` field lines :math:`\theta=\alpha+\iota\varphi` start the
+wells over ``n_transits`` toroidal transits (a well belongs to the line whose window
 holds its first bounce point, so no well is clipped; each line is extended by
-``next`` transits to close it).  ``|B|`` along a line is a Hermite cubic on
-``nper`` nodes per field period, split at its stationary points into monotone
+``n_extension`` transits to close it).  ``|B|`` along a line is a Hermite cubic on
+``nodes_per_period`` nodes per field period, split at its stationary points into monotone
 pieces: bounce points and the critical values of ``|B|`` (where wells merge)
 are exact roots, and the ``b`` integral runs between the critical values of each
 line with a Gauss rule on analytic pieces.  Each well uses a Gauss rule in the
@@ -41,6 +41,7 @@ equilibrium, so forward and reverse mode agree with finite differences.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 import numpy as np
@@ -49,6 +50,7 @@ import jax
 import jax.numpy as jnp
 
 __all__ = [
+    "RippleBudget",
     "epsilon_effective_3_2_from_boozer",
     "epsilon_effective_3_2_from_state",
     "epsilon_effective_3_2_from_wout",
@@ -56,8 +58,31 @@ __all__ = [
     "transport_improves",
 ]
 
-#: Default budget (see :func:`epsilon_effective_3_2_from_boozer`).
-_BUDGET = dict(nalpha=24, nturn=4, next=4, nper=32, nq=6, nquad=48, nsurf=64)
+@dataclass(frozen=True)
+class RippleBudget:
+    """Resolution of the bounce integrals; the defaults hold 1% against a 3x larger budget.
+
+    ``n_lines`` field lines start the wells over ``n_transits`` toroidal transits of the
+    window and are extended by ``n_extension`` transits that close them;
+    ``nodes_per_period`` Hermite nodes per field period; ``n_pitch`` Gauss nodes per
+    interval between critical values of ``|B|``; ``n_well`` Gauss nodes per well;
+    ``n_surface`` points per direction for ``B_max``, ``<|grad psi|>`` and ``V'``.
+    ``max_wells`` (default ``2 nfp n_transits + 4``) caps the wells that start at one pitch
+    (more returns NaN); ``max_critical`` (default ``4 nfp (n_transits + n_extension)``) caps
+    the critical values per line, thinned evenly in rank beyond it. ``line_batch`` lines are
+    evaluated together (a speed against memory trade: 1.4x on rotating ellipses, 1.5x more memory).
+    """
+
+    n_lines: int = 16
+    n_transits: int = 3
+    n_extension: int = 3
+    nodes_per_period: int = 16
+    n_pitch: int = 4
+    n_well: int = 32
+    n_surface: int = 64
+    max_wells: int | None = None
+    max_critical: int | None = None
+    line_batch: int = 1
 
 
 def _neo_imports():
@@ -71,6 +96,9 @@ def _neo_imports():
             "the NEO screen requires NEO_JAX; install VMEX with "
             "`pip install vmex[neoclassical]`") from exc
     return NeoConfig, run_neo
+
+
+_ROOT_ITERS = 12
 
 
 def _gl(n, a=0.0, b=1.0):
@@ -131,7 +159,7 @@ def _root(c, b, lo, hi):
         inside = (tn > jnp.minimum(lo_, hi_)) & (tn < jnp.maximum(lo_, hi_))
         return (lo_, hi_, jnp.where(inside, tn, 0.5 * (lo_ + hi_))), None
 
-    t = jax.lax.stop_gradient(jax.lax.scan(step, (lo, hi, 0.5 * (lo + hi)), None, length=26)[0][2])
+    t = jax.lax.stop_gradient(jax.lax.scan(step, (lo, hi, 0.5 * (lo + hi)), None, length=_ROOT_ITERS)[0][2])
     q = _pder(c, t)
     return t - f(t) / jnp.where(jnp.abs(q) < 1e-14, 1e-14, q)
 
@@ -177,12 +205,14 @@ def _wells(cB, cQ, pcs, h, b, GI, nstart, ramp, nwell, nquad):
     return jnp.where(ok, win * I1**2 / jnp.where(ok, I2, 1.0), 0.0).sum(), down.sum() > nwell
 
 
-def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, nquad, nsurf, ramp=0.25, nwell=None, ncrit=None):
+def _surface(amp, xm, xn, iota, cur, G, nfp, bud, ramp=0.25):
     """``epsilon_eff^(3/2)`` of one Boozer surface; NaN if more wells start than fit in one pitch node."""
-    n = nfp * (nturn + next) * nper
+    nturn, nper, nquad, nsurf = bud.n_transits, bud.nodes_per_period, bud.n_well, bud.n_surface
+    n = nfp * (nturn + bud.n_extension) * nper
     nstart = nfp * nturn * nper
-    L, h = 2 * jnp.pi * nturn, 2 * jnp.pi * (nturn + next) / n
-    nwell, ncrit = nwell or 2 * nfp * nturn + 4, ncrit or 4 * nfp * (nturn + next)
+    L, h = 2 * jnp.pi * nturn, 2 * jnp.pi * (nturn + bud.n_extension) / n
+    nwell = bud.max_wells or 2 * nfp * nturn + 4
+    ncrit = bud.max_critical or 4 * nfp * (nturn + bud.n_extension)
     GI = G + iota * cur
     # surface quantities on a (theta, field period) grid
     th = jnp.arange(nsurf) * 2 * jnp.pi / nsurf
@@ -195,7 +225,7 @@ def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, n
     sqrtg = GI / B**2
     gradpsi, Vp = dS.mean() / sqrtg.mean(), 4 * jnp.pi**2 * sqrtg.mean()
     R0 = amp["R"][np.flatnonzero((xm == 0) & (xn == 0))[0]].real
-    pitch, wpitch = _gl(nq)
+    pitch, wpitch = _gl(bud.n_pitch)
     sg, dsg = pitch * pitch * (3 - 2 * pitch), 6 * pitch * (1 - pitch)   # nodes cluster at the interval ends
     phi = jnp.arange(n + 1) * h
 
@@ -223,13 +253,13 @@ def _surface(amp, xm, xn, iota, cur, G, nfp, *, nalpha, nturn, next, nper, nq, n
         val, over = jax.vmap(lambda b: _wells(cB, cQ, pcs, h, b, GI, nstart, ramp * L, nwell, nquad))(bq)
         return (wb * val / bq**3).sum() * 2 * jnp.pi / (L * (1 - ramp)), over.any()
 
-    alpha = (jnp.arange(nalpha) + 0.5) * 2 * jnp.pi / nalpha
-    S, over = jax.lax.map(jax.checkpoint(line), alpha)
+    alpha = (jnp.arange(bud.n_lines) + 0.5) * 2 * jnp.pi / bud.n_lines
+    S, over = jax.lax.map(jax.checkpoint(line), alpha, **({"batch_size": bud.line_batch} if bud.line_batch > 1 else {}))
     eps = (jnp.pi * R0)**2 * B.max()**2 / (4 * jnp.sqrt(2.0) * gradpsi**2 * Vp) * S.mean()
     return jnp.where(over.any(), jnp.nan, eps)
 
 
-def epsilon_effective_3_2_from_boozer(booz: Any, **budget):
+def epsilon_effective_3_2_from_boozer(booz: Any, budget: RippleBudget | None = None):
     r"""Return ``(s, epsilon_eff**(3/2))`` from Boozer-coordinate data (traceable).
 
     ``booz`` is a mapping with the NEO_JAX keys: ``nfp_b``, ``ixm_b``, ``ixn_b``
@@ -237,18 +267,11 @@ def epsilon_effective_3_2_from_boozer(booz: Any, **budget):
     ``rmnc_b``, ``zmns_b``, ``pmns_b`` (``phi - zeta_B``), ``bmnc_b``, ``s_b``,
     optionally the sine partners ``rmns_b``, ``zmnc_b``, ``pmnc_b``, ``bmns_b``
     of an asymmetric equilibrium and ``mode_first`` for ``(mode, surface)``
-    arrays.  Budget keywords (defaults in ``_BUDGET``): ``nalpha`` field lines,
-    ``nturn``/``next`` toroidal transits of the well-start window and of the
-    extension, ``nper`` nodes per field period, ``nq`` pitch nodes per interval
-    of critical values, ``nquad`` nodes per well, ``nsurf`` surface grid.  The
-    value changes by ~0.1% when ``nalpha``, ``nturn``, ``next``, ``nper``,
-    ``nq`` or ``nquad`` double; a surface with more wells starting at one pitch
-    than the capacity ``nwell`` (``2 nfp nturn + 4``, overridable) returns NaN.
-    ``ncrit`` (default ``4 nfp (nturn + next)``) bounds the critical values of
-    each line; a nearly flat ``|B|`` with more of them keeps ``ncrit`` spread
-    evenly in rank.
+    arrays.  ``budget`` is a :class:`RippleBudget`; the default is within 1% of a
+    3x larger one on the validation set (six boundaries and a QI spectrum).  A
+    surface that overflows ``max_wells`` returns NaN.
     """
-    kw = {**_BUDGET, **budget}
+    bud = budget or RippleBudget()
     t = (lambda a: jnp.asarray(a).T) if booz.get("mode_first") else jnp.asarray  # noqa: E731
     zero = lambda k, ref: t(booz[k]) if k in booz else 0 * ref  # noqa: E731
     bc, rc, zs, ps = t(booz["bmnc_b"]), t(booz["rmnc_b"]), t(booz["zmns_b"]), t(booz["pmns_b"])
@@ -256,7 +279,7 @@ def epsilon_effective_3_2_from_boozer(booz: Any, **budget):
             "Z": zero("zmnc_b", zs) - 1j * zs, "p": zero("pmnc_b", ps) - 1j * ps}
     xm, xn = np.asarray(booz["ixm_b"], float), np.asarray(booz["ixn_b"], float)
     per_row = (jnp.asarray(booz["iota_b"]), jnp.asarray(booz["buco_b"]), jnp.asarray(booz["bvco_b"]), amps)
-    values = jax.lax.map(lambda a: _surface(a[3], xm, xn, a[0], a[1], a[2], int(booz["nfp_b"]), **kw), per_row)
+    values = jax.lax.map(lambda a: _surface(a[3], xm, xn, a[0], a[1], a[2], int(booz["nfp_b"]), bud), per_row)
     return booz["s_b"], values
 
 
@@ -274,7 +297,7 @@ def _interpolate(values, lo, hi, w):
 
 
 def epsilon_effective_3_2_from_state(state, rt, surfaces: Sequence[float] = (0.25, 0.5, 0.75), *,
-                                     mboz: int = 12, nboz: int = 9, **budget):
+                                     mboz: int = 12, nboz: int = 9, budget: RippleBudget | None = None):
     r"""``epsilon_eff**(3/2)`` of a solved VMEX state at ``surfaces``, traceable end to end.
 
     The path is the differentiable one of the optimizer: the state's Boozer tables
@@ -294,11 +317,11 @@ def epsilon_effective_3_2_from_state(state, rt, surfaces: Sequence[float] = (0.2
     booz = {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
             "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"]}
     booz |= {k: b[k] for k in ("bmnc_b", "bmns_b", "rmnc_b", "rmns_b", "zmnc_b", "zmns_b", "pmnc_b", "pmns_b")}
-    return _interpolate(epsilon_effective_3_2_from_boozer(booz, **budget)[1], lo, hi, w)
+    return _interpolate(epsilon_effective_3_2_from_boozer(booz, budget)[1], lo, hi, w)
 
 
 def epsilon_effective_3_2_from_wout(wout, surfaces: Sequence[float] = (0.2, 0.4, 0.6, 0.8, 0.95), *,
-                                    mboz: int = 12, nboz: int = 9, **budget):
+                                    mboz: int = 12, nboz: int = 9, budget: RippleBudget | None = None):
     """``epsilon_eff**(3/2)`` at ``surfaces`` from a (VMEX or VMEC) ``wout``, interpolated like the state route."""
     from booz_xform_jax import Booz_xform
 
@@ -307,7 +330,7 @@ def epsilon_effective_3_2_from_wout(wout, surfaces: Sequence[float] = (0.2, 0.4,
     rows, lo, hi, w = _bracket(np.asarray(bx.s_in, float), surfaces)
     bx.compute_surfs = [int(r) for r in rows]
     bx.run()
-    values = epsilon_effective_3_2_from_boozer(_neo_boozer_data(bx, rows), **budget)[1]
+    values = epsilon_effective_3_2_from_boozer(_neo_boozer_data(bx, rows), budget)[1]
     return _interpolate(values, lo, hi, w)
 
 
