@@ -464,7 +464,8 @@ al. 2021 (section 5.4) validate ``Gamma_alpha`` as the predictor of the
 prompt-loss fraction, and :class:`~vmex.core.gammac.GammaAlpha` returns that
 quantity (eq. 25, ripple wells ignored) on the same wells, between zero and
 the trapped fraction.  Both are differentiable through the implicit solve;
-use ``forward_ftol=1e-12`` so the adjoint is accepted.  Nemov's tangency
+use ``forward_ftol=1e-12`` (``1e-14`` at a sharp quasisymmetric start) so the
+adjoint is accepted.  Nemov's tangency
 factor is smoothed by ``tangency_width`` (it tends to his value as the width
 goes to zero) and wells cut by the ends of the finite line are completed
 from the complete wells (``completeness``); both and the convergence

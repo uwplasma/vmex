@@ -981,9 +981,9 @@ quasisymmetry error itself (the superbanana resonances have area
 :math:`\propto |v_r|`), so it has a cusp there rather than a minimum with
 zero slope: use finite differences away from the exact optimum and the
 least-squares form (``GammaC.total``) in optimizers.  The reverse-mode
-gradient needs a tight forward solve (``forward_ftol=1e-12``); a looser
-solve makes the adjoint miss its acceptance and the gradient is rejected
-rather than returned.
+gradient needs a tight forward solve (``forward_ftol=1e-12``, ``1e-14`` at a
+sharp quasisymmetric start); a looser solve makes the adjoint miss its
+acceptance and the gradient is rejected rather than returned.
 
 :class:`~vmex.core.gammac.GammaAlpha` implements the Velasco et al. 2021
 (section 4.2, eq. 25) loss fraction on the same wells: every well is
