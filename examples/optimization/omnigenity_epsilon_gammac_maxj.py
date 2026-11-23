@@ -10,8 +10,7 @@ dimensionless preferences, one L-BFGS-B call drives the boundary through one
 reverse implicit adjoint per gradient, and force balance is a constraint by
 construction: every evaluation is a converged hot-restarted equilibrium.
 
-Policy: optimize ``GammaC``, report its value at a sharper tangency width
-before and after.  Minimizing the proxy does not promise zero prompt orbit losses -- certify a design with collisionless tracing
+Policy: optimize ``GammaC``, report its value before and after.  Minimizing the proxy does not promise zero prompt orbit losses -- certify a design with collisionless tracing
 (``examples/vmex_essos_workflow.py``) before quoting loss fractions.  The
 bootstrap-consistent current profile is frozen during this refinement; see
 ``QA_maxJ_continuation.py`` for the self-consistent Redl loop.
@@ -27,7 +26,9 @@ from scipy.optimize import minimize
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.gammac import GammaC
+from neo_jax.fastion import FastIonBudget
+
+from vmex.core.fastion import GammaC
 from vmex.core.maxj import MaximumJResidual, common_trapped_pitches_state
 
 # The seed deck: the finite-beta Landreman-Buller-Drevlak QA:
@@ -58,18 +59,16 @@ MAXJ_TARGET = -0.01
 TRAPPING_DEPTHS = (0.4, 0.8)
 
 # Gamma_c sampling budget, and the bounce-ACTION plan:
-GC_BUDGET = dict(nalpha=16, num_transit=4, points_per_transit=32,
-                 pitch_nodes=4, quadrature_order=32)
+GC_BUDGET = FastIonBudget()
 ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
 ACTION_MBOZ = 10
 
-# Research resolution. Gamma_c converges to ~1 % at the shipped budget
-# (docs/reference/objectives.rst); quote the budget with any number taken
-# from this script:
+# Research resolution. Gamma_c moves by <1 % under budget doublings except the
+# number of lines (docs/explanation/confinement.rst); quote the budget with any
+# number taken from this script:
 #   MAX_MODE, MAXITER = 3, 40
-#   GC_BUDGET = dict(nalpha=16, num_transit=6, points_per_transit=32,
-#                    pitch_nodes=6, quadrature_order=32)
+#   GC_BUDGET = FastIonBudget(n_lines=32, n_transits=6)
 #   ACTION = dict(nalpha=9, points_per_period=48, num_periods=10,
 #                 max_wells=24, quadrature_order=32)
 
@@ -91,8 +90,7 @@ ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODE, MAXITER = 1, 2
     QS_SURFACES, GC_SURFACES = np.linspace(0.2, 0.8, 4), (0.5,)
-    GC_BUDGET = dict(nalpha=6, num_transit=2, points_per_transit=32,
-                     pitch_nodes=3, quadrature_order=16)
+    GC_BUDGET = FastIonBudget(n_lines=6, n_transits=2, nodes_per_period=12, n_panel=8, n_level=12, n_well=16, n_dense=32)
     # The bounce-ACTION trace cannot be shortened further: a coarser plan loses
     # the matched wells on the outer surfaces and returns NaN slopes.
     ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
@@ -125,8 +123,7 @@ pitch = np.asarray(common_trapped_pitches_state(
     num_periods=ACTION["num_periods"]))
 
 qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, helicity_m=1, helicity_n=0)
-gamma_c = GammaC(GC_SURFACES, **GC_BUDGET)
-gamma_c_sharp = GammaC(GC_SURFACES, **{**GC_BUDGET, "tangency_width": 0.01})  # report-only
+gamma_c = GammaC(GC_SURFACES, budget=GC_BUDGET)
 maximum_j = MaximumJResidual(MAXJ_SURFACES, pitch, mboz=ACTION_MBOZ,
                              nboz=ACTION_MBOZ, target=MAXJ_TARGET, **ACTION)
 
@@ -182,9 +179,9 @@ def print_terms(label, eq):
 
 
 def hard_confinement(eq):
-    """Validation metrics at the sharper tangency width."""
+    """Validation metrics."""
     row = {"gamma_c": np.asarray(
-        gamma_c_sharp.compute_state(eq.solution, eq.solver_context)["gamma_c"])}
+        gamma_c.compute_state(eq.solution, eq.solver_context)["gamma_c"])}
     maxj = maximum_j.compute_state(eq.solution, eq.solver_context)
     row["maxj_total"] = float(maxj["total"])
     row["maxj_fraction"] = float(maxj["maximum_j_fraction"])

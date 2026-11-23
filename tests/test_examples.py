@@ -790,7 +790,7 @@ def test_combined_confinement_example_states_the_surrogate_policy():
     """Optimize GammaC, report a sharper-width value, promise no zero losses."""
     text = (EXAMPLES / "optimization" / "omnigenity_epsilon_gammac_maxj.py").read_text()
     assert "optimize ``GammaC``, report its value" in text
-    assert text.count("GammaC(") == 2
+    assert "GammaC(GC_SURFACES, budget=GC_BUDGET)" in text
     assert "does not promise" in text
     assert "normalized by its seed value" in text
     assert "VmecProblem.from_loss" in text  # one aggregate scalar adjoint

@@ -200,8 +200,7 @@ __all__ = [
     "quasi_isodynamic_residual_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaAlpha",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
-    "gamma_alpha_state",  # noqa: F822 - provided lazily by __getattr__ below
-    "gamma_c_state",  # noqa: F822 - provided lazily by __getattr__ below
+    "fast_ion_from_state",  # noqa: F822 - provided lazily by __getattr__ below
 ]
 
 Array = Any
@@ -213,11 +212,11 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
     if name in ("RedlBootstrapMismatch", "BootstrapFiniteNuResidual"):
         from . import bootstrap
         return getattr(bootstrap, name)
-    # gammac.py sits on the stability/turbulence field-line lane; the lazy
-    # re-export keeps the fast-ion proxy import-light like the f_boot term.
-    if name in ("GammaAlpha", "GammaC", "gamma_alpha_state", "gamma_c_state"):
-        from . import gammac
-        return getattr(gammac, name)
+    # fastion.py needs the optional NEO_JAX; the lazy re-export keeps the
+    # fast-ion proxies import-light like the f_boot term.
+    if name in ("GammaAlpha", "GammaC", "fast_ion_from_state"):
+        from . import fastion
+        return getattr(fastion, name)
     if name in ("quasi_isodynamic_residual", "boozer_modes_from_wout",
                 "quasi_isodynamic_residual_from_wout"):
         from . import qi

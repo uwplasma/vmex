@@ -905,10 +905,9 @@ def _boozer_summary_data(
 #: Compact ``Gamma_c`` sampling for the summary trend panel — radial ordering
 #: quality, not publication numbers (the ``diagnostic_neo_config`` analogue;
 #: the value carries the resolution scatter documented in
-#: :func:`vmex.core.gammac.gamma_c_state`).
+#: :func:`vmex.core.fastion.fast_ion_from_wout`).
 _GAMMA_C_DIAGNOSTIC = dict(
-    nalpha=8, num_transit=3, points_per_transit=32, pitch_nodes=3,
-    quadrature_order=16)
+    n_lines=8, n_transits=3, nodes_per_period=16, n_panel=16, n_level=16, n_well=24, n_dense=48)
 
 #: Radial targets of the summary ``Gamma_c`` profile (snapped to distinct
 #: interior full-mesh rows of the WOUT grid).
@@ -937,7 +936,7 @@ class ConfinementSummary:
         transport, on ``surfaces["epsilon_effective"]``.  Non-finite and
         non-positive samples are already dropped.  ``None`` when unavailable.
     gamma_c:
-        The fast-ion confinement proxy of :mod:`vmex.core.gammac` on
+        The fast-ion confinement proxy of :mod:`vmex.core.fastion` on
         ``surfaces["gamma_c"]``.  Deliberate NaN rows (a degenerate
         field-line map at ``iota`` near zero) are already dropped.  ``None``
         when unavailable.
@@ -1040,11 +1039,13 @@ def _gamma_c_profile(wout):
         for target in _GAMMA_C_TARGETS
     })
     try:
-        from .gammac import gamma_c_from_wout
+        from neo_jax.fastion import FastIonBudget
 
-        out = gamma_c_from_wout(
-            wout, surfaces=tuple(row / (ns - 1) for row in rows),
-            **_GAMMA_C_DIAGNOSTIC)
+        from .fastion import fast_ion_from_wout
+
+        out = fast_ion_from_wout(
+            wout, surfaces=tuple((row - 0.5) / (ns - 1) for row in rows),
+            budget=FastIonBudget(**_GAMMA_C_DIAGNOSTIC))
     except Exception as exc:  # noqa: BLE001 - summary stays usable without it
         return None, None, f"Gamma_c evaluation failed: {type(exc).__name__}"
     surfaces = np.asarray(out["s"], dtype=float)
@@ -1063,8 +1064,8 @@ def confinement_summary(wout, booz: dict[str, Any] | None, *, booz_note: str = "
     ``booz`` is the shared :func:`_boozer_summary_data` result (or ``None``
     with ``booz_note`` saying why), so the effective ripple rides the one
     Boozer transform the summary figure already ran; ``Gamma_c`` uses its
-    validated real-space route (:func:`vmex.core.gammac.gamma_c_from_wout`)
-    since none of its ingredients live in Boozer coordinates.  Results are
+    Boozer-spectrum route (:func:`vmex.core.fastion.fast_ion_from_wout`,
+    five neighbouring rows per surface).  Results are
     cached per in-memory WOUT and settings (see ``_CONFINEMENT_CACHE``).
     """
     key = None

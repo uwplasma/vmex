@@ -43,8 +43,9 @@ def fast_ion_from_state(state, rt, surfaces: Sequence[float] = (0.35, 0.6, 0.85)
 
     ns = int(np.shape(rt.setup.s_full)[0])
     s_half = (np.arange(ns - 1) + 0.5) / (ns - 1)
-    out = []
+    out, used = [], []
     for rows in _rows(s_half, surfaces):
+        used.append(s_half[rows[2]])
         b = boozer_spectrum_state(state, rt, surfaces=s_half[rows], mboz=mboz, nboz=nboz, geometry=True)
         booz = {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
                 "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"]}
@@ -53,7 +54,7 @@ def fast_ion_from_state(state, rt, surfaces: Sequence[float] = (0.35, 0.6, 0.85)
         out.append(_proxies(booz_xform_to_boozerdata_jax(
             booz, mode_first=False, mode_indices=np.arange(len(booz["ixm_b"]))), budget))
     gc, ga, ft = (jnp.stack(v) for v in zip(*out))
-    return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft}
+    return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft, "s": np.asarray(used)}
 
 
 def fast_ion_from_wout(wout, surfaces: Sequence[float] = (0.35, 0.6, 0.85), *, budget=None,
@@ -62,15 +63,17 @@ def fast_ion_from_wout(wout, surfaces: Sequence[float] = (0.35, 0.6, 0.85), *, b
     from booz_xform_jax import Booz_xform
     from neo_jax import booz_xform_to_boozerdata_jax
 
-    out = []
-    for rows in _rows((np.arange(int(wout.ns) - 1) + 0.5) / (int(wout.ns) - 1), surfaces):
+    out, used = [], []
+    s_half = (np.arange(int(wout.ns) - 1) + 0.5) / (int(wout.ns) - 1)
+    for rows in _rows(s_half, surfaces):
+        used.append(s_half[rows[2]])
         bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
         bx.read_wout_data(wout)
         bx.compute_surfs = [int(r) for r in rows]
         bx.run()
         out.append(_proxies(booz_xform_to_boozerdata_jax(bx, mode_first=True), budget))
     gc, ga, ft = (jnp.stack(v) for v in zip(*out))
-    return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft}
+    return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft, "s": np.asarray(used)}
 
 
 class _Proxy(_ResidualTerm):

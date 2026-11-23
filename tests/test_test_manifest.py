@@ -28,14 +28,14 @@ def test_ci_scope_narrows_lanes_only_for_attributable_changes() -> None:
     for path in (".github/workflows/ci.yml", "tools/ci_scope.py", "pyproject.toml"):
         assert ci_scope.select_lanes([path], entries) == entries, path
     assert ci_scope.select_lanes(
-        ["vmex/core/solver.py", "tests/test_gammac.py"], entries
+        ["vmex/core/solver.py", "tests/test_fastion.py"], entries
     ) == entries, "a mixed change keeps every lane"
 
     # A test module runs the lanes that own it, and nothing else.
-    lanes = ci_scope.needed_lanes(["tests/test_gammac.py"])
+    lanes = ci_scope.needed_lanes(["tests/test_fastion.py"])
     assert lanes and lanes < {entry["selector"] for entry in entries} | lanes
     assert "pr-parity-c4" in lanes
-    assert ci_scope.needed_lanes(["tests/test_gammac.py"]) == lanes
+    assert ci_scope.needed_lanes(["tests/test_fastion.py"]) == lanes
     # A selector lane that runs nodes of a module it does not own runs on its
     # changes too (test_device.py nodes are selected by pr-device).
     assert "pr-device" in ci_scope.needed_lanes(["tests/test_device.py"])

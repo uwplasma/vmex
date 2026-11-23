@@ -802,26 +802,21 @@ def test_lasym_growth_rate_gradient_matches_finite_differences(lasym_finite_beta
 
 
 def test_every_field_line_lane_reaches_an_asymmetric_state(lasym_finite_beta_eq):
-    """Ballooning, turbulence and Gamma_c all run on a lasym equilibrium.
+    """Ballooning and turbulence run on a lasym equilibrium.
 
-    All three share one parity-complete field-line geometry, and each now has
+    Both share one parity-complete field-line geometry, and each has
     its own asymmetric evidence rather than a guard: ballooning through the
     zero-sine and LASYM-of-a-symmetric-deck gates above, turbulence against
-    simsopt's ``vmec_fieldlines`` on an asymmetric deck, and Gamma_c through
-    the exact reflection identity.  Nothing here should raise, and nothing
+    simsopt's ``vmec_fieldlines`` on an asymmetric deck.  Nothing here should raise, and nothing
     should come back non-finite.
     """
-    from vmex.core import gammac, turbulence
+    from vmex.core import turbulence
     eq = lasym_finite_beta_eq
     lam = np.asarray(stab.ballooning_lambda(eq.state, eq.runtime, **FAST))
     assert np.all(np.isfinite(lam))
     geom = turbulence.gk_fieldline_geometry(eq.state, eq.runtime, ntheta=16)
     assert np.all(np.isfinite(np.asarray(geom["bmag"])))
     assert float(np.min(np.asarray(geom["bmag"]))) > 0.0
-    out = gammac.gamma_c_state(eq.state, eq.runtime, surfaces=(0.5,), nalpha=4,
-                               num_transit=2, points_per_transit=32,
-                               pitch_nodes=3, quadrature_order=16)
-    assert np.all(np.isfinite(np.asarray(out["gamma_c"])))
 
 
 # ---------------------------------------------------------------------------
