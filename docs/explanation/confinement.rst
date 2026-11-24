@@ -938,10 +938,13 @@ meets an outward superbanana (:math:`\gamma_c^*>0.2`) before an inward one and
 is bounded by the trapped fraction; ripple wells are ignored as in the paper.
 Each well takes the label :math:`\alpha+2\pi\iota k/N_{fp}` of its field period
 :math:`k`; the signed :math:`\gamma_c^*` and precession direction of the wells
-are binned on a periodic :math:`\alpha` grid and the thresholds are smoothsteps.
-The residual rows of :class:`~vmex.core.fastion.GammaC` and
-:class:`~vmex.core.fastion.GammaAlpha` are the values per surface, so the cost
-is the weighted sum of squares; neither is a loss law (Velasco et al. validate
+are binned on a periodic :math:`\alpha` grid with cubic B-spline weights and the
+thresholds are smoothsteps of half-width 0.2 in :math:`\gamma_c^*` (any wider and
+an omnigenous field loses particles).  The residual rows of
+:class:`~vmex.core.fastion.GammaC` are the values per surface, so the cost is
+the weighted sum of squares.  :class:`~vmex.core.fastion.GammaAlpha` is a
+value-only diagnostic: its gradient is cut because the loss fraction jumps by
+about 2-3 % between field steps of :math:`10^{-4}` (see below).  Neither is a loss law (Velasco et al. validate
 :math:`\Gamma_\alpha` as the predictor; Bader et al. and Paul et al. document
 the imperfect correlation of such proxies with measured losses).
 
@@ -949,7 +952,9 @@ the imperfect correlation of such proxies with measured losses).
 Boozer series) split at its stationary points into monotone pieces, so bounce
 points are exact roots (the effective-ripple primitives of
 :mod:`neo_jax.ripple`).  The pitch integral is split at the critical levels of
-each line, plus equispaced panels; the well integrals are evaluated on the
+each line, plus equispaced panels; each well is cut at its stationary points
+and every piece takes a sine-mapped Gauss rule (64 nodes, which resolves the
+square-root ends and the near-singular humps); the well integrals are evaluated on the
 panel nodes and interpolated to a dense rule on which :math:`\gamma_c^2` (which
 has narrow resonances where :math:`\partial_sJ` vanishes) is integrated.  The
 panel edges move with the field, so their Leibniz terms are differentiated
@@ -1032,37 +1037,42 @@ report the validation set. The sampling noise of :math:`\Gamma_c` is real:
 shifting the field-line origin changes the hard value by 5 to 13 % and can
 reorder near-equal candidates; between distinct designs the order is stable.
 
-**Convergence.**  Values at the default budget against each knob doubled or
-quadrupled, on :math:`s=0.5` of five cmp61 configurations (office CPU).
-:math:`\Gamma_c` is converged to better than 1 % at the default budget in every
-knob except the number of lines on the nfp 4 ellipse (6 % between 16 and 64
-lines); :math:`\Gamma_\alpha` needs 32 lines (the 16-line default is 35-40 %
-low, 32 lines is within 1-10 % of 64) because the alpha binning is only
-resolved once the lines are dense enough to see every well.
+**Convergence.**  Values at the default budget (64 nodes per well piece,
+cut at its stationary points) with 16 / 32 / 64 lines, at :math:`s=0.5` of
+four configurations (office CPU).  :math:`\Gamma_c` is converged to better than
+1 % at 16 lines on QH and QI, 1 % on QA and 4.5 % on the nfp 4 ellipse (still
+moving at 64 lines: iota near a low-order rational costs extra lines).
+:math:`\Gamma_\alpha` is converged on QH and QI but not on QA (0.148 / 0.162 / 0.175)
+or the nfp 4 ellipse (0.183 / 0.195 / 0.198): it moves by 8 % per doubling of
+the lines there, so quote it only with the budget.
 
 .. list-table::
    :header-rows: 1
 
    * - Case
-     - :math:`\Gamma_c` at 8 / 16 / 32 / 64 lines
-     - :math:`\Gamma_\alpha` at 8 / 16 / 32 / 64 lines
+     - :math:`\Gamma_c` at 16 / 32 / 64 lines
+     - :math:`\Gamma_\alpha` at 16 / 32 / 64 lines
    * - QA
-     - 0.0455 / 0.0432 / 0.0429 / 0.0431
-     - 0.102 / 0.112 / 0.181 / 0.183
+     - 0.04329 / 0.04303 / 0.04321
+     - 0.148 / 0.162 / 0.175
    * - QH
-     - 0.01035 / 0.01050 / 0.01050 / 0.01052
-     - 0.071 / 0.125 / 0.173 / 0.182
+     - 0.01039 / 0.01037 / 0.01036
+     - 0.1767 / 0.1770 / 0.1767
    * - QI
-     - 0.01471 / 0.01503 / 0.01505 / 0.01506
-     - 0.098 / 0.119 / 0.139 / 0.159
+     - 0.01510 / 0.01515 / 0.01516
+     - 0.2089 / 0.2091 / 0.2093
    * - nfp 4 ellipse
-     - 0.0633 / 0.0674 / 0.0657 / 0.0645
-     - 0.161 / 0.183 / 0.202 / 0.208
+     - 0.0674 / 0.0656 / 0.0643
+     - 0.183 / 0.195 / 0.198
 
 The other knobs move :math:`\Gamma_c` by less than 0.5 %: transits 2/4/8
 (0.0427/0.0432/0.0434 on QA), nodes per period 12 to 96 (0.0432 to 0.0432),
-pitch nodes per panel 3 to 8, and the number of panels 24 to 192 (0.0431 to
-0.0432, a slow 0.4 % drift from the Leibniz edge terms, not yet removed).
+pitch nodes per panel 3 to 8, and the number of panels 24 to 192.  The nodes
+per well piece are the delicate knob: on QH the unsplit rule gave 0.01048, 0.01045,
+0.01053, 0.01064, 0.01026 at 16, 24, 32, 48, 64 nodes (errors of 0.5-3.7 %, not
+monotone, and the source of a 0.4-0.8 % drift with the number of panels); cutting wells at their stationary points
+reduces the scatter to about 1 % at 48 or more nodes on QH (0.01039 +- 0.0001) and QI
+(0.0151 +- 0.0001 at 48-96, one outlier of 1.5 % at 128).
 :math:`\Gamma_\alpha` is unchanged by all of them.  An equispaced :math:`\alpha`
 average is spectrally accurate for a smooth integrand; the line count needed
 grows as :math:`\iota` approaches a low-order rational because the lines then

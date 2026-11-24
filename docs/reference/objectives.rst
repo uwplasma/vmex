@@ -462,7 +462,9 @@ of ``Gamma_c**2``.  ``Gamma_c`` is a proxy rather than a loss law: Velasco
 et al. 2021 (section 5.4) validate ``Gamma_alpha`` as the predictor of the
 prompt-loss fraction, and :class:`~vmex.core.fastion.GammaAlpha` returns
 that quantity (eq. 25, ripple wells ignored), between zero and the trapped
-fraction.  Both are differentiable through the implicit solve; use
+fraction, as a value-only diagnostic (its gradient is cut: the loss fraction
+still jumps by about 2 % between steps of 1e-4).  ``Gamma_c`` is
+differentiable through the implicit solve; use
 ``forward_ftol=1e-14`` and ``adjoint_tol=1e-13`` so the adjoint is accepted
 and accurate.  The numerical budget is a
 :class:`neo_jax.fastion.FastIonBudget` (``budget=``); its definitions and

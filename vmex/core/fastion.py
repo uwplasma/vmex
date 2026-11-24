@@ -5,6 +5,12 @@ eqs. 14-16, 25; the bounce-averaged drifts as derivatives of the second adiabati
 field lines).  This module is the adapter: solver state or wout to the Boozer spectra of five neighbouring
 half-mesh rows around each requested surface (the quartic radial fit of ``|B|``, ``iota`` and ``G + iota I``
 is inside the kernel), and the least-squares terms.  Surfaces snap to the nearest half-mesh row.
+Once the ripple adapter of ``vmex.core.neoclassical`` lands, its state-to-NEO conversion duplicates the
+body of :func:`fast_ion_from_state`: the shared helper would be ``_boozer_rows(state, rt, rows, mboz, nboz)``
+(``boozer_spectrum_state`` on the half-mesh ``rows`` then the ``nfp_b/ixm_b/.../s_b`` dict that
+``neo_jax.booz_xform_to_boozerdata_jax`` consumes), next to ``neoclassical._neo_boozer_data`` (the wout route);
+``_rows`` here and ``neoclassical._bracket`` are two row selections (five centred rows against the bracketing
+pair) over the same half-mesh.
 Needs ``neo-jax`` with ``neo_jax.fastion`` (``pip install "vmex[neoclassical]"``).
 """
 
@@ -14,6 +20,7 @@ from typing import Sequence
 
 import numpy as np
 
+import jax
 import jax.numpy as jnp
 
 from .omnigenity import _ResidualTerm, boozer_spectrum_state
@@ -109,6 +116,12 @@ class GammaC(_Proxy):
 
 
 class GammaAlpha(_Proxy):
-    """Velasco ``Gamma_alpha`` (eq. 25) rows."""
+    """Velasco ``Gamma_alpha`` (eq. 25) rows, a value-only diagnostic: the loss fraction is not smooth enough in the
+    field (jumps of about 2 % between steps of 1e-4 on QA from the threshold and alpha-bin events) for a
+    reverse-mode gradient to agree with finite differences, so its gradient is cut (``stop_gradient``) and it cannot drive an optimization."""
 
     name = "gamma_alpha"
+
+    def residuals_state(self, state, rt):
+        """The rows with their gradient cut."""
+        return jax.lax.stop_gradient(super().residuals_state(state, rt))
