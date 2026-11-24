@@ -22,6 +22,7 @@ import numpy as np
 
 import jax.numpy as jnp
 
+from .neoclassical import _neo_boozer_data
 from .omnigenity import _ResidualTerm, boozer_spectrum_state
 
 __all__ = ["GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
@@ -77,7 +78,7 @@ def fast_ion_from_wout(wout, surfaces: Sequence[float] = (0.35, 0.6, 0.85), *, b
         bx.read_wout_data(wout)
         bx.compute_surfs = [int(r) for r in rows]
         bx.run()
-        out.append(_proxies(booz_xform_to_boozerdata_jax(bx, mode_first=True), budget))
+        out.append(_proxies(booz_xform_to_boozerdata_jax(_neo_boozer_data(bx, rows)), budget))
     gc, ga, ft = (jnp.stack(v) for v in zip(*out))
     return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft, "s": np.asarray(used)}
 
