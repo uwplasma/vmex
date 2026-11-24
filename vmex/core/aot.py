@@ -31,27 +31,9 @@ from typing import Any, Callable
 import jax
 import jaxlib
 import numpy as np
-from jax.experimental import layout as _layout
 from jax.experimental import serialize_executable as _se
 
-_AUTO_LAYOUT = getattr(_layout.Layout, "AUTO", None)
-
-
-def _auto_layout() -> Any:
-    """The ``Layout.AUTO`` singleton, unpickled by reference.
-
-    A blob pickles the executable's argument and result avals.  Plain
-    unpickling makes a second ``AUTO`` object, JAX compares layouts by
-    identity, and a gradient through arrays a loaded executable returned then
-    fails with "Expected cotangent type float64[...] but got float64[...]".
-    """
-    return _AUTO_LAYOUT
-
-
-if _AUTO_LAYOUT is not None:
-    copyreg.pickle(type(_AUTO_LAYOUT), lambda _: (_auto_layout, ()))
-
-_LANES: list = []             #: every AotLane, for :func:`release`
+_LANES: list = []               #: every AotLane, for :func:`release`
 MAX_FILES = 64                  #: executables kept per cache directory
 _SOURCE_HASH: str | None = None
 _BUILD_LOCK = threading.Lock()
@@ -98,6 +80,20 @@ def _source_hash() -> str | None:
                 h.update(path.read_bytes())
         _SOURCE_HASH = h.hexdigest()[:16]
     return _SOURCE_HASH
+
+
+def _auto_layout() -> Any:
+    """JAX's layout singleton, for unpickling it as itself."""
+    from jax._src.layout import AutoLayout
+    return AutoLayout
+
+
+try:  # JAX 0.12.1 unpickles the singleton as a second object that its gradient
+    # type check rejects, so outputs of a loaded executable fail jax.grad.
+    if pickle.loads(pickle.dumps(_auto_layout())) is not _auto_layout():
+        copyreg.pickle(type(_auto_layout()), lambda _: (_auto_layout, ()))
+except ImportError:
+    pass
 
 
 def _directory() -> Path | None:
