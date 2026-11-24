@@ -193,6 +193,47 @@ def test_cubic_spline_two_knots_is_secant_line():
     np.testing.assert_allclose(np.asarray(got), 1.0 + 2.0 * S, rtol=1e-13)
 
 
+@pytest.mark.parametrize("n", [2, 3, 7])
+@pytest.mark.parametrize("kind", ["cubic_spline", "cubic_spline_ip", "akima_spline"])
+def test_cubic_spline_kinds_match_scipy_values_and_knot_jacobian(kind, n):
+    """VMEC's spline_cubic is SciPy's clamped spline with quadratic-fit end slopes.
+
+    The profile is linear in the knot values, so the Jacobian column k is the
+    spline of the unit vector e_k.  Akima with n < 4 uses the same cubic.
+    Tolerance: two equivalent tridiagonal solves differ by rounding only.
+    """
+    from scipy.interpolate import CubicSpline
+
+    if kind == "akima_spline" and n >= 4:
+        pytest.skip("Akima proper for n >= 4")
+    x = np.sort(np.array([0.1, 0.23, 0.31, 0.5, 0.62, 0.8, 0.95])[np.linspace(0, 6, n).astype(int)])
+    y = 1.0e3 * np.exp(-2.0 * x) * (1.0 + 0.3 * np.sin(7.0 * x))
+    s = np.linspace(-0.1, 1.1, 37)
+    q = np.clip(s, x[0], x[-1])
+
+    def reference(yk):
+        if n == 2:
+            yp1 = ypn = (yk[1] - yk[0]) / (x[1] - x[0])
+        else:
+            yp1 = np.polyfit(x[:3], yk[:3], 2) @ [2 * x[0], 1, 0]
+            ypn = np.polyfit(x[-3:], yk[-3:], 2) @ [2 * x[-1], 1, 0]
+        spline = CubicSpline(x, yk, bc_type=((1, yp1), (1, ypn)))
+        return np.array([spline.integrate(x[0], v) for v in q]) if kind.endswith("ip") else spline(q)
+
+    def profile(yk):
+        if kind.endswith("ip"):
+            return profiles.current(kind, None, x, yk, s)
+        return profiles.evaluate_profile(kind, None, x, yk, s)
+
+    want = reference(y)
+    got = np.asarray(profile(jnp.asarray(y)))
+    assert np.max(np.abs(got - want)) <= 1e-13 * np.max(np.abs(want))
+    jac_want = np.stack([reference(e) for e in np.eye(n)], axis=1)
+    for jac in (jax.jacfwd(profile), jax.jacrev(profile)):
+        diff = np.asarray(jac(jnp.asarray(y))) - jac_want
+        assert np.max(np.abs(diff)) <= 1e-13 * np.max(np.abs(jac_want))
+
+
 def test_akima_spline_reproduces_a_quadratic_at_both_edges():
     """The end extrapolation is exact for quadratics; the right edge used to miss by 1e-3."""
     x = np.linspace(0.0, 1.0, 11)
