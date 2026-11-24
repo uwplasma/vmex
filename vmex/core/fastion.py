@@ -20,12 +20,11 @@ from typing import Sequence
 
 import numpy as np
 
-import jax
 import jax.numpy as jnp
 
 from .omnigenity import _ResidualTerm, boozer_spectrum_state
 
-__all__ = ["GammaAlpha", "GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
+__all__ = ["GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
 
 
 def _rows(s_half, surfaces) -> list[np.ndarray]:
@@ -83,10 +82,8 @@ def fast_ion_from_wout(wout, surfaces: Sequence[float] = (0.35, 0.6, 0.85), *, b
     return {"gamma_c": gc, "gamma_alpha": ga, "f_trapped": ft, "s": np.asarray(used)}
 
 
-class _Proxy(_ResidualTerm):
-    """Least-squares term: one proxy row per surface, cost the weighted sum of squares."""
-
-    name = ""
+class GammaC(_ResidualTerm):
+    """Least-squares term: one ``Gamma_c`` row per surface, cost the weighted sum of squares."""
 
     def __init__(self, surfaces=(0.35, 0.6, 0.85), *, weights=None, budget=None, mboz: int = 12, nboz: int = 9):
         self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
@@ -98,30 +95,15 @@ class _Proxy(_ResidualTerm):
         self.budget, self.mboz, self.nboz = budget, mboz, nboz
 
     def compute_state(self, state, rt) -> dict:
+        """All three proxies at the surfaces."""
         return fast_ion_from_state(state, rt, self.surfaces, budget=self.budget, mboz=self.mboz, nboz=self.nboz)
 
     def residuals_state(self, state, rt):
-        value = self.compute_state(state, rt)[self.name]
+        """Weighted ``Gamma_c`` rows."""
+        value = self.compute_state(state, rt)["gamma_c"]
         return value if self.weights is None else jnp.sqrt(jnp.asarray(self.weights)) * value
 
     def total_state(self, state, rt):
+        """Sum of squares of the rows."""
         rows = self.residuals_state(state, rt)
         return jnp.vdot(rows, rows)
-
-
-class GammaC(_Proxy):
-    """Velasco/Nemov ``Gamma_c`` rows (module docstring of :mod:`neo_jax.fastion`)."""
-
-    name = "gamma_c"
-
-
-class GammaAlpha(_Proxy):
-    """Velasco ``Gamma_alpha`` (eq. 25) rows, a value-only diagnostic: the loss fraction is not smooth enough in the
-    field (jumps of about 2 % between steps of 1e-4 on QA from the threshold and alpha-bin events) for a
-    reverse-mode gradient to agree with finite differences, so its gradient is cut (``stop_gradient``) and it cannot drive an optimization."""
-
-    name = "gamma_alpha"
-
-    def residuals_state(self, state, rt):
-        """The rows with their gradient cut."""
-        return jax.lax.stop_gradient(super().residuals_state(state, rt))

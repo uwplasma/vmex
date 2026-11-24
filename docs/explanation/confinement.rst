@@ -942,9 +942,10 @@ are binned on a periodic :math:`\alpha` grid with cubic B-spline weights and the
 thresholds are smoothsteps of half-width 0.2 in :math:`\gamma_c^*` (any wider and
 an omnigenous field loses particles).  The residual rows of
 :class:`~vmex.core.fastion.GammaC` are the values per surface, so the cost is
-the weighted sum of squares.  :class:`~vmex.core.fastion.GammaAlpha` is a
-value-only diagnostic: its gradient is cut because the loss fraction jumps by
-about 2-3 % between field steps of :math:`10^{-4}` (see below).  Neither is a loss law (Velasco et al. validate
+the weighted sum of squares.  :math:`\Gamma_\alpha` is reported by
+:func:`~vmex.core.fastion.fast_ion_from_state` as a diagnostic and is not an
+objective term: the loss fraction jumps by about 2-3 % between field steps of
+:math:`10^{-4}` (see below).  Neither is a loss law (Velasco et al. validate
 :math:`\Gamma_\alpha` as the predictor; Bader et al. and Paul et al. document
 the imperfect correlation of such proxies with measured losses).
 

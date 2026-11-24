@@ -460,10 +460,10 @@ surface (Velasco et al. 2021, eqs. 14-16, the Boozer-coordinate form of
 Nemov et al. 2008, eq. 61), so the least-squares cost is the weighted sum
 of ``Gamma_c**2``.  ``Gamma_c`` is a proxy rather than a loss law: Velasco
 et al. 2021 (section 5.4) validate ``Gamma_alpha`` as the predictor of the
-prompt-loss fraction, and :class:`~vmex.core.fastion.GammaAlpha` returns
-that quantity (eq. 25, ripple wells ignored), between zero and the trapped
-fraction, as a value-only diagnostic (its gradient is cut: the loss fraction
-still jumps by about 2 % between steps of 1e-4).  ``Gamma_c`` is
+prompt-loss fraction, and :func:`~vmex.core.fastion.fast_ion_from_state`
+reports that quantity (eq. 25, ripple wells ignored), between zero and the
+trapped fraction, as a diagnostic only (the loss fraction jumps by about
+2 % between steps of 1e-4, so it is not an objective term).  ``Gamma_c`` is
 differentiable through the implicit solve; use
 ``forward_ftol=1e-14`` and ``adjoint_tol=1e-13`` so the adjoint is accepted
 and accurate.  The numerical budget is a
@@ -473,18 +473,17 @@ the convergence numbers are on :doc:`/explanation/confinement`:
 .. code-block:: python
 
    from neo_jax.fastion import FastIonBudget
-   from vmex.core.fastion import GammaAlpha, GammaC
+   from vmex.core.fastion import GammaC, fast_ion_from_state
 
    gamma_c = GammaC([0.35, 0.6, 0.85], budget=FastIonBudget())
    result = opt.least_squares(
        [(qs, 0.0, 1.0), (gamma_c, 0.0, 1.0)],
        inp, max_mode=6, jac="implicit", forward_ftol=1e-14, adjoint_tol=1e-13)
-   report = GammaAlpha([0.35, 0.6, 0.85])(result.equilibrium)
+   eq = result.equilibrium
+   report = fast_ion_from_state(eq.state, eq.runtime, [0.35, 0.6, 0.85])
 
 Stellarator-symmetric states with ``iota != 0`` on the target surfaces
 (surfaces through ``iota ~ 0`` return NaN rather than a plausible number).
-Superbanana layers make the objective demanding on ``nalpha``/``num_pitch``;
-check ``excluded_fraction`` in ``compute_state`` before trusting a value.
 
 Bootstrap current (Redl)
 ------------------------
@@ -759,10 +758,6 @@ Which objectives differentiate how
      - yes
      - yes
      - Boozer-line Hermite bounce kernel, exact bounce points, drift integrals of J
-   * - :class:`~vmex.core.fastion.GammaAlpha`
-     - yes
-     - yes
-     - Velasco loss fraction with smoothed thresholds and alpha binning
    * - :class:`~vmex.core.bootstrap.RedlBootstrapMismatch`
      - yes
      - yes

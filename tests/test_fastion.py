@@ -77,7 +77,6 @@ def test_class_contract_and_validation(li383):
     rows = np.asarray(term(li383))
     assert rows.shape == (2,) and np.all(rows > 0)
     assert float(term.total(li383)) == pytest.approx(rows @ rows)
-    assert fastion.GammaAlpha([0.5], budget=FAST).name == "gamma_alpha"
     with pytest.raises(ValueError, match="increasing"):
         fastion.GammaC([0.7, 0.3])
     with pytest.raises(ValueError, match="weights"):
