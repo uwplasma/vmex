@@ -78,7 +78,7 @@ The same packages can be installed by name; the floors are the ones in `pyprojec
 | `booz_xform_jax` | 0.5.2 | `pip install vmex` | `pip install "booz_xform_jax>=0.5.2"` |
 | `essos` | 0.22.0 | `vmex[coils]` | `pip install "essos>=0.22.0"` |
 | `virtual-casing-jax` | 0.0.17 | `vmex[freeb]` | `pip install "virtual-casing-jax>=0.0.17"` |
-| `neo-jax` | 1.1.1 | `vmex[neoclassical]` | `pip install "neo-jax>=1.1.1"` |
+| `neo-jax` | 1.2.0 | `vmex[neoclassical]` | `pip install "neo-jax>=1.2.0"` |
 | `dkx` | 2.14.0 | `vmex[neoclassical]` | `pip install "dkx>=2.14.0"` |
 | `gkx` | 2.6.0 | `vmex[turbulence]` | `pip install "gkx>=2.6.0"` |
 | `alfvex` | 1.2.0 | `vmex[alfven]` | `pip install "alfvex>=1.2.0"` |
