@@ -71,7 +71,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from solvax import cubic_spline, cubic_spline_evaluate, cubic_spline_integrate
+from solvax import cubic_spline, cubic_spline_antiderivative, cubic_spline_evaluate
 
 #: Denominator floor for 'sum_atan'; see :func:`_sum_atan`.
 _SUM_ATAN_FLOOR = 1.0e-300
@@ -620,7 +620,7 @@ def _cubic_spline(x_knots, y_knots, x, *, integrate: bool):
     spline = _vmec_cubic(x_knots, y_knots)
     x = jnp.clip(x, x_knots[0], x_knots[-1])
     if integrate:
-        return cubic_spline_integrate(spline, x_knots[0], x)
+        return cubic_spline_antiderivative(spline, x)
     return cubic_spline_evaluate(spline, x)
 
 
