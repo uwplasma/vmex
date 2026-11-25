@@ -307,6 +307,20 @@ def test_radial_parity_axis_row_is_extrapolated_not_copied():
         np.testing.assert_allclose(np.asarray(derivative), exact_derivative, rtol=1e-10)
 
 
+@pytest.mark.parametrize("ns", [3, 4, 5, 17])
+def test_extender_spline_moments_are_scipy_not_a_knot_second_derivatives(ns):
+    """The radial table's moments are the knot second derivatives of SciPy's
+    not-a-knot spline on the uniform s mesh, per column; below four nodes they
+    are zero (the linear interpolant).  Round-off tolerance."""
+    from scipy.interpolate import CubicSpline
+
+    s = np.linspace(0.0, 1.0, ns)
+    table = np.stack([np.exp(-3.0 * s), np.sin(5.0 * s) + s**3], axis=1)
+    got = np.asarray(ext._spline_moments(jnp.asarray(table)))
+    want = CubicSpline(s, table)(s, 2) if ns >= 4 else np.zeros_like(table)
+    np.testing.assert_allclose(got, want, rtol=0.0, atol=1e-11 * np.max(np.abs(table)) * (ns - 1) ** 2)
+
+
 def test_extender_helper_contracts_and_public_equilibrium_aliases():
     """Radial parity, seeded inversion, and the equilibrium field entry points.
 
