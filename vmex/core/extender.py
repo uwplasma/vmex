@@ -19,6 +19,7 @@ from typing import Any, Callable, Literal, cast
 import jax
 import jax.numpy as jnp
 import numpy as np
+from solvax import cubic_spline, cubic_spline_evaluate
 
 from .errors import VmecNumericalError
 from .mgrid import MgridField, read_mgrid
@@ -457,22 +458,14 @@ def _spline_moments(regular: Array) -> Array:
 
     A piecewise-linear interpolant has zero second derivative inside every
     cell, so the second and third radial derivatives of ``B`` do not converge
-    with ``ns`` at all.  A C2 spline restores them.  The system is solved once
-    per field, for every Fourier coefficient at once, and its matrix depends
-    only on ``ns``.
+    with ``ns`` at all.  A C2 spline restores them.  It is fitted once per
+    field, for every Fourier coefficient at once.
     """
     ns = regular.shape[0]
     if ns < 4:  # not-a-knot needs four nodes; fall back to the linear interpolant
         return jnp.zeros_like(regular)
-    h = 1.0 / (ns - 1)
-    matrix = np.zeros((ns, ns))
-    rows = np.arange(1, ns - 1)
-    matrix[rows, rows - 1], matrix[rows, rows], matrix[rows, rows + 1] = 1.0, 4.0, 1.0
-    matrix[0, 0], matrix[0, 1], matrix[0, 2] = 1.0, -2.0, 1.0
-    matrix[-1, -3], matrix[-1, -2], matrix[-1, -1] = 1.0, -2.0, 1.0
-    rhs = jnp.zeros_like(regular).at[1:-1].set(
-        6.0 / h**2 * (regular[:-2] - 2.0 * regular[1:-1] + regular[2:]))
-    return jnp.linalg.solve(jnp.asarray(matrix, dtype=regular.dtype), rhs)
+    s = jnp.linspace(0.0, 1.0, ns, dtype=regular.dtype)
+    return cubic_spline_evaluate(cubic_spline(s, regular), s, derivative=2)
 
 
 def _radial_table(coefficients: Array, modes: Array | None,

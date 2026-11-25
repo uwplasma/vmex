@@ -17,7 +17,7 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   examples do not run, except `QA_optimization.py` and `pwO_optimization.py`,
   which call `vmex.optimize.scipy_least_squares` to pass the callback there),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
-  `booz_xform_jax>=0.5.2` and `solvax>=0.36.2` (the linear solvers). `import
+  `booz_xform_jax>=0.5.2` and `solvax>=0.37.0` (the linear solvers and the profile splines). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
   upgrade.
 
