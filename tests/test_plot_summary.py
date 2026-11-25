@@ -423,6 +423,7 @@ def test_confinement_missing_ripple_and_lasym_notes(solved_case):
     assert "tables unavailable" in conf.notes["epsilon_effective"]
 
 
+@needs_fastion
 def test_confinement_one_valid_one_invalid_and_never_zero(
     solved_case, monkeypatch,
 ):
