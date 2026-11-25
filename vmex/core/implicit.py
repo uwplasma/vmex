@@ -2240,12 +2240,15 @@ def _host_solve_and_mask_impl(cfg: ImplicitConfig, params_np, *,
     return as_np(state), mask
 
 
-def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
+def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np, *,
+                                 refine: bool | str = "certified") -> tuple:
     """Status-returning host callback for optimization trial points.
 
     Status is 0 for a derivative-certified state, 1 for a failed solve, 2
     when the iteration budget was exhausted above ``cfg.max_fsq_ratio``, and
-    3 when the fixed-point anchor stalled far from the root.
+    3 when the fixed-point anchor stalled far from the root.  ``refine=False``
+    skips the anchor, for trials that are scored but not differentiated: the
+    state is the host solve's unless this point was anchored already.
     The final force residual and its ratio to ``ftol`` accompany the state so
     every optimizer interface applies the same acceptance policy.  That
     residual is the host solver's own, from before the fixed-point refinement
@@ -2255,7 +2258,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         _HOST_ERROR.clear()
         error = None
         try:
-            state, mask = _host_solve_and_mask_impl(cfg, params_np, refine="certified")
+            state, mask = _host_solve_and_mask_impl(cfg, params_np, refine=refine)
         except VmecError as exc:
             # Direct host calls preserve the typed exception; pure_callback
             # wraps the same error in the relayed sentinel handled below.
@@ -2298,6 +2301,8 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         refined = _LAST_REFINED.get(cfg)
         if status == 0 and refined is not None and refined[0] == hit[0] and refined[2]:
             status = 3  # anchor stalled far from the root: no certified gradient
+        elif not refine and refined is not None and refined[0] == hit[0]:
+            state = jax.tree.map(lambda a: np.asarray(a, dtype=np.float64), refined[1])
         if status != 0:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
         return state, mask, np.int32(status), np.float64(fsq), np.float64(ratio)

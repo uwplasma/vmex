@@ -3132,18 +3132,29 @@ def _least_squares_implicit(
         else:  # unexpected call pattern: better no seed than a wrong one
             holder["lin"] = None
 
-    def host_evaluate(x, evaluate):
+    def host_evaluate(x, evaluate, refine="certified"):
         # A retry can encounter new grid shapes. Compiling their GPU kernels
         # inside a running GPU pure_callback can deadlock. The host optimizer
         # owns this solve; stage only the objective evaluation on its result.
         placed = _place(x)
         params_np = jax.tree.map(np.asarray, params_of(placed, problem_data))
-        state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+        state, _, status, _, _ = imp._host_solve_and_mask_status(
+            cfg, params_np, refine=refine)
         state = jax.tree.map(_place, state)
-        holder["solved"] = (FunctionProblem._key(np.asarray(x, dtype=float)), state)
+        holder["solved"] = (FunctionProblem._key(np.asarray(x, dtype=float)),
+                            state, bool(refine))
         return evaluate(placed, state, status, with_roots(x, state, problem_data))
 
-    def fun(x: np.ndarray) -> np.ndarray:
+    def trial_residual(x: np.ndarray) -> np.ndarray:
+        """Residual rows at the host solve, without the fixed-point anchor.
+
+        A least-squares driver rejects many trials and differentiates only
+        accepted points, so the anchor is paid in :func:`jacobian_host`
+        instead, at the point the Jacobian is taken.
+        """
+        return fun(x, refine=False)
+
+    def fun(x: np.ndarray, refine="certified") -> np.ndarray:
         lin = holder["lin"]
         if lin is not None and lin[0].shape == np.shape(x):
             seed = jax.tree.map(
@@ -3154,7 +3165,7 @@ def _least_squares_implicit(
                 imp._PERTURB_SEED[cfg] = seed
         try:
             residual = np.asarray(
-                jax.device_get(host_evaluate(x, host_rows_jit)), dtype=float)
+                jax.device_get(host_evaluate(x, host_rows_jit, refine)), dtype=float)
         except Exception as exc:  # zero-crash policy: penalize, don't die
             if holder["nres"] is None:
                 raise
@@ -3204,6 +3215,15 @@ def _least_squares_implicit(
             # failed. Refresh the host solve in that rare case so the old
             # error cannot turn this point's exact Jacobian into a penalty row.
             fun(x)
+        solved = holder.get("solved")
+        if certified_trial(x) and (solved is None or solved[0] != x_key or not solved[2]):
+            # The trial was scored without the anchor: anchor it now (a solve
+            # memo hit), and reject a point whose anchor stalls far from the root.
+            state, _, status, _, _ = imp._host_solve_and_mask_status(cfg, params_np)
+            holder["solved"] = (x_key, jax.tree.map(_place, state), True)
+            if int(status) != 0:
+                holder["lin"] = None
+                return failure_jacobian(x)
         if not certified_trial(x):
             holder["lin"] = None
             return failure_jacobian(x)
@@ -3215,7 +3235,7 @@ def _least_squares_implicit(
             # full (~50 s) Jacobian compile.  The trial evaluation at this
             # point already holds the state the callback would return.
             solved = holder.get("solved")
-            if solved is not None and solved[0] == x_key:
+            if solved is not None and solved[0] == x_key and solved[2]:
                 return solved[1]
             state, _ = imp._host_solve_and_mask(cfg, params_np)
             return jax.tree.map(_place, state)
@@ -3613,7 +3633,7 @@ def _least_squares_implicit(
             np.ones_like(np.asarray(x0, dtype=float))
             if problem_scales is None else np.asarray(problem_scales, dtype=float)
         )
-        residual_fun = None if traceable_scalar is not None else fun
+        residual_fun = None if traceable_scalar is not None else trial_residual
         residual_jac_fun = None if traceable_scalar is not None else jac_fn
         return problem_class(
             np.asarray(x0, dtype=float),

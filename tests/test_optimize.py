@@ -2103,3 +2103,29 @@ def test_stability_terms_on_an_asymmetric_state():
     rows = np.sqrt(weights) * np.asarray(band(merc(eq.state, eq.runtime)))
     assert rows.shape == weights.shape and np.all(np.isfinite(rows))
     assert np.all(np.isfinite(np.asarray(band_r(res(eq.state, eq.runtime)))))
+
+
+def test_least_squares_trials_defer_the_anchor_to_the_jacobian():
+    """A scored trial skips the fixed-point anchor; the Jacobian at that point
+    pays it once and reads the anchored state, as a residual-first call did."""
+    from vmex.core import implicit as im
+
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0), (opt.mean_iota, 0.3, 1.0)]
+    problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=1, progress=False)
+    cfg = problem.metadata["config"]
+    trial = problem.x0 + 0.01 * problem.scales
+
+    def refinements():
+        return im._SOLVE_STATS[cfg]["refinements"]
+
+    problem.residual(problem.x0)
+    before = refinements()
+    rows = problem.residual(trial)
+    assert refinements() == before
+    jacobian = problem.residual_jac(trial)
+    assert refinements() == before + 1
+    anchored_rows, anchored_jacobian = opt.VmecProblem.from_tuples(
+        inp, terms, max_mode=1, progress=False).residual_and_jac(trial)
+    np.testing.assert_allclose(jacobian, anchored_jacobian, rtol=1e-8, atol=1e-12)
+    np.testing.assert_allclose(rows, anchored_rows, rtol=1e-8, atol=1e-12)
