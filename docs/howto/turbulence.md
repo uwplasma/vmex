@@ -5,7 +5,7 @@
 `turbulence` extra:
 
 ```console
-pip install "vmex[turbulence]"        # gkx>=2.6.0; saturation_t_min and the per-turn ntheta need GKX main from #527 on (newer than 2.9.0)
+pip install "vmex[turbulence]"        # gkx>=2.6.0; saturation_t_min needs a GKX newer than 2.9.0
 vmex input.my_case --turbulence
 vmex wout_my_case.nc --turbulence --outdir turb
 ```
@@ -56,7 +56,7 @@ shaped tokamak, the circular tokamak and the Landreman-Paul QA stellarator:
 |---|---|
 | `(N_x, N_y)` | stellarator QA: 64 x 64 reads 44% above 128 x 128, 96 x 96 within 7%. Tokamaks: 64, 96 and 128 agree within the seed spread. 96 x 96 is the single default. |
 | `(N_l, N_m)` | `(4, 8)` is adequate; `(6, 12)` lowers `Q` by a further 8 to 14%. |
-| `N_z` per turn | 48, and 16 per field period on stellarators: on two tokamaks and three stellarators (nfp 2 to 6) the linear growth rate moves by 1% or less from 48 to 96 points per turn, by 1 to 5% at 24, and the nfp 3 and 6 cases leave the physical branch below 16 to 32 (GKX #527). |
+| `N_z` per turn | 48, and 16 per field period on stellarators: on two tokamaks and three stellarators (nfp 2 to 6) the linear growth rate moves by 1% or less from 48 to 96 points per turn, by 1 to 5% at 24, and the nfp 3 and 6 cases leave the physical branch below 16 to 32. |
 | `D_hyper`, precision | 0.05 and `float32` were adequate. |
 | Saturation window | starting no earlier than `t = 300` instead of 800 saves 22 to 33% of the run time with the same mean. |
 | Random seed | about 10% spread of `Q` on tokamaks, the largest single error. |
