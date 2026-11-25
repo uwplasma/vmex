@@ -25,7 +25,7 @@ import jax.numpy as jnp
 from .neoclassical import _neo_boozer_data
 from .omnigenity import _ResidualTerm, boozer_spectrum_state
 
-__all__ = ["GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
+__all__ = ["GammaAlpha", "GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
 
 
 def _rows(s_half, surfaces) -> list[np.ndarray]:
@@ -86,6 +86,8 @@ def fast_ion_from_wout(wout, surfaces: Sequence[float] = (0.35, 0.6, 0.85), *, b
 class GammaC(_ResidualTerm):
     """Least-squares term: one ``Gamma_c`` row per surface, cost the weighted sum of squares."""
 
+    key = "gamma_c"
+
     def __init__(self, surfaces=(0.35, 0.6, 0.85), *, weights=None, budget=None, mboz: int = 12, nboz: int = 9):
         self.surfaces = np.atleast_1d(np.asarray(surfaces, dtype=float))
         if np.any(np.diff(self.surfaces) <= 0.0):
@@ -100,11 +102,17 @@ class GammaC(_ResidualTerm):
         return fast_ion_from_state(state, rt, self.surfaces, budget=self.budget, mboz=self.mboz, nboz=self.nboz)
 
     def residuals_state(self, state, rt):
-        """Weighted ``Gamma_c`` rows."""
-        value = self.compute_state(state, rt)["gamma_c"]
+        """Weighted rows of the proxy."""
+        value = self.compute_state(state, rt)[self.key]
         return value if self.weights is None else jnp.sqrt(jnp.asarray(self.weights)) * value
 
     def total_state(self, state, rt):
         """Sum of squares of the rows."""
         rows = self.residuals_state(state, rt)
         return jnp.vdot(rows, rows)
+
+
+class GammaAlpha(GammaC):
+    """The same term for ``Gamma_alpha`` (Velasco et al. 2021, eq. 25), the lost fraction of trapped particles."""
+
+    key = "gamma_alpha"

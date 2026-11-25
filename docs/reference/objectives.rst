@@ -460,11 +460,9 @@ surface (Velasco et al. 2021, eqs. 14-16, the Boozer-coordinate form of
 Nemov et al. 2008, eq. 61), so the least-squares cost is the weighted sum
 of ``Gamma_c**2``.  ``Gamma_c`` is a proxy rather than a loss law: Velasco
 et al. 2021 (section 5.4) validate ``Gamma_alpha`` as the predictor of the
-prompt-loss fraction, and :func:`~vmex.core.fastion.fast_ion_from_state`
-reports that quantity (eq. 25, ripple wells ignored), between zero and the
-trapped fraction, as a diagnostic only (the loss fraction jumps by about
-2 % between steps of 1e-4, so it is not an objective term).  ``Gamma_c`` is
-differentiable through the implicit solve; use
+prompt-loss fraction, and :class:`~vmex.core.fastion.GammaAlpha` returns
+that quantity (eq. 25, ripple wells ignored), between zero and the trapped
+fraction.  Both are differentiable through the implicit solve; use
 ``forward_ftol=1e-14`` and ``adjoint_tol=1e-13`` so the adjoint is accepted
 and accurate.  The numerical budget is a
 :class:`neo_jax.fastion.FastIonBudget` (``budget=``); its definitions and
@@ -473,7 +471,7 @@ the convergence numbers are on :doc:`/explanation/confinement`:
 .. code-block:: python
 
    from neo_jax.fastion import FastIonBudget
-   from vmex.core.fastion import GammaC, fast_ion_from_state
+   from vmex.core.fastion import GammaAlpha, GammaC, fast_ion_from_state
 
    gamma_c = GammaC([0.35, 0.6, 0.85], budget=FastIonBudget())
    result = opt.least_squares(

@@ -198,6 +198,7 @@ __all__ = [
     "quasi_isodynamic_residual",  # noqa: F822 - provided lazily by __getattr__ below
     "boozer_modes_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
     "quasi_isodynamic_residual_from_wout",  # noqa: F822 - provided lazily by __getattr__ below
+    "GammaAlpha",  # noqa: F822 - provided lazily by __getattr__ below
     "GammaC",  # noqa: F822 - provided lazily by __getattr__ below
     "fast_ion_from_state",  # noqa: F822 - provided lazily by __getattr__ below
 ]
@@ -213,7 +214,7 @@ def __getattr__(name: str):  # PEP 562 lazy re-export
         return getattr(bootstrap, name)
     # fastion.py needs the optional NEO_JAX; the lazy re-export keeps the
     # fast-ion proxies import-light like the f_boot term.
-    if name in ("GammaC", "fast_ion_from_state"):
+    if name in ("GammaAlpha", "GammaC", "fast_ion_from_state"):
         from . import fastion
         return getattr(fastion, name)
     if name in ("quasi_isodynamic_residual", "boozer_modes_from_wout",

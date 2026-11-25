@@ -936,18 +936,30 @@ J/|\partial_sJ|)` and
 real-space version).  :math:`\Gamma_\alpha` counts the orbits whose precession
 meets an outward superbanana (:math:`\gamma_c^*>0.2`) before an inward one and
 is bounded by the trapped fraction; ripple wells are ignored as in the paper.
-Each well takes the label :math:`\alpha+2\pi\iota k/N_{fp}` of its field period
-:math:`k`; the signed :math:`\gamma_c^*` and precession direction of the wells
-are binned on a periodic :math:`\alpha` grid with cubic B-spline weights and the
-thresholds are smoothsteps of half-width 0.2 in :math:`\gamma_c^*` (any wider and
-an omnigenous field loses particles).  The residual rows of
-:class:`~vmex.core.fastion.GammaC` are the values per surface, so the cost is
-the weighted sum of squares.  :math:`\Gamma_\alpha` is reported by
-:func:`~vmex.core.fastion.fast_ion_from_state` as a diagnostic and is not an
-objective term: the loss fraction jumps by about 2-3 % between field steps of
-:math:`10^{-4}` (see below).  Neither is a loss law (Velasco et al. validate
-:math:`\Gamma_\alpha` as the predictor; Bader et al. and Paul et al. document
-the imperfect correlation of such proxies with measured losses).
+Each well is an event at its own poloidal position
+:math:`\theta=\alpha+\iota\varphi_{mid}` (a period label would jump by
+:math:`2\pi\iota/N_{fp}` when a well midpoint crosses a period boundary),
+present with its smooth window weight and outward or inward through smoothstep
+thresholds of half-width 0.2 around :math:`\gamma_c^*=0.2` (zero below 0 and
+above :math:`-0.4` respectively, so an omnigenous field loses nothing).  Events
+are deposited as mass with cubic B-spline weights on a periodic :math:`\alpha`
+grid, a bin of mass :math:`m` is crossed with probability :math:`e^{-5m}`, and
+the probability that the first event met going up or down in :math:`\alpha` is
+outward follows from the competing hazards; each well mixes the two directions
+with its own smooth precession direction.  Averaging :math:`\gamma_c^*` per bin
+before thresholding, as an earlier version did, made any sliver of a well a
+full-strength event and the value jumped by 5 to 10 % between field steps of
+:math:`10^{-4}`; the hazard form removes the jumps (second differences of a
+41-point scan fall by a factor 20).  The residual rows of
+:class:`~vmex.core.fastion.GammaC` and :class:`~vmex.core.fastion.GammaAlpha`
+are the values per surface, so the cost is the weighted sum of squares.
+Neither is a loss law (Velasco et al. validate :math:`\Gamma_\alpha` as the
+predictor; Bader et al. and Paul et al. document the imperfect correlation of
+such proxies with measured losses).  The smoothed :math:`\Gamma_\alpha` sits
+within 0.4 % of the sharp-threshold value on QA, 4-9 % below it on the nfp 4
+ellipse, 25-29 % above it on QH and 59-66 % above it on QI (thresholds of half-width 0.05 to
+0.2 give the same value to 2 % there; the sharp value is itself very sensitive,
+because many wells sit just below :math:`\gamma_c^*=0.2`).
 
 **Numerics.**  Each line is a Hermite cubic (exact derivative data from the
 Boozer series) split at its stationary points into monotone pieces, so bounce
@@ -984,6 +996,16 @@ solve and a tight adjoint (``forward_ftol=1e-14``, ``adjoint_tol=1e-13``): the
 state cotangent of these proxies is large against an O(1) response, and the
 default adjoint tolerance left a 30 % error on the nfp 2 ellipse (1.24 against
 1.79 at ``adjoint_tol=1e-13``, frozen-path value 1.85).
+
+For :math:`\Gamma_\alpha` (sum over three surfaces, 16 lines, re-solved central
+differences at steps of 3e-4 and 1e-4, first four coefficients) the reverse-mode
+gradient on QA is -0.573 / 17.70 / 9.99 / 11.57 against FD -0.558, 17.85, 10.40,
+11.96 (3e-4) and -0.575, 18.58, 10.37, 11.41 (1e-4); on the nfp 2 seed
+-0.211 / 33.53 / 6.92 / 28.07 against -0.199, 31.21, 6.92, 28.08 and -0.196,
+33.29, 6.92, 27.95.  The largest differences (6-8 %) are in small or curved
+components; larger steps (1e-3) bend the response by 12 % on the second QA
+coefficient.  The cost of one value-and-gradient is 4-9 minutes on four cores at
+16 lines.
 
 .. _confinement-resolution:
 
@@ -1043,9 +1065,8 @@ cut at its stationary points) with 16 / 32 / 64 lines, at :math:`s=0.5` of
 four configurations (office CPU).  :math:`\Gamma_c` is converged to better than
 1 % at 16 lines on QH and QI, 1 % on QA and 4.5 % on the nfp 4 ellipse (still
 moving at 64 lines: iota near a low-order rational costs extra lines).
-:math:`\Gamma_\alpha` is converged on QH and QI but not on QA (0.148 / 0.162 / 0.175)
-or the nfp 4 ellipse (0.183 / 0.195 / 0.198): it moves by 8 % per doubling of
-the lines there, so quote it only with the budget.
+:math:`\Gamma_\alpha` is converged to 0.2 % on QA and QH, 0.6 % on the nfp 4
+ellipse (16 to 32 lines) and moves by 1.6 % per doubling of the lines on QI.
 
 .. list-table::
    :header-rows: 1
@@ -1055,16 +1076,16 @@ the lines there, so quote it only with the budget.
      - :math:`\Gamma_\alpha` at 16 / 32 / 64 lines
    * - QA
      - 0.04329 / 0.04303 / 0.04321
-     - 0.148 / 0.162 / 0.175
+     - 0.1535 / 0.1538 / 0.1536
    * - QH
      - 0.01039 / 0.01037 / 0.01036
-     - 0.1767 / 0.1770 / 0.1767
+     - 0.1829 / 0.1826 / not run
    * - QI
      - 0.01510 / 0.01515 / 0.01516
-     - 0.2089 / 0.2091 / 0.2093
+     - 0.2317 / 0.2281 / 0.2243
    * - nfp 4 ellipse
      - 0.0674 / 0.0656 / 0.0643
-     - 0.183 / 0.195 / 0.198
+     - 0.1697 / 0.1688 / not run
 
 The other knobs move :math:`\Gamma_c` by less than 0.5 %: transits 2/4/8
 (0.0427/0.0432/0.0434 on QA), nodes per period 12 to 96 (0.0432 to 0.0432),
