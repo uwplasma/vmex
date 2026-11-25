@@ -114,28 +114,37 @@ monitor = opt.OptimizationMonitor()
 ### Run the optimization ######################################################
 
 equilibrium = opt.solve_equilibrium(inp)
+# Stages that share a boundary resolution share one problem, built at the
+# group's largest max_mode; problem.subproblem() frees one stage's harmonics
+# and holds the rest, so the value-and-gradient graph compiles once per group.
+resolution_of = {max_mode: max(max_mode + 2, MINIMUM_MPOL) for max_mode in MAX_MODES}
+problem, mpol = None, None
 for max_mode, maxiter in zip(MAX_MODES, MAXITER):
     print(f"\n===== scalar QA stage, max_mode = {max_mode} =====")
-    mpol = max(max_mode + 2, MINIMUM_MPOL)
-    inp = replace(inp, delt=0.5).change_resolution(
-        mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
-    problem = opt.VmecProblem.from_loss(
-        inp, loss, max_mode=max_mode, vary_major_radius=VARY_MAJOR_RADIUS,
-        use_ess=True, ess_alpha=ESS_ALPHA, restart_from=equilibrium,
-        progress=False, evaluation_progress=False)
-    print(f"dof_names = {problem.dof_names}")
-    monitor.problem = problem
-    if not ci_smoke:
-        problem.compile_value_and_gradient()
+    if resolution_of[max_mode] != mpol:
+        mpol = resolution_of[max_mode]
+        inp = replace(inp, delt=0.5).change_resolution(
+            mpol=mpol, ntor=mpol, ntheta=2 * mpol + 6, nzeta=2 * mpol + 4)
+        problem = opt.VmecProblem.from_loss(
+            inp, loss, max_mode=max(m for m in MAX_MODES if resolution_of[m] == mpol),
+            vary_major_radius=VARY_MAJOR_RADIUS,
+            use_ess=True, ess_alpha=ESS_ALPHA, restart_from=equilibrium,
+            progress=False, evaluation_progress=False)
+        x = problem.x0
+        monitor.problem = problem
+        if not ci_smoke:
+            problem.compile_value_and_gradient()
+    stage = problem.subproblem(max_mode=max_mode, x=x)
+    print(f"dof_names = {stage.dof_names}")
 
     # SciPy works in dimensionless increments y, with x = x0 + step * y, so
     # every coefficient moves on a similar scale.
-    x0 = problem.x0
-    step = PARAMETER_STEP * problem.scales
+    x0 = stage.x0
+    step = PARAMETER_STEP * stage.scales
 
     def value_and_gradient(y):
         """What SciPy calls. The monitor caches it, so its callback never re-solves."""
-        value, gradient = problem.value_and_grad(x0 + step * y)
+        value, gradient = stage.value_and_grad(x0 + step * y)
         return monitor.cache_evaluation(x0 + step * y, value, step * gradient)
 
     def record(intermediate_result):
@@ -149,7 +158,7 @@ for max_mode, maxiter in zip(MAX_MODES, MAXITER):
         callback=record,
         options={"maxiter": maxiter, "gtol": 1e-6, "ftol": 1e-12, "maxls": 20, "maxcor": 20})
     print(f"scalar cost: {initial_value:.12e} -> {float(result.fun):.12e}")
-    x = x0 + step * result.x
+    x = stage.embed(x0 + step * result.x)
     inp = problem.input_from_x(x)
     equilibrium = problem.equilibrium_from_x(x)
     report(f"mode {max_mode}", equilibrium)
