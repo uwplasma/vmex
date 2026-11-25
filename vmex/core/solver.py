@@ -65,6 +65,7 @@ from typing import Any, Callable
 import contextvars
 import functools
 import platform
+import warnings
 
 import numpy as np
 
@@ -647,8 +648,8 @@ def _resolve_prec2d(
     from ``precon_type``/``prec2d_threshold`` (input defaults, overridable).
     ``NONE`` and VMEC2000's ``DEFAULT`` select the parity 1-D path.  ``GMRES``
     selects VMEX's documented matrix-free JAX/SOLVAX Newton--GMRES path.
-    VMEC2000's distinct ``CG``, ``GMRESR`` and ``TFQMR`` algorithms are
-    rejected rather than silently aliased to GMRES.
+    VMEC2000's ``CG``, ``GMRESR`` and ``TFQMR`` solve the same preconditioned
+    step and run on that GMRES path with a warning.
     """
     if prec2d is not None:
         return prec2d
@@ -661,10 +662,16 @@ def _resolve_prec2d(
     pt_normalized = str(pt).strip().upper()
     if pt_normalized in {"NONE", "DEFAULT"}:
         return None
-    if pt_normalized != "GMRES":
+    if pt_normalized in {"CG", "GMRESR", "TFQMR"}:
+        warnings.warn(
+            f"PRECON_TYPE={pt_normalized}: VMEX solves the 2-D preconditioned "
+            "step with matrix-free GMRES",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    elif pt_normalized != "GMRES":
         raise NotImplementedError(
-            "PRECON_TYPE must be NONE/DEFAULT or GMRES; VMEC2000's distinct "
-            "CG, GMRESR, and TFQMR evolution algorithms are not implemented"
+            f"PRECON_TYPE={pt_normalized} is not a VMEC2000 preconditioner type"
         )
     return Prec2DConfig(threshold=float(thr), finest=bool(finest))
 

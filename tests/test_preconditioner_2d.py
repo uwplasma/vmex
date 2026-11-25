@@ -130,8 +130,8 @@ def test_prec2d_config_is_hashable():
     assert hash(cfg) != hash(Prec2DConfig(threshold=1e-7))
 
 
-def test_precon_type_has_explicit_non_aliasing_semantics() -> None:
-    """NONE/DEFAULT are 1-D; other VMEC Krylov names are not GMRES aliases."""
+def test_precon_type_runs_vmec_krylov_names_on_gmres() -> None:
+    """NONE/DEFAULT are 1-D; VMEC2000's other Krylov names warn and use GMRES."""
     assert _resolve_prec2d(
         VmecInput(precon_type="NONE"), None, None, None
     ) is None
@@ -142,8 +142,14 @@ def test_precon_type_has_explicit_non_aliasing_semantics() -> None:
         _resolve_prec2d(VmecInput(precon_type="GMRES"), None, None, None),
         Prec2DConfig,
     )
-    with pytest.raises(NotImplementedError, match="CG, GMRESR, and TFQMR"):
-        _resolve_prec2d(VmecInput(precon_type="TFQMR"), None, None, None)
+    for name in ("CG", "GMRESR", "TFQMR"):
+        with pytest.warns(RuntimeWarning, match=f"PRECON_TYPE={name}"):
+            config = _resolve_prec2d(VmecInput(precon_type=name), None, None, None)
+        assert config == _resolve_prec2d(
+            VmecInput(precon_type="GMRES"), None, None, None
+        )
+    with pytest.raises(NotImplementedError, match="BICGSTAB"):
+        _resolve_prec2d(VmecInput(precon_type="BICGSTAB"), None, None, None)
 
 
 def test_precon_none_keeps_vmec2000_radial_preconditioner(monkeypatch) -> None:
