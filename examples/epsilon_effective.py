@@ -1,14 +1,17 @@
 #!/usr/bin/env python
-"""Compute the NEO_JAX effective ripple of a solved equilibrium.
+"""Compute the effective ripple of a solved equilibrium, differentiably.
 
 ``epsilon_eff^(3/2)`` measures the neoclassical transport a stellarator's field
-ripple drives in the 1/nu regime. VMEX computes it straight from a solved
-equilibrium through NEO_JAX, with the Boozer transform done internally, so no
-``boozmn`` file is written.
+ripple drives in the 1/nu regime. VMEX evaluates Nemov's bounce integrals along
+Boozer field lines (NEO_JAX) directly from the solver state (Boozer transform included, no
+``boozmn`` or WOUT file), so the same call is a differentiable objective: see
+``test_neoclassical.py`` for its gradient with respect to boundary coefficients.
 
 A quasi-axisymmetric field has a very small ripple (about 1e-8 for this deck),
-at the level where the profile is not monotonic in s. Raise the NEO controls
-for anything beyond an order-of-magnitude statement.
+so the profile there is a statement about the residual symmetry breaking and is
+not monotonic in s.  The default ``neo_jax.RippleBudget`` holds 1 % on non-quasi-symmetric
+fields (raise it below about 1e-7); it agrees with converged NEO_JAX, xneo and DESC runs to
+0.2 to 3 %.
 
 Needs the optional ``neoclassical`` extra: ``pip install "vmex[neoclassical]"``.
 """
@@ -17,7 +20,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from neo_jax import NeoConfig
 
 import vmex as vj
 from vmex import optimize as opt
@@ -25,27 +27,12 @@ from vmex import optimize as opt
 # Input deck:
 INPUT_FILE = Path(__file__).resolve().parent / "data" / "input.LandremanPaul2021_QA_lowres"
 
-# Flux surfaces the effective ripple is evaluated on:
+# Flux surfaces the effective ripple is evaluated on (linear interpolation in s
+# between the two bracketing half-mesh rows):
 SURFACES = np.linspace(0.15, 0.95, 5)
-
-# NEO controls: the resolution of vmex.core.neoclassical.diagnostic_neo_config,
-# about 2.5 % from a much finer reference on optimized equilibria; raise them
-# for a publication calculation.  Setting max_rational_field_periods to 0 asks
-# for an unlimited exact rational correction, which on a near-rational surface
-# does not finish in an example's budget, so it is bounded here:
-NEO_CONFIG_ARGS = dict(theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
-                       nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
-                       max_rational_field_periods=100000)
 
 # Figure written to the working directory:
 FIGURE_PATH = Path("epsilon_effective.png")
-
-# This example has no VMEX_EXAMPLES_CI smoke path, deliberately.  Coarsening
-# the NEO controls enough to matter destroys the result: at theta_n/phi_n 12,
-# npart 6 and acc_req 0.3 the profile came back about four times too large, for
-# a saving of 91 s to 54 s.  Its test is gated on
-# the optional neoclassical extra rather than on runtime, so a cheaper lane
-# would buy nothing and degrade the value this example exists to show.
 
 ###############################################################################
 # End of input parameters.
@@ -59,16 +46,16 @@ equilibrium = opt.solve_equilibrium(vj.VmecInput.from_file(INPUT_FILE))
 ### Compute the effective ripple ##############################################
 
 print("Transforming to Boozer coordinates and calculating epsilon_eff^(3/2)...")
-NEO_CONFIG = NeoConfig(**NEO_CONFIG_ARGS)
-s, epsilon_effective_3_2 = vj.epsilon_effective_from_wout(
-    equilibrium.wout, surfaces=SURFACES, config=NEO_CONFIG)
+epsilon_effective_3_2 = vj.epsilon_effective_3_2_from_state(
+    equilibrium.state, equilibrium.runtime, SURFACES)
+
 ### Print, plot and save ######################################################
 
-print("s =", np.asarray(s))
+print("s =", SURFACES)
 print("epsilon_eff^(3/2) =", np.asarray(epsilon_effective_3_2))
 
 figure, axis = plt.subplots(figsize=(5.2, 3.8))
-axis.semilogy(s, epsilon_effective_3_2, "o-")
+axis.semilogy(SURFACES, epsilon_effective_3_2, "o-")
 axis.set(xlabel=r"$s=\psi/\psi_b$", ylabel=r"$\epsilon_{\rm eff}^{3/2}$")
 axis.grid(alpha=0.25, which="both")
 figure.tight_layout()

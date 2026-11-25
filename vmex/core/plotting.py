@@ -903,8 +903,7 @@ def _boozer_summary_data(
 # ==========================================================================
 
 #: Compact ``Gamma_c`` sampling for the summary trend panel — radial ordering
-#: quality, not publication numbers (the ``diagnostic_neo_config`` analogue;
-#: the value carries the resolution scatter documented in
+#: quality, not publication numbers (the value carries the resolution scatter documented in
 #: :func:`vmex.core.fastion.fast_ion_from_wout`).
 _GAMMA_C_DIAGNOSTIC = dict(
     n_lines=8, n_transits=3, nodes_per_period=16, n_panel=16, n_level=16, n_well=24, n_dense=48)
@@ -1015,19 +1014,16 @@ def _epsilon_effective_profile(booz: dict[str, Any] | None, note: str):
     if booz.get("neo_booz") is None:
         return None, None, "NEO Boozer tables unavailable"
     try:
-        from .neoclassical import diagnostic_neo_config, epsilon_effective_from_boozer
+        from .neoclassical import epsilon_effective_3_2_from_boozer
 
-        surfaces, values = epsilon_effective_from_boozer(
-            _neo_surface_subset(booz["neo_booz"]), config=diagnostic_neo_config())
-    except ImportError:
-        return None, None, "effective ripple requires NEO_JAX (vmex[neoclassical])"
-    except Exception as exc:  # noqa: BLE001 - summary stays usable without NEO
-        return None, None, f"NEO evaluation failed: {type(exc).__name__}: {exc}"
+        surfaces, values = epsilon_effective_3_2_from_boozer(_neo_surface_subset(booz["neo_booz"]))
+    except Exception as exc:  # noqa: BLE001 - summary stays usable without the ripple
+        return None, None, f"effective-ripple evaluation failed: {type(exc).__name__}: {exc}"
     surfaces = np.asarray(surfaces, dtype=float)
     values = np.asarray(values, dtype=float)
     keep = np.isfinite(values) & (values > 0.0)
     if not keep.any():
-        return None, None, "NEO returned no finite positive values"
+        return None, None, "no finite positive effective ripple"
     return surfaces[keep], values[keep], ""
 
 

@@ -5,13 +5,8 @@ eqs. 14-16, 25; the bounce-averaged drifts as derivatives of the second adiabati
 field lines).  This module is the adapter: solver state or wout to the Boozer spectra of five neighbouring
 half-mesh rows around each requested surface (the quartic radial fit of ``|B|``, ``iota`` and ``G + iota I``
 is inside the kernel), and the least-squares terms.  Surfaces snap to the nearest half-mesh row.
-Once the ripple adapter of ``vmex.core.neoclassical`` lands, its state-to-NEO conversion duplicates the
-body of :func:`fast_ion_from_state`: the shared helper would be ``_boozer_rows(state, rt, rows, mboz, nboz)``
-(``boozer_spectrum_state`` on the half-mesh ``rows`` then the ``nfp_b/ixm_b/.../s_b`` dict that
-``neo_jax.booz_xform_to_boozerdata_jax`` consumes), next to ``neoclassical._neo_boozer_data`` (the wout route);
-``_rows`` here and ``neoclassical._bracket`` are two row selections (five centred rows against the bracketing
-pair) over the same half-mesh.
-Needs ``neo-jax`` with ``neo_jax.fastion`` (``pip install "vmex[neoclassical]"``).
+The Boozer tables come from the helpers of :mod:`vmex.core.neoclassical`.
+Needs ``neo-jax >= 1.2.0`` (``pip install "vmex[neoclassical]"``).
 """
 
 from __future__ import annotations
@@ -22,8 +17,8 @@ import numpy as np
 
 import jax.numpy as jnp
 
-from .neoclassical import _neo_boozer_data
-from .omnigenity import _ResidualTerm, boozer_spectrum_state
+from .neoclassical import _half_mesh, _neo_boozer_data, _state_boozer
+from .omnigenity import _ResidualTerm
 
 __all__ = ["GammaAlpha", "GammaC", "fast_ion_from_state", "fast_ion_from_wout"]
 
@@ -48,16 +43,11 @@ def fast_ion_from_state(state, rt, surfaces: Sequence[float] = (0.35, 0.6, 0.85)
     """``gamma_c``, ``gamma_alpha`` and ``f_trapped`` at ``surfaces`` of a solved state (traceable)."""
     from neo_jax import booz_xform_to_boozerdata_jax
 
-    ns = int(np.shape(rt.setup.s_full)[0])
-    s_half = (np.arange(ns - 1) + 0.5) / (ns - 1)
+    s_half = _half_mesh(rt)
     out, used = [], []
     for rows in _rows(s_half, surfaces):
         used.append(s_half[rows[2]])
-        b = boozer_spectrum_state(state, rt, surfaces=s_half[rows], mboz=mboz, nboz=nboz, geometry=True)
-        booz = {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
-                "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"]}
-        booz |= {k: b[k] for k in ("bmnc_b", "rmnc_b", "zmns_b", "pmns_b")
-                 + (("bmns_b", "rmns_b", "zmnc_b", "pmnc_b") if bool(rt.setup.lasym) else ())}
+        booz = _state_boozer(state, rt, s_half[rows], mboz, nboz)
         out.append(_proxies(booz_xform_to_boozerdata_jax(
             booz, mode_first=False, mode_indices=np.arange(len(booz["ixm_b"]))), budget))
     gc, ga, ft = (jnp.stack(v) for v in zip(*out))
