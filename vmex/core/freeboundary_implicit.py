@@ -408,6 +408,9 @@ _FREE_HOT_CACHE: dict[FreeBoundaryImplicitConfig, Any] = {}
 _FREE_LAST_RESULT: dict[FreeBoundaryImplicitConfig, Any] = {}
 #: What :func:`_anchor_root` reported for the last solve (``None``: skipped).
 _FREE_LAST_ANCHOR: dict[FreeBoundaryImplicitConfig, Any] = {}
+#: The last anchor's preconditioner per config: the next trial's anchor starts
+#: from it and rebuilds when GMRES says it is stale (``_ANCHOR_REFACTOR_KRYLOV``).
+_FREE_LAST_BULK: dict[FreeBoundaryImplicitConfig, Any] = {}
 
 
 def _mask_key(cfg: FreeBoundaryImplicitConfig) -> tuple:
@@ -1568,10 +1571,11 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
 
     initial_response = _edge_response(
         cfg, params, field_parameters, state, rcon0, zcon0)
-    initial_bulk = bulk = factor(z, initial_response)
+    reused = _FREE_LAST_BULK.get(cfg)
+    initial_bulk = bulk = factor(z, initial_response) if reused is None else reused
     z0, force0 = z, raw(z)
     best_z, best = z, base
-    factorizations = 1
+    factorizations = int(reused is None)
     steps = krylov = attempts = 0
     # An attempt whose first step would start at or above the factor the
     # previous attempt's first step accepted retraces that attempt exactly
@@ -1599,6 +1603,14 @@ def _anchor_root(cfg, params, field_parameters, state, mask, rcon0, zcon0,
                 factorizations += 1
             newton, iterations, linear = correction(force, z, _ANCHOR_FORCING)
             krylov += iterations
+            if bulk is reused and iterations > _ANCHOR_REFACTOR_KRYLOV:
+                # The last trial's preconditioner is stale here: build this
+                # point's own and solve again, as without the reuse.
+                initial_bulk = bulk = factor(z, response)
+                factorizations += 1
+                newton, iterations, linear = correction(force, z, _ANCHOR_FORCING)
+                krylov += iterations
+            _FREE_LAST_BULK[cfg] = bulk
             refactor = iterations > _ANCHOR_REFACTOR_KRYLOV
             level = float(jnp.linalg.norm(newton))
             step = _unpack_projected(newton, mask, cfg=cfg)
