@@ -609,24 +609,29 @@ def _prefix_plus_partial(full_interval, partial, idx):
     return prefix[idx] + partial
 
 
-def _cubic_spline(x_knots, y_knots, x, *, integrate: bool):
-    """Evaluate (or integrate from the first knot) VMEC's clamped cubic spline."""
+def _cubic_spline(x_knots, y_knots, x, *, integrate: bool, akima: bool = False):
+    """Evaluate (or integrate from the first knot) VMEC's clamped cubic or Akima spline.
+
+    VMEC's ``spline_akima`` extends the end secants by ghost parabolas, which
+    is Akima's linear continuation of the secants.  VMEC stops for fewer than
+    four Akima knots; here those fall back to the clamped cubic so tiny
+    diagnostic grids stay usable.
+    """
     x = jnp.asarray(x)
     n = int(x_knots.shape[0])
     if n == 0:
         return jnp.zeros_like(x)
     if n == 1:
         return y_knots[0] * x if integrate else jnp.broadcast_to(y_knots[0], x.shape)
-    spline = _vmec_cubic(x_knots, y_knots)
+    if akima and n >= 4:
+        spline = cubic_spline(x_knots, y_knots, slopes="akima")
+    else:
+        slopes = _cubic_endpoint_derivatives(x_knots, y_knots)
+        spline = cubic_spline(x_knots, y_knots, bc="clamped", end_slopes=slopes)
     x = jnp.clip(x, x_knots[0], x_knots[-1])
     if integrate:
         return cubic_spline_antiderivative(spline, x)
     return cubic_spline_evaluate(spline, x)
-
-
-def _vmec_cubic(x_knots, y_knots):
-    slopes = _cubic_endpoint_derivatives(x_knots, y_knots)
-    return cubic_spline(x_knots, y_knots, bc="clamped", end_slopes=slopes)
 
 
 def _line_segment(x_knots, y_knots, x, *, integrate: bool):
@@ -646,80 +651,9 @@ def _line_segment(x_knots, y_knots, x, *, integrate: bool):
     return _prefix_plus_partial(full, partial, idx)
 
 
-def _akima_coefficients(x_knots, y_knots):
-    """VMEC/STELLOPT Akima Hermite coefficients (spline_akima.f).
-
-    VMEC stops for fewer than four knots; here small knot counts fall back to
-    the cubic-spline Hermite form so tiny diagnostic grids stay usable.
-    """
-    n = int(x_knots.shape[0])
-    h = x_knots[1:] - x_knots[:-1]
-    if n < 4:
-        return _hermite(x_knots, y_knots, _vmec_cubic(x_knots, y_knots).slopes, h)
-
-    xloc = jnp.zeros((n + 4,), dtype=x_knots.dtype).at[2 : 2 + n].set(x_knots)
-    yloc = jnp.zeros((n + 4,), dtype=y_knots.dtype).at[2 : 2 + n].set(y_knots)
-    xloc = xloc.at[0].set(2.0 * xloc[2] - xloc[4])
-    xloc = xloc.at[1].set(xloc[2] + xloc[3] - xloc[4])
-    xloc = xloc.at[n + 3].set(2.0 * xloc[n + 1] - xloc[n - 1])
-    xloc = xloc.at[n + 2].set(xloc[n + 1] + xloc[n] - xloc[n - 1])
-
-    m = jnp.zeros((n + 3,), dtype=y_knots.dtype)
-    slopes = (yloc[3 : 2 + n] - yloc[2 : 1 + n]) / (xloc[3 : 2 + n] - xloc[2 : 1 + n])
-    m = m.at[2 : n + 1].set(slopes)
-
-    cl = (m[3] - m[2]) / (xloc[4] - xloc[2])
-    bl = m[2] - cl * (xloc[3] - xloc[2])
-    cr = (m[n] - m[n - 1]) / (xloc[n + 1] - xloc[n - 1])
-    br = m[n] - cr * (xloc[n] - xloc[n + 1])
-    yloc = yloc.at[1].set(yloc[2] + bl * (xloc[1] - xloc[2]) + cl * (xloc[1] - xloc[2]) ** 2)
-    yloc = yloc.at[0].set(yloc[2] + bl * (xloc[0] - xloc[2]) + cl * (xloc[0] - xloc[2]) ** 2)
-    yloc = yloc.at[n + 2].set(
-        yloc[n + 1] + br * (xloc[n + 2] - xloc[n + 1]) + cr * (xloc[n + 2] - xloc[n + 1]) ** 2
-    )
-    yloc = yloc.at[n + 3].set(
-        yloc[n + 1] + br * (xloc[n + 3] - xloc[n + 1]) + cr * (xloc[n + 3] - xloc[n + 1]) ** 2
-    )
-
-    m = m.at[0].set((yloc[1] - yloc[0]) / (xloc[1] - xloc[0]))
-    m = m.at[1].set((yloc[2] - yloc[1]) / (xloc[2] - xloc[1]))
-    m = m.at[n + 1].set((yloc[n + 2] - yloc[n + 1]) / (xloc[n + 2] - xloc[n + 1]))
-    m = m.at[n + 2].set((yloc[n + 3] - yloc[n + 2]) / (xloc[n + 3] - xloc[n + 2]))
-
-    dm = jnp.abs(m[1:] - m[:-1])
-    tangents = []
-    for idx in range(1, n + 1):
-        denom = dm[idx + 1] + dm[idx - 1]
-        weighted = (dm[idx + 1] * m[idx] + dm[idx - 1] * m[idx + 1]) / jnp.where(
-            denom == 0.0, 1.0, denom
-        )
-        tangents.append(jnp.where(denom == 0.0, 0.5 * (m[idx] + m[idx + 1]), weighted))
-    return _hermite(x_knots, y_knots, jnp.asarray(tangents), h)
-
-
-def _hermite(x_knots, y_knots, t, h):
-    """Power coefficients of the cubic Hermite pieces with knot slopes ``t``."""
-    interval_slope = (y_knots[1:] - y_knots[:-1]) / h
-    c = (3.0 * interval_slope - t[1:] - 2.0 * t[:-1]) / h
-    d = (t[1:] + t[:-1] - 2.0 * interval_slope) / (h * h)
-    return y_knots[:-1], t[:-1], c, d, h
-
-
 def _akima_spline(x_knots, y_knots, x, *, integrate: bool):
-    """Evaluate (or integrate from 0) VMEC's Akima spline through the knots."""
-    x = jnp.asarray(x)
-    n = int(x_knots.shape[0])
-    if n == 0:
-        return jnp.zeros_like(x)
-    if n == 1:
-        return y_knots[0] * x if integrate else jnp.broadcast_to(y_knots[0], x.shape)
-    _, idx, h, dx = _knot_setup(x_knots, y_knots, x)
-    a, b, c, d, h_all = _akima_coefficients(x_knots, y_knots)
-    if not integrate:
-        return a[idx] + dx * (b[idx] + dx * (c[idx] + d[idx] * dx))
-    full = a * h_all + 0.5 * b * h_all**2 + (c / 3.0) * h_all**3 + 0.25 * d * h_all**4
-    partial = dx * (a[idx] + dx * (0.5 * b[idx] + dx * ((c[idx] / 3.0) + 0.25 * d[idx] * dx)))
-    return _prefix_plus_partial(full, partial, idx)
+    """Evaluate (or integrate from the first knot) VMEC's Akima spline."""
+    return _cubic_spline(x_knots, y_knots, x, integrate=integrate, akima=True)
 
 
 _TABULATED = {
