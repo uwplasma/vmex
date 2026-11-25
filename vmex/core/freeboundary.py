@@ -69,7 +69,7 @@ from .errors import (
 )
 from .fields import magnetic_fields, metric_elements
 from .fourier import ModeTable
-from .geometry import apply_lambda_axis_closure, half_mesh_jacobian, real_space_geometry
+from .geometry import apply_lambda_axis_closure, apply_lambda_cos_axis_closure, half_mesh_jacobian, real_space_geometry
 from .input import VmecInput
 from .mgrid import MgridField
 from .position_control import (
@@ -149,12 +149,13 @@ def _vacuum_scalars(state: SpectralState, rt: SolverRuntime):
         state, modes=rt.modes, lthreed=setup.lthreed, lasym=setup.lasym, lconm1=setup.lconm1
     )
     lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=rt.modes, ntor=rt.resolution.ntor)
+    lambda_cos = apply_lambda_cos_axis_closure(state.L_cos, modes=rt.modes)
 
     def synth(a, b, closure):
         R_cos, R_sin, Z_cos, Z_sin = (c[a:b] for c in coeffs)
         return real_space_geometry(
             R_cos=R_cos, R_sin=R_sin, Z_cos=Z_cos, Z_sin=Z_sin,
-            lambda_cos=state.L_cos[a:b], lambda_sin=lambda_sin[a:b],
+            lambda_cos=lambda_cos[a:b], lambda_sin=lambda_sin[a:b],
             modes=rt.modes, trig=rt.trig, s=setup.s_full[a:b], axis_closure=closure,
             odd_m_scaling=setup.scalxc[a:b],
         )

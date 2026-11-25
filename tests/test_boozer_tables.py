@@ -223,6 +223,19 @@ def test_lasym_tables_match_the_wout_asymmetric_families(lasym_solved):
                                    err_msg=key)
 
 
+def test_lasym_lmnc_m0_on_the_first_half_surface_matches_the_wout(lasym_solved):
+    """VMEC2000 ``totzspa`` (``totzsp_mod.f``) copies the second ``lmncc``
+    row into the axis row for ``m = 0`` and every ``n``, so the first half
+    surface sees the whole cosine lambda.  The wout writes that closed value;
+    the table synthesized from the same state must too (it was half)."""
+    wout = lasym_solved.wout
+    tables = boozer_input_tables(lasym_solved.state, lasym_solved.runtime, 1)
+    ref, mask = _match_wout_row(wout.xm, wout.xn, wout.lmnc, 1, tables["xm"], tables["xn"])
+    mask &= (np.asarray(tables["xm"]) == 0) & (np.asarray(tables["xn"]) != 0)
+    assert np.min(np.abs(ref[mask])) > 1e-4
+    np.testing.assert_allclose(np.asarray(tables["lmnc"])[mask], ref[mask], rtol=1e-12)
+
+
 @pytest.mark.parametrize("deck", ["symmetric_eq", "lasym_beta_eq"])
 def test_field_tables_match_wout_rows_at_quadrature_level(deck, request):
     """``gmnc``/``bsup*``/``bsubs*`` equal the wout engine rows exactly.

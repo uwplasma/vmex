@@ -419,6 +419,7 @@ def _state_field_spectra(inp, state, runtime=None):
     from .fourier import Resolution, mode_table, trig_tables
     from .geometry import (
         apply_lambda_axis_closure,
+        apply_lambda_cos_axis_closure,
         half_mesh_jacobian,
         real_space_geometry,
     )
@@ -457,7 +458,7 @@ def _state_field_spectra(inp, state, runtime=None):
     lambda_sin = apply_lambda_axis_closure(state.L_sin, modes=modes, ntor=ntor)
     geometry = real_space_geometry(
         R_cos=R_cos_p, R_sin=R_sin_p, Z_cos=Z_cos_p, Z_sin=Z_sin_p,
-        lambda_cos=state.L_cos, lambda_sin=lambda_sin,
+        lambda_cos=apply_lambda_cos_axis_closure(state.L_cos, modes=modes), lambda_sin=lambda_sin,
         modes=modes, trig=trig, s=grids.s_full)
     jacobian = half_mesh_jacobian(geometry, s=grids.s_full)
     metrics = metric_elements(geometry, s=grids.s_full)
@@ -513,7 +514,7 @@ def _state_field_spectra(inp, state, runtime=None):
         nfp=nfp, ns=ns, xm=xm, xn=xn, xmn=xm_nyq, xnn=xn_nyq,
         rmnc=rmnc, zmns=zmns, rmns=rmns, zmnc=zmnc,
         bsupu=bsupumnc, bsupv=bsupvmnc, bsupu_s=bsupumns, bsupv_s=bsupvmns,
-        lmns=lmns, lmnc=(apply_lambda_axis_closure(state.L_cos, modes=modes, ntor=ntor)
+        lmns=lmns, lmnc=(apply_lambda_cos_axis_closure(state.L_cos, modes=modes)
                          * jnp.asarray(fields.lamscale) * mode_scale[None, :] if lasym else None),
         phipf=jnp.asarray(prof["phipf"]),
         chipf=(((-1.0 if lflip else 1.0) * jnp.asarray(prof["chipf"]))
