@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 
 jax = pytest.importorskip("jax")
+import jax.numpy as jnp  # noqa: E402
 
 jax.config.update("jax_enable_x64", True)
 
@@ -542,3 +543,54 @@ def test_hot_restart_rotates_lasym_state_into_the_polar_angle():
     for name in ("R_cos", "R_sin", "Z_cos", "Z_sin", "L_cos", "L_sin"):
         np.testing.assert_array_equal(np.asarray(getattr(again, name)),
                                       np.asarray(getattr(cold.state, name)))
+
+
+def test_warm_started_solve_differentiates_against_finite_differences():
+    """A solve given ``initial_state`` is differentiable, in the state and in the boundary.
+
+    JAX 0.12 puts the array layout in the aval, and a ``lax.cond`` in the
+    iteration body whose branches differ in layout rejects a restarted state
+    (seen on Linux x86-64 CPU only).  The restarted solve must run, and
+    ``jax.jvp`` / ``jax.grad`` of a scalar of the returned state and of the
+    boundary must match finite differences.
+    """
+    from vmex import optimize as opt
+
+    inp = VmecInput.from_file(DATA / "input.nfp4_QH_warm_start")
+    tight = dict(forward_ftol=1e-14, forward_max_iterations=20000)
+    cold = opt.solve_equilibrium(inp, **tight)
+    warm = opt.solve_equilibrium(inp, initial_state=cold.state, **tight)
+    assert warm.result.converged
+
+    # state route: gradient of the aspect ratio with respect to the state pytree
+    rt = warm.runtime
+    fun = lambda state: opt.aspect_ratio(state, rt)  # noqa: E731
+    tangent = jax.tree.map(lambda a: jnp.cos(jnp.arange(a.size).reshape(a.shape)), warm.state)
+    value, jvp = jax.jvp(fun, (warm.state,), (tangent,))
+    grad = jax.grad(fun)(warm.state)
+    dot = sum(float(jnp.vdot(g, t)) for g, t in zip(jax.tree.leaves(grad), jax.tree.leaves(tangent)))
+    step = 1e-6
+    plus, minus = (
+        float(fun(jax.tree.map(lambda a, t: a + sign * step * t, warm.state, tangent)))
+        for sign in (1.0, -1.0)
+    )
+    assert float(value) == pytest.approx(float(opt.aspect_ratio(warm.state, rt)), rel=1e-12)
+    assert float(jvp) == pytest.approx((plus - minus) / (2 * step), rel=1e-6)
+    assert dot == pytest.approx(float(jvp), rel=1e-9)
+
+    # boundary route: the reverse gradient through the warm-started solve
+    problem = opt.VmecProblem.from_loss(
+        inp, lambda state, runtime: opt.aspect_ratio(state, runtime),
+        max_mode=1, restart_from=cold, **tight)
+    x0 = jnp.asarray(problem.x0)
+    _, gradient = problem.jax_value_and_grad(x0)
+
+    def value_at(x):
+        eq = opt.solve_equilibrium(
+            problem.input_from_x(np.asarray(x)), initial_state=cold.state, **tight)
+        return float(opt.aspect_ratio(eq.state, eq.runtime))
+
+    h = 1e-5
+    direction = jnp.zeros_like(x0).at[0].set(1.0)
+    fd = (value_at(x0 + h * direction) - value_at(x0 - h * direction)) / (2 * h)
+    assert float(gradient[0]) == pytest.approx(fd, rel=1e-4)
