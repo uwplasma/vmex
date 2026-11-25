@@ -1055,7 +1055,7 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - ``FastIonBudget(n_lines=8, n_transits=2)``
      - the default (16 lines, 4 transits, 24 nodes per period) or finer
      - see the convergence table below
-     - 4-6 s per surface value on four office cores
+     - 4-6 s per surface value on four CPU cores
    * - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state`
      - default budget (16 lines, 3 + 3 transits, 16 nodes per period, 4 pitch nodes, 32 per well)
      - 48 lines, 6 + 6 transits, 48 nodes per period, 8 pitch nodes, 64 per well
@@ -1071,7 +1071,7 @@ reorder near-equal candidates; between distinct designs the order is stable.
 
 **Convergence.**  Values at the default budget (64 nodes per well piece,
 cut at its stationary points) with 16 / 32 / 64 lines, at :math:`s=0.5` of
-four configurations (office CPU).  :math:`\Gamma_c` is converged to better than
+four configurations (CPU).  :math:`\Gamma_c` is converged to better than
 1 % at 16 lines on QH and QI, 1 % on QA and 4.5 % on the nfp 4 ellipse (still
 moving at 64 lines: iota near a low-order rational costs extra lines).
 :math:`\Gamma_\alpha` is converged to 0.2 % on QA and QH, 0.6 % on the nfp 4

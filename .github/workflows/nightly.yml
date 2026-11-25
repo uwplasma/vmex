@@ -142,6 +142,7 @@ jobs:
             tests/test_virtual_casing_api.py \
             tests/test_virtual_casing_physics.py::test_synthetic_surface_gradient_fd_validates \
             tests/test_neoclassical.py::test_state_and_wout_routes_agree_and_a_good_qa_has_a_tiny_ripple \
+            tests/test_fastion.py::test_adapter_values_ordering_and_bounds \
             tests/test_turbulence.py::test_drive_gradients_reach_gkx_as_a_over_l \
             tests/test_turbulence_cli.py::test_turbulence_smoke \
             tests/test_turbulence.py::test_growth_rate_gradient_matches_finite_differences \
