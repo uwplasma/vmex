@@ -142,7 +142,10 @@ def _device(leaves: list) -> Any:
 def _structure(args: tuple, static: dict) -> tuple[str, Any] | None:
     """Exact call-structure string and target device, or None when not safely hashable."""
     leaves, treedef = jax.tree_util.tree_flatten(args)
-    parts = [str(treedef), repr(sorted(static.items()))]
+    # A static argument with an ``_aot_key()`` (a content digest) is keyed by it.
+    parts = [str(treedef), repr(sorted(
+        (name, value._aot_key() if hasattr(value, "_aot_key") else value)
+        for name, value in static.items()))]
     for leaf in leaves:
         if isinstance(leaf, jax.core.Tracer):
             return None
@@ -181,6 +184,7 @@ class AotLane:
         self.__doc__ = fn.__doc__
         self._static_names = tuple(jit_kwargs.get("static_argnames") or ())
         self._memory: dict[str, Any] = {}
+        self._lock = threading.Lock()     # threads asking for one program build it once
         _LANES.append(self)
 
     def __getattr__(self, name: str) -> Any:     # lower, eval_shape, ...
@@ -206,6 +210,14 @@ class AotLane:
         if found is None:
             return None
         text, device = found
+        hit = self._memory.get(text)
+        if hit is not None:
+            return hit
+        with self._lock:
+            return self._load_or_build(directory, text, device, args, static)
+
+    def _load_or_build(self, directory: Path, text: str, device: Any,
+                       args: tuple, static: dict) -> Any:
         hit = self._memory.get(text)
         if hit is not None:
             return hit
