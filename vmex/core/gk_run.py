@@ -75,6 +75,8 @@ class TurbulenceSettings:
     @property
     def ntheta(self) -> int:
         """Total parallel points ``nz * npol``."""
+        if self.nz is None:
+            raise ValueError("nz follows the equilibrium: resolve it with flux_tube_box(cfg, geom)['nz'] first")
         return int(round(self.nz * self.npol))
 
 
@@ -82,6 +84,7 @@ class TurbulenceSettings:
 # time fit is not a clean growing mode.
 _T_LINEAR = 50.0
 _NZ_MIN = 48  # points per poloidal turn
+_NZ_MAX = 80  # cap of the rule: low iota or many periods would ask for thousands of points
 _NU_ION = 0.01
 _BETA_KINETIC = 1e-4  # small finite beta with A_par: GKX's kinetic-electron stepper needs it
 _ELECTRON_MOMENTS = (4, 48)  # (Nl, Nm), GKX's nonlinear kinetic-electron default
@@ -168,7 +171,7 @@ def flux_tube_box(cfg: TurbulenceSettings, geom: dict | None = None) -> dict:
     """Box of the flux tube: the one place the parallel resolution and the ``jtwist`` / ``Lx`` rule live.
 
     Points per poloidal turn: 16 per field period (``nfp / |iota|`` periods per turn), at least 48
-    (``cfg.nz`` overrides). Below that the linear growth rate moves by 1-5% and, from about 24 per
+    (``cfg.nz`` overrides), capped at ``_NZ_MAX``. Below that the linear growth rate moves by 1-5% and, from about 24 per
     turn down, jumps to a grid-scale branch (measured on five public equilibria).
     ``jtwist = None`` leaves GKX's own rule (the line is cut where ``2 s_hat gds21 / gds22`` last
     crosses an integer inside ``npol`` turns, so ``Lx = Ly``); an integer is written to the deck.
@@ -177,7 +180,9 @@ def flux_tube_box(cfg: TurbulenceSettings, geom: dict | None = None) -> dict:
     nz = cfg.nz
     if nz is None:
         nz = max(_NZ_MIN, 8 * math.ceil(2 * int(geom["nfp"]) * abs(float(geom["q"]))))
-    return {"y0": y0, "lx": 2 * np.pi * y0, "ly": 2 * np.pi * y0, "jtwist": None, "nz": int(nz)}
+        capped, nz = nz, min(nz, _NZ_MAX)
+    return {"y0": y0, "lx": 2 * np.pi * y0, "ly": 2 * np.pi * y0, "jtwist": None, "nz": int(nz),
+            "capped_from": None if cfg.nz is not None or capped == nz else int(capped)}
 
 
 def twist_estimate(geom: dict, cfg: TurbulenceSettings) -> tuple[int, float]:
@@ -359,7 +364,11 @@ def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
     if not abs(float(geom["q"])) < 1e3:
         raise ValueError(f"iota is ~0 at s={cfg.s:g}: the field line never closes poloidally, so no flux tube is defined")
 
-    cfg = replace(cfg, nz=flux_tube_box(cfg, geom)["nz"])
+    box = flux_tube_box(cfg, geom)
+    cfg = replace(cfg, nz=box["nz"])
+    if box["capped_from"]:
+        emit(f"          points per turn capped at {box['nz']} (16 per field period asks {box['capped_from']}): "
+             "the line is under-resolved; check by rerunning with a larger nz in TurbulenceSettings")
     # GKX releases up to 2.9.0 have no saturation_t_min and reject it in a deck.
     has_t_min = "saturation_t_min" in {f.name for f in dataclasses.fields(TimeConfig)}
     lin_case = gkx.load(write_deck(outdir / f"{label}_gkx_linear.toml", wout_path, cfg, nonlinear=False))

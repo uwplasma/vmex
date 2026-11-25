@@ -32,7 +32,7 @@ is not a clean growing mode. Nonlinear runs use the adaptive CFL-controlled RK4 
 
 Everything else is fixed to the values the GPU study below supports and lives in
 `vmex.core.gk_run.TurbulenceSettings` (Python API): the `k_y` scan (`0.1` to `1`, 8 points), `96 x 96` points in
-`(x, y)`, three poloidal turns of `max(48, 8 ceil(2 nfp / |ι|))` points each (16 per field period), `(N_l, N_m) = (4, 8)` for the ions, `float32`, ion
+`(x, y)`, three poloidal turns of `min(80, max(48, 8 ceil(2 nfp / |ι|)))` points each (16 per field period up to 80; the run says when the cap binds; `nz` in `TurbulenceSettings` sets the points per turn directly), `(N_l, N_m) = (4, 8)` for the ions, `float32`, ion
 collisionality `ν = 0.01`, hypercollisions, the `k_⊥` hyperdiffusion `D_hyper = 0.05` and the earliest start of
 the saturation window, `t = 300`. Pass a modified `TurbulenceSettings` to `run_turbulence`, or edit the
 `<case>_gkx_linear.toml` and `<case>_gkx_nonlinear.toml` decks the run writes and rerun them with `gkx run`.

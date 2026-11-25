@@ -75,6 +75,13 @@ def test_points_per_turn_rule():
     # 16 per field period, at least 48: tokamak, nfp 3 QI, nfp 4 (iota 1.1), nfp 6 (iota 1.42)
     assert [box(1, 1 / 0.875), box(3, 1 / 1.061), box(4, 1 / 1.1), box(6, 1 / 1.419)] == [48, 48, 64, 72]
     assert box(4, 1 / 1.1, nz=24) == 24  # an explicit nz wins
+    assert box(1, -2.0) == 48  # the sign of iota does not matter
+    # low iota or many periods would ask for 160 to 16000 points per turn: capped at 80 (240 in all)
+    assert [box(1, 1 / 0.1), box(10, 1.0), box(1, 1e3 - 1)] == [80, 80, 80]
+    assert gk_run.flux_tube_box(gk_run.TurbulenceSettings(), {"nfp": 10, "q": 1.0})["capped_from"] == 160
+    assert gk_run.flux_tube_box(gk_run.TurbulenceSettings(nz=200), {"nfp": 10, "q": 1.0})["capped_from"] is None
+    with pytest.raises(ValueError, match="flux_tube_box"):
+        gk_run.TurbulenceSettings().ntheta  # noqa: B018
 
 
 def test_kinetic_electron_deck_follows_gkx_example(tmp_path):
