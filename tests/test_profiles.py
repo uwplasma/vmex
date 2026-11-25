@@ -234,6 +234,40 @@ def test_cubic_spline_kinds_match_scipy_values_and_knot_jacobian(kind, n):
         assert np.max(np.abs(diff)) <= 1e-13 * np.max(np.abs(jac_want))
 
 
+@pytest.mark.parametrize("n", [4, 5, 8])
+@pytest.mark.parametrize("kind", ["akima_spline", "akima_spline_ip"])
+def test_akima_spline_matches_scipy_akima_values_and_knot_jacobian(kind, n):
+    """VMEC's spline_akima is Akima (1970): its ghost parabolas extend the end secants linearly.
+
+    Reference: SciPy Akima1DInterpolator, whose ends continue the secants
+    linearly.  The Jacobian is checked against central differences of the
+    reference (Akima is not linear in the knot values).
+    """
+    from scipy.interpolate import Akima1DInterpolator
+
+    x = np.sort(np.array([0.0, 0.07, 0.19, 0.3, 0.46, 0.6, 0.81, 1.0])[np.linspace(0, 7, n).astype(int)])
+    y = 1.0e3 * np.exp(-2.0 * x) * (1.0 + 0.3 * np.sin(7.0 * x))
+    s = np.linspace(0.0, 1.1, 37)  # current() folds s < 0 to |s|
+    q = np.clip(s, x[0], x[-1])
+
+    def reference(yk):
+        spline = Akima1DInterpolator(x, yk)
+        return np.array([spline.integrate(x[0], v) for v in q]) if kind.endswith("ip") else spline(q)
+
+    def profile(yk):
+        if kind.endswith("ip"):
+            return profiles.current(kind, None, x, yk, s)
+        return profiles.evaluate_profile(kind, None, x, yk, s)
+
+    want = reference(y)
+    assert np.max(np.abs(np.asarray(profile(jnp.asarray(y))) - want)) <= 1e-12 * np.max(np.abs(want))
+    eps = 1e-4
+    jac_want = np.stack([(reference(y + eps * e) - reference(y - eps * e)) / (2 * eps) for e in np.eye(n)], 1)
+    for jac in (jax.jacfwd(profile), jax.jacrev(profile)):
+        diff = np.asarray(jac(jnp.asarray(y))) - jac_want
+        assert np.max(np.abs(diff)) <= 1e-7 * np.max(np.abs(jac_want))
+
+
 def test_akima_spline_reproduces_a_quadratic_at_both_edges():
     """The end extrapolation is exact for quadratics; the right edge used to miss by 1e-3."""
     x = np.linspace(0.0, 1.0, 11)
