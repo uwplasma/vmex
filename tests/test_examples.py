@@ -126,6 +126,7 @@ UNTESTED_EXAMPLES = {
     "examples/optimization/single_stage_optimization_pwO.py": "requires the full vacuum optimization; joint numerical/physics validation is separate",
     "examples/mirror/pleiades_mirror_reference.py": "needs an external Pleiades checkout",
     "examples/mirror/stellarator_mirror_hybrid.py": "mirror hybrid, covered by tests/mirror",
+    "examples/optimization/helium_ash_objective.py": "optional ESSOS residence API; exercised in test_problem.py",
         "examples/plot_optimized_families.py": "plots families produced by the tested optimization examples",
 }
 
