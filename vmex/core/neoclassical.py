@@ -1,17 +1,24 @@
-"""Effective-ripple diagnostics through the optional NEO_JAX backend."""
+"""Effective ripple ``epsilon_eff`` of VMEX equilibria: Boozer tables to NEO_JAX bounce integrals.
+
+The physics lives in :func:`neo_jax.effective_ripple_3_2` (Nemov et al., Phys. Plasmas 6, 4622
+(1999), as bounce integrals along Boozer field lines; differentiable in forward and reverse mode).
+This module is the adapter: solver state or wout to Boozer tables, linear interpolation in ``s``
+between the two half-mesh rows that bracket each surface, and the NEO transport screen.
+Needs ``neo-jax >= 1.2.0`` (``pip install "vmex[neoclassical]"``).
+"""
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from typing import Sequence
 
 import numpy as np
 
 __all__ = [
-    "diagnostic_neo_config",
+    "epsilon_effective_3_2_from_boozer",
+    "epsilon_effective_3_2_from_state",
+    "epsilon_effective_3_2_from_wout",
     "screen_transport",
     "transport_improves",
-    "epsilon_effective_from_boozer",
-    "epsilon_effective_from_wout",
 ]
 
 
@@ -28,27 +35,64 @@ def _neo_imports():
     return NeoConfig, run_neo
 
 
-def diagnostic_neo_config():
-    """Return the bounded NEO resolution used by VMEX summary figures and examples.
+def _bracket(s_half, surfaces):
+    """Static half-mesh rows ``rows`` and the weights that interpolate linearly in s to ``surfaces``."""
+    s = np.atleast_1d(np.asarray(surfaces, float))
+    hi = np.clip(np.searchsorted(s_half, s), 1, len(s_half) - 1)
+    w = np.clip((s - s_half[hi - 1]) / (s_half[hi] - s_half[hi - 1]), 0.0, 1.0)
+    rows = np.unique(np.concatenate([hi - 1, hi]))
+    return rows, np.searchsorted(rows, hi - 1), np.searchsorted(rows, hi), w
 
-    A 32 x 32 spline grid, 24 particles and 20 steps per field period.
-    Against a 96 x 96, 60-particle, 40-steps-per-period reference, the largest
-    error over ``s = 0.25, 0.5, 0.75`` on 39 optimized QI and pwO equilibria is
-    2.5% median and 10% at the 90th percentile, and the Spearman rank
-    correlation with the reference is 0.995; on ten nearby QI candidates it is
-    1.00. A 16 x 16 grid aliases the ``mboz=16`` Boozer spectrum, and fewer
-    than 20 steps per period leave 7-30% errors. Below ``epsilon_eff^(3/2)`` of
-    about 1e-5 (near-perfect quasi-symmetry) 20 steps per period do not
-    resolve the value; use 40 steps with 400-1000 steps. Pass a
-    ``neo_jax.NeoConfig`` to :func:`epsilon_effective_from_wout` for
-    publication calculations.
+
+def epsilon_effective_3_2_from_boozer(booz, budget=None, *, mode_first=None):
+    """``(s, epsilon_eff**(3/2))`` of a NEO-style Boozer mapping (``nfp_b``, ``ixm_b``, ..., ``s_b``)."""
+    from neo_jax import booz_xform_to_boozerdata_jax, effective_ripple_3_2
+
+    data = booz_xform_to_boozerdata_jax(booz, mode_first=mode_first, mode_indices=np.arange(len(booz["ixm_b"])))
+    return booz["s_b"], effective_ripple_3_2(data, budget)
+
+
+def _ripple(booz, lo, hi, w, budget, mode_first):
+    """``epsilon_eff**(3/2)`` of the Boozer rows, interpolated to the requested surfaces."""
+    values = epsilon_effective_3_2_from_boozer(booz, budget, mode_first=mode_first)[1]
+    return (1 - w) * values[lo] + w * values[hi]
+
+
+def epsilon_effective_3_2_from_state(state, rt, surfaces: Sequence[float] = (0.25, 0.5, 0.75), *,
+                                     mboz: int = 12, nboz: int = 9, budget=None):
+    r"""``epsilon_eff**(3/2)`` of a solved VMEX state at ``surfaces``, traceable end to end.
+
+    The state's Boozer tables (:func:`vmex.core.omnigenity.boozer_spectrum_state`, ``booz_xform_jax``'s
+    jittable kernel) feed :func:`neo_jax.effective_ripple_3_2` on the two half-mesh rows that bracket
+    each surface; the result is interpolated linearly in ``s``.  ``jax.grad``, ``jax.jvp`` and
+    ``jax.jacrev`` pass through :func:`vmex.core.implicit.solve_implicit` and this function alike.
+    ``budget`` is a :class:`neo_jax.RippleBudget`.  The effective ripple is ``value ** (2 / 3)``.
     """
-    NeoConfig, _ = _neo_imports()
-    return NeoConfig(
-        theta_n=32, phi_n=32, npart=24, multra=1, no_bins=50,
-        nstep_per=20, nstep_min=200, nstep_max=500, acc_req=0.02,
-        max_rational_field_periods=100000,
-    )
+    from .omnigenity import boozer_spectrum_state
+
+    ns = int(np.shape(rt.setup.s_full)[0])
+    s_half = (np.arange(ns - 1) + 0.5) / (ns - 1)
+    rows, lo, hi, w = _bracket(s_half, surfaces)
+    b = boozer_spectrum_state(state, rt, surfaces=s_half[rows], mboz=mboz, nboz=nboz, geometry=True)
+    booz = {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
+            "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"]}
+    names = ("bmnc_b", "rmnc_b", "zmns_b", "pmns_b") + (
+        ("bmns_b", "rmns_b", "zmnc_b", "pmnc_b") if bool(rt.setup.lasym) else ())
+    booz |= {k: b[k] for k in names}
+    return _ripple(booz, lo, hi, w, budget, mode_first=False)
+
+
+def epsilon_effective_3_2_from_wout(wout, surfaces: Sequence[float] = (0.2, 0.4, 0.6, 0.8, 0.95), *,
+                                    mboz: int = 12, nboz: int = 9, budget=None):
+    """``epsilon_eff**(3/2)`` at ``surfaces`` from a (VMEX or VMEC) ``wout``, interpolated like the state route."""
+    from booz_xform_jax import Booz_xform
+
+    bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
+    bx.read_wout_data(wout)
+    rows, lo, hi, w = _bracket(np.asarray(bx.s_in, float), surfaces)
+    bx.compute_surfs = [int(r) for r in rows]
+    bx.run()
+    return _ripple(_neo_boozer_data(bx, rows), lo, hi, w, budget, mode_first=True)
 
 
 def _neo_boozer_data(bx, indices):
@@ -67,63 +111,6 @@ def _neo_boozer_data(bx, indices):
         booz.update(rmns_b=np.asarray(bx.rmns_b), zmnc_b=np.asarray(bx.zmnc_b),
                     pmnc_b=-np.asarray(bx.numnc_b), bmns_b=np.asarray(bx.bmns_b))
     return booz
-
-
-def epsilon_effective_from_boozer(booz: Any, *, config=None):
-    r"""Return ``(s, epsilon_eff**(3/2))`` from Boozer-coordinate data.
-
-    ``booz`` may be a NEO_JAX ``BoozerData`` or a booz_xform-style mapping.
-    The returned NEO quantity is the effective-ripple transport measure
-    :math:`\epsilon_\mathrm{eff}^{3/2}`, conventionally named ``epstot``.
-    JAX arrays remain differentiable when the mapping and selected NEO path
-    are JAX-native.
-    """
-    NeoConfig, run_neo = _neo_imports()
-    cfg = NeoConfig() if config is None else config
-    result = run_neo(
-        booz, config=cfg, use_jax=True, progress=False, jax_surface_scan=True)
-    values = getattr(result, "eps_eff", None)
-    if values is None:
-        values = result.epsilon_effective
-    if hasattr(booz, "es"):
-        surfaces = booz.es
-    elif isinstance(booz, dict) and "s_b" in booz:
-        surfaces = booz["s_b"]
-    else:
-        surfaces = np.arange(np.asarray(values).size, dtype=float)
-    return surfaces, values
-
-
-def epsilon_effective_from_wout(
-    wout,
-    *,
-    surfaces: Sequence[float] = (0.2, 0.4, 0.6, 0.8, 0.95),
-    mboz: int = 16,
-    nboz: int = 12,
-    config=None,
-    clear_jax_caches: bool = False,
-):
-    """Compute ``epsilon_eff**(3/2)`` directly from an in-memory VMEX wout.
-
-    The same in-memory Boozer transform feeds NEO, including all LASYM
-    partners. Caches remain available unless ``clear_jax_caches=True``.
-    """
-    if clear_jax_caches:
-        import gc
-
-        import jax
-
-        jax.clear_caches(); gc.collect()
-    from booz_xform_jax import Booz_xform
-
-    bx = Booz_xform(verbose=0, mboz=int(mboz), nboz=int(nboz))
-    bx.read_wout_data(wout)
-    s_in = np.asarray(bx.s_in, dtype=float)
-    indices = sorted({int(np.argmin(np.abs(s_in - float(s)))) for s in surfaces})
-    bx.compute_surfs = indices
-    bx.run()
-    booz = _neo_boozer_data(bx, indices)
-    return epsilon_effective_from_boozer(booz, config=config)
 
 
 def screen_transport(wout, surfaces, *, mboz=24, nboz=24, config=None):

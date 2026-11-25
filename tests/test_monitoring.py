@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 from pathlib import Path
 from types import SimpleNamespace
@@ -622,3 +623,41 @@ def test_stall_stop_ends_a_stage_that_stops_improving():
         held(SimpleNamespace(cost=1.0))
     with pytest.raises(ValueError):
         StallStop(patience=0)
+
+
+def test_scipy_least_squares_passes_the_callback_on_scipy_without_it(monkeypatch):
+    import scipy.optimize
+
+    from vmex.core.monitoring import scipy_least_squares
+
+    def fun(x):
+        return np.array([10 * (x[1] - x[0] ** 2), 1 - x[0]])
+
+    def jac(x):
+        return np.array([[-20 * x[0], 10.0], [-1.0, 0.0]])
+
+    def run(stop_at):
+        seen = []
+
+        def callback(intermediate_result):
+            seen.append((np.array(intermediate_result.x), intermediate_result.cost))
+            if len(seen) == stop_at:
+                raise StopIteration
+        return scipy_least_squares(fun, [-1.2, 1.0], jac=jac, callback=callback), seen
+
+    native, native_seen = run(None)
+    real = scipy.optimize.least_squares
+    monkeypatch.setattr(scipy.optimize, "least_squares",
+                        lambda fun, x0, **kw: real(fun, x0, **kw))  # SciPy 1.15 signature
+    full, seen = run(None)
+    np.testing.assert_allclose(full.x, native.x)
+    np.testing.assert_allclose(scipy_least_squares(fun, [-1.2, 1.0], jac=jac).x, native.x)  # no callback
+    accepted = [c for i, (x, c) in enumerate(native_seen)
+                if i == 0 or not np.array_equal(x, native_seen[i - 1][0])]
+    if "callback" in inspect.signature(real).parameters:  # same accepted iterates as SciPy 1.16
+        np.testing.assert_allclose([c for _x, c in seen], accepted)
+    assert len(seen) == full.njev - 1 > 3
+    halted, seen = run(3)
+    assert halted.status == -2 and not halted.success and len(seen) == 3
+    np.testing.assert_allclose(halted.x, seen[-1][0])
+    np.testing.assert_allclose(halted.cost, seen[-1][1])

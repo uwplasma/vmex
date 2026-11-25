@@ -16,7 +16,6 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
-from scipy.optimize import least_squares
 
 import vmex as vj
 from vmex import optimize as opt
@@ -224,7 +223,7 @@ for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     # Map variables are sigmoid-scaled, so a unit step spans their bounds.
     step = np.concatenate((PARAMETER_STEP * stage.scales, np.ones(len(FREE_MAP))))
     change = np.concatenate((MAX_PARAMETER_CHANGE * step[:joint.nx], np.full(len(FREE_MAP), np.inf)))
-    result = least_squares(
+    result = opt.scipy_least_squares(
         joint.residual, joint.x0, jac=joint.residual_jac,
         x_scale=step, max_nfev=max_nfev, bounds=(joint.x0 - change, joint.x0 + change),
         ftol=1e-6, xtol=1e-10, verbose=2, callback=monitor)

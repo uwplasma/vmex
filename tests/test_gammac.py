@@ -188,7 +188,8 @@ def test_gamma_c_tracks_effective_ripple_on_a_ripple_ray(qa_eq):
     factor; asserted at x10).
     """
     pytest.importorskip("neo_jax")
-    from vmex.core.neoclassical import epsilon_effective_from_wout
+    pytest.importorskip("neo_jax.ripple")
+    from vmex.core.neoclassical import epsilon_effective_3_2_from_wout
 
     base = _gamma_c(qa_eq)
     inp = qa_eq.inp
@@ -211,8 +212,7 @@ def test_gamma_c_tracks_effective_ripple_on_a_ripple_ray(qa_eq):
     assert smooth(eq) > 10.0 * smooth(qa_eq)
 
     def eps(e):
-        _, values = epsilon_effective_from_wout(e.wout, surfaces=(0.5,))
-        return float(np.asarray(values)[0])
+        return float(np.asarray(epsilon_effective_3_2_from_wout(e.wout, surfaces=(0.5,)))[0])
 
     assert eps(eq) > 10.0 * eps(qa_eq)
 

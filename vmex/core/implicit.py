@@ -1415,6 +1415,8 @@ _COUNTERS = ("solves", "iterations", "solve_seconds", "refinements",
              "anchor_krylov_iterations", "anchor_factorizations",
              "anchor_seconds", "abandoned_rungs", "block_factorizations",
              "block_bands_reused", "block_bands_rejected")
+# Beside the counters, ``anchor_residual`` holds ``|F|`` of the latest
+# refined state (see :func:`_anchor_certified`).
 # Nested-time accumulators of the open ``_timed`` sections.  Host callbacks run
 # while their caller waits, so one process-wide stack nests correctly.
 _OPEN_SECTIONS: list[float] = []
@@ -1461,10 +1463,10 @@ _HOST_ERROR: list[VmecError] = []
 _LAST_STATUS_ERROR: weakref.WeakKeyDictionary[ImplicitConfig, Exception] = \
     weakref.WeakKeyDictionary()
 
-# cfg -> (params-bytes key, refined state, stalled): one-entry memo mirroring
+# cfg -> (params-bytes key, refined state, missed): one-entry memo mirroring
 # _LAST_SOLVE, so the fun(x)-then-jac(x) pattern that already skips the second
 # equilibrium solve also skips the second frozen-residual measurement.
-# ``stalled`` marks an anchor abandoned far from the root (_REFINE_FAR_STALL).
+# ``missed`` marks an anchor that ended above ``refine_tol``.
 _LAST_REFINED: weakref.WeakKeyDictionary[
     ImplicitConfig, tuple[bytes, SpectralState, bool]] = weakref.WeakKeyDictionary()
 
@@ -1678,6 +1680,27 @@ def _anchor_residual(cfg: ImplicitConfig, params: ImplicitParams,
     return float(_tree_norm(F(_dof_projector(cfg, dof_mask)(state), params)))
 
 
+def _anchor_certified(cfg: ImplicitConfig, params: ImplicitParams,
+                      state: SpectralState, dof_mask: SpectralState):
+    """Whether ``state`` is a root the implicit derivative holds at, or ``None``.
+
+    ``None`` when refinement is off (``refine_tol`` infinite).  Otherwise the
+    traceable test ``|F(P(state))| <= refine_tol`` of :func:`_anchor_residual`:
+    a state above it gets NaN tangents, not a derivative of another point.
+    """
+    if not np.isfinite(cfg.refine_tol):
+        return None
+    F = residual_fn(cfg, state, dof_mask)
+    return _tree_norm(F(_dof_projector(cfg, dof_mask)(state), params)) <= cfg.refine_tol
+
+
+def _nan_unless(certified, tree):
+    """``tree`` where ``certified`` holds (``None``: always), NaN elsewhere."""
+    if certified is None:
+        return tree
+    return jax.tree.map(lambda a: jnp.where(certified, a, jnp.nan), tree)
+
+
 @_holding_m1
 def _resumed_refinement(cfg: ImplicitConfig, params: ImplicitParams,
                         state: SpectralState, dof_mask: SpectralState,
@@ -1738,11 +1761,13 @@ def _refine_fixed_point(cfg: ImplicitConfig, params: ImplicitParams,
                     stalled = _ANCHOR_STALLED.pop(id(cfg), False)
             correction = jax.tree.map(jnp.subtract, refined, state)
             correction_norm = float(_tree_norm(correction))
+            residual = _anchor_residual(cfg, params, refined, dof_mask)
+            _SOLVE_STATS[cfg]["anchor_residual"] = residual
         if not stalled and np.isfinite(correction_norm) and correction_norm > 0.0:
             _LAST_REFINEMENT_CORRECTION[cfg] = correction
         else:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
-        hit = (key, refined, stalled)
+        hit = (key, refined, stalled or not residual <= cfg.refine_tol)
         _LAST_REFINED[cfg] = hit
     return hit[1]
 
@@ -2017,10 +2042,10 @@ def _refined_state(cfg: ImplicitConfig, params: ImplicitParams,
     solves exactly the equations the host solver iterates, only closer.  Any
     refinement that fails to improve the residual — a stalled Krylov step, a
     non-finite iterate — leaves ``state`` untouched: the anchor is an
-    accuracy gain, never a precondition for returning a gradient.  The one
-    exception is a first pass whose block phase ends above
-    ``_REFINE_FAR_STALL * refine_tol``: it is flagged, and the optimizer's
-    status lane rejects that trial rather than differentiate it.
+    accuracy gain, not a precondition for returning a state; a state left
+    above ``refine_tol`` gets NaN tangents and status 3 (:func:`_anchor_certified`).
+    A first pass whose block phase ends above ``_REFINE_FAR_STALL * refine_tol``
+    stops there, without the Krylov fallback.
     """
     tol = float(cfg.refine_tol)
     if not np.isfinite(tol) or tol <= 0.0:
@@ -2245,7 +2270,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
 
     Status is 0 for a derivative-certified state, 1 for a failed solve, 2
     when the iteration budget was exhausted above ``cfg.max_fsq_ratio``, and
-    3 when the fixed-point anchor stalled far from the root.
+    3 when the fixed-point anchor ended above ``cfg.refine_tol``.
     The final force residual and its ratio to ``ftol`` accompany the state so
     every optimizer interface applies the same acceptance policy.  That
     residual is the host solver's own, from before the fixed-point refinement
@@ -2297,7 +2322,7 @@ def _host_solve_and_mask_status(cfg: ImplicitConfig, params_np) -> tuple:
         status = 0 if bool(result.converged) or ratio <= cfg.max_fsq_ratio else 2
         refined = _LAST_REFINED.get(cfg)
         if status == 0 and refined is not None and refined[0] == hit[0] and refined[2]:
-            status = 3  # anchor stalled far from the root: no certified gradient
+            status = 3  # anchor above refine_tol: no certified gradient
         if status != 0:
             _LAST_REFINEMENT_CORRECTION.pop(cfg, None)
         return state, mask, np.int32(status), np.float64(fsq), np.float64(ratio)
@@ -2493,8 +2518,8 @@ def solve_implicit_status(
     """Differentiable equilibrium with an exception-free trial status.
 
     Status is 0 for a derivative-certified state, 1 for a failed solve, 2
-    for an under-converged state, and 3 when the fixed-point anchor stalled
-    far from the root (``_REFINE_FAR_STALL``).  ``fsq`` and ``fsq_ratio`` expose the force
+    for an under-converged state, and 3 when the fixed-point anchor ended
+    above ``cfg.refine_tol``.  ``fsq`` and ``fsq_ratio`` expose the force
     residual used for that decision.  Only status 0 has an implicit pullback.
     ``adjoint_tol`` is traced as in :func:`solve_implicit`.
     """
@@ -3347,7 +3372,9 @@ def _implicit_evolved_tangent_multi_rhs(
             lambda prm: raw_residual(z_star, prm), (params,), (tangent,))[1]
         return jax.tree.map(jnp.negative, value)
 
-    rhs_batch = jax.vmap(raw_rhs)(tangent_batch)
+    # lax.map, not vmap: jaxlib 0.6.2's algebraic simplifier miscompiles the
+    # batched parameter JVP (wrong right-hand sides, silently wrong Jacobian).
+    rhs_batch = jax.lax.map(raw_rhs, tangent_batch)
     initial, _ = _raw_block_solve(system, rhs_batch, cfg)
 
     # Supplied bands may be a nearby point's (see _BANDS_REUSE_TOL): their
@@ -3425,6 +3452,8 @@ def implicit_state_tangent_multi_rhs(
             )[1]
 
         state_batch = jax.vmap(assemble_tangent)(dz_batch, tangent_batch)
+        state_batch = _nan_unless(
+            _anchor_certified(cfg, params, x_star, dof_mask), state_batch)
         return _device_pin(cfg, (state_batch, report))
 
 
@@ -3602,6 +3631,10 @@ def _solve_implicit_bwd(cfg, res, gbar):
 
 def _solve_implicit_bwd_impl(cfg, res, gbar, tol=None):
     params, x_star, dof_mask = res
+    certified = _anchor_certified(cfg, params, x_star, dof_mask)
+    if certified is not None and not isinstance(certified, jax.core.Tracer) \
+            and not bool(certified):
+        return (jax.tree.map(lambda a: jnp.full_like(a, jnp.nan), params),)
     tol = cfg.adjoint_tol if tol is None else tol
     frozen = jax.lax.stop_gradient(x_star)
     edge_mask = _edge_mask(cfg)
@@ -3658,7 +3691,7 @@ def _solve_implicit_bwd_impl(cfg, res, gbar, tol=None):
     g2 = vjp_p2(gbar)[0]
     if debug:
         _debug_stage("direct parameter contribution", g2)
-    return (jax.tree.map(jnp.add, g1, g2),)
+    return (_nan_unless(certified, jax.tree.map(jnp.add, g1, g2)),)
 
 
 _solve_implicit.defvjp(_solve_implicit_fwd, _solve_implicit_bwd)
@@ -3732,11 +3765,13 @@ def implicit_state_pullback_multi_rhs(
         x_star = _device_pin(cfg, x_star)
         dof_mask = _device_pin(cfg, dof_mask)
         gbar_batch = _device_pin(cfg, gbar_batch)
-        return _device_pin(cfg, _implicit_state_pullback_multi_rhs_impl(
-            params, cfg, x_star, dof_mask, gbar_batch,
-            solver=solver, active_fields=active_fields,
-            probe_chunk_size=probe_chunk_size,
-            response_chunk_size=response_chunk_size))
+        return _device_pin(cfg, _nan_unless(
+            _anchor_certified(cfg, params, x_star, dof_mask),
+            _implicit_state_pullback_multi_rhs_impl(
+                params, cfg, x_star, dof_mask, gbar_batch,
+                solver=solver, active_fields=active_fields,
+                probe_chunk_size=probe_chunk_size,
+                response_chunk_size=response_chunk_size)))
 
 
 def _block_state_pullback(

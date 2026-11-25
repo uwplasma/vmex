@@ -544,3 +544,93 @@ def test_force_evaluation_accepts_a_state_from_another_device() -> None:
     state = jax.device_put(solver._initial_state(runtime.setup), devices[1])
     _, residuals, _ = solver.evaluate_forces(state, runtime)
     assert np.isfinite(float(residuals.fsqr))
+
+
+def test_anchor_that_misses_refine_tol_gives_nan_tangents(monkeypatch) -> None:
+    """A state whose anchor ends above ``refine_tol`` has no certified derivative.
+
+    The implicit function theorem gives ``dx/dp`` only at a root of the
+    frozen residual (:attr:`ImplicitConfig.refine_tol`); the config docstring
+    measures a 4.2e-3 relative gradient error at an unrefined state.  With
+    every refinement budget at zero the anchor stays at the host solve
+    (``ftol`` 1e-10, so ``|F|`` far above 1e-10): the status lane must report
+    the miss (3), the solve statistics must carry the anchor residual, and
+    both the reverse and the forward tangents must be NaN rather than finite.
+    """
+    for name in ("_REFINE_BLOCK_MAX_STEPS", "_REFINE_MAX_STEPS", "_REFINE_RESTARTS"):
+        monkeypatch.setattr(im, name, 0)
+    inp, _, p0 = _small_solovev_setup()
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=999)  # own memo entries
+    im._SOLVE_STATS.pop(cfg, None)
+
+    def volume(params):
+        return im.plasma_volume(im.solve_implicit(params, cfg),
+                                im.runtime_from_params(params, cfg))
+
+    try:
+        gradient = jax.grad(volume)(p0)
+        assert all(np.all(np.isnan(np.asarray(leaf))) for leaf in jax.tree.leaves(gradient))
+        assert im._SOLVE_STATS[cfg]["anchor_residual"] > cfg.refine_tol
+        status = im.solve_implicit_status(p0, cfg)[1]
+        assert int(status) == 3
+        state, mask = im.solve_implicit_with_aux(p0, cfg)
+        direction = jax.tree.map(lambda a: jnp.ones_like(a)[None], p0)
+        tangent, _ = im.implicit_state_tangent_multi_rhs(p0, cfg, state, mask, direction)
+        assert all(np.all(np.isnan(np.asarray(leaf))) for leaf in jax.tree.leaves(tangent))
+        cotangent = jax.tree.map(lambda a: jnp.ones_like(a)[None], state)
+        pulled = im.implicit_state_pullback_multi_rhs(p0, cfg, state, mask, cotangent)
+        assert all(np.all(np.isnan(np.asarray(leaf))) for leaf in jax.tree.leaves(pulled))
+    finally:
+        im._SOLVE_STATS.pop(cfg, None)
+
+
+def test_certified_anchor_gradient_is_the_plain_adjoint(monkeypatch) -> None:
+    """On a certified quasi-axisymmetric state the gate changes the gradient by nothing.
+
+    ``nfp2_QA`` at mpol = ntor = 3, ns 15, ``ftol`` 1e-12: the anchor lands
+    below ``refine_tol``, so the gradient through :func:`solve_implicit`
+    equals the one with the gate switched off to 1e-14 relative (the plan's
+    gate; the gate selects the value, it adds no arithmetic).
+    """
+    inp = VmecInput.from_file(str(DATA / "input.nfp2_QA")).change_resolution(mpol=3, ntor=3)
+    inp = dataclasses.replace(inp, ns_array=np.asarray([15]),
+                              ftol_array=np.asarray([1.0e-12]), niter_array=np.asarray([4000]))
+    cfg = im.make_config(inp, ftol=1.0e-12, max_iterations=4000)
+    p0 = im.params_from_input(inp)
+
+    def objective(params):
+        state = im.solve_implicit(params, cfg)
+        rt = im.runtime_from_params(params, cfg)
+        return im.mhd_energy(state, rt)[0] + im.iota_edge(state, rt)
+
+    gated = jax.grad(objective)(p0)
+    assert im._SOLVE_STATS[cfg]["anchor_residual"] <= cfg.refine_tol
+    monkeypatch.setattr(im, "_anchor_certified", lambda *_args: None)
+    plain = jax.grad(objective)(p0)
+    got, want = (np.concatenate([np.ravel(a) for a in jax.tree.leaves(g)]) for g in (gated, plain))
+    assert np.all(np.isfinite(got))
+    assert np.linalg.norm(got - want) <= 1e-14 * np.linalg.norm(want)
+
+
+def test_infinite_refine_tol_skips_the_certificate(monkeypatch) -> None:
+    """``refine_tol = numpy.inf`` keeps the behaviour from before the check.
+
+    Same forced-miss deck as above: with refinement off there is no anchor to
+    certify, so the gradient stays finite and equals the ungated adjoint
+    (``_nan_unless`` replaced by the identity), exactly.
+    """
+    for name in ("_REFINE_BLOCK_MAX_STEPS", "_REFINE_MAX_STEPS", "_REFINE_RESTARTS"):
+        monkeypatch.setattr(im, name, 0)
+    inp, _, p0 = _small_solovev_setup()
+    cfg = im.make_config(inp, ftol=1.0e-10, max_iterations=998, refine_tol=np.inf)
+    assert im._anchor_certified(cfg, p0, *im.solve_implicit_with_aux(p0, cfg)) is None
+
+    def volume(params):
+        return im.plasma_volume(im.solve_implicit(params, cfg),
+                                im.runtime_from_params(params, cfg))
+
+    gated = np.concatenate([np.ravel(a) for a in jax.tree.leaves(jax.grad(volume)(p0))])
+    monkeypatch.setattr(im, "_nan_unless", lambda _certified, tree: tree)
+    plain = np.concatenate([np.ravel(a) for a in jax.tree.leaves(jax.grad(volume)(p0))])
+    assert np.all(np.isfinite(gated))
+    np.testing.assert_array_equal(gated, plain)

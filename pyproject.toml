@@ -74,9 +74,10 @@ optimizers = [
 ]
 # Effective ripple through the independently validated NEO_JAX backend. It is
 # optional so the equilibrium solver and default installation remain slim.
-# 1.1.1 supplies rational-surface validity diagnostics for optimization screens.
+# 1.1.1 supplies rational-surface validity diagnostics for optimization screens;
+# 1.2.0 adds the differentiable bounce-integral effective ripple (neo_jax.effective_ripple_3_2).
 neoclassical = [
-  "neo-jax>=1.1.1",
+  "neo-jax>=1.2.0",
   "dkx>=2.14.0",
 ]
 # Virtual-casing fields and adjoints with traced geometry isolated from host caches.

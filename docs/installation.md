@@ -14,7 +14,8 @@ virtual casing, effective ripple, turbulence proxies and external optimizers
   oldest release CI tests; 0.6.2 or newer on Python 3.10), `scipy` (1.16 or
   newer: the optimization examples pass `least_squares(callback=...)`, which
   SciPy 1.16 introduced, so on Python 3.10, where SciPy stops at 1.15, those
-  examples do not run),
+  examples do not run, except `QA_optimization.py` and `pwO_optimization.py`,
+  which call `vmex.optimize.scipy_least_squares` to pass the callback there),
   `netCDF4`, `h5py`, `matplotlib`, `packaging`, `filelock`,
   `booz_xform_jax>=0.5.2` and `solvax>=0.37.0` (the linear solvers and the profile splines). `import
   vmex` refuses a too-old `jax`, `jaxlib` or `scipy` and names the package to
@@ -49,7 +50,7 @@ can reproduce each step yourself.
 |---|---|---|
 | `vmex[coils]` | `essos>=0.22.0` | coil fields, free boundary from coils, single-stage examples, alpha tracing |
 | `vmex[freeb]` | `virtual-casing-jax>=0.0.17` | virtual-casing exterior fields (`VmecExtender`) |
-| `vmex[neoclassical]` | `neo-jax>=1.1.1` | effective ripple |
+| `vmex[neoclassical]` | `neo-jax>=1.2.0` | effective ripple |
 | `vmex[alfven]` | `alfvex>=1.2.0`, `matplotlib` | shear-Alfven continuum gaps and modes (`vmex --alfven`) |
 | `vmex[turbulence]` | `gkx>=2.6.0` (and `jax>=0.10.1`) | gyrokinetic turbulence proxies |
 | `vmex[optimizers]` | `jaxopt`, `optax` | the JAXopt and Optax example drivers |
