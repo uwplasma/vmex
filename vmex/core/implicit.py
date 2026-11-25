@@ -985,7 +985,7 @@ def _fixed_boundary_dof_mask(cfg: ImplicitConfig) -> SpectralState:
 
     all_modes = np.ones(m.shape, dtype=bool)
     z_cos = all_modes.copy() if not symmetric else np.zeros_like(all_modes)
-    # In the converged lconm1 branch force_Z_cc(m=1,n=0) is released.  The
+    # force_Z_cc(m=1,n=0) is zeroed and the entry comes from p (_held).  The
     # 3-D +/-n combinations are handled by the symmetric projector below;
     # their individual support remains active.
     if cfg.lconm1 and not symmetric:
@@ -1052,7 +1052,7 @@ def _held(x: SpectralState, rt_p: SolverRuntime) -> SpectralState:
     """``x`` with the m=1 constrained family on ``p``'s interior guess, where
     the held host solve leaves it, so the derivative follows the guess."""
     res = rt_p.resolution
-    if not (bool(rt_p.setup.lconm1) and int(res.ntor) > 0):
+    if not bool(rt_p.setup.lconm1):
         return x
     return hold_m1_family(x, _initial_state(rt_p.setup), rt_p.modes, lasym=bool(res.lasym))
 

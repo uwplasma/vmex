@@ -708,8 +708,12 @@ def prepare_runtime(
     prec2d: Prec2DConfig | None = None,
     use_fft: bool = False,
     lambda_m0_floor: float | None = None,
+    hold_m1: bool | None = None,
 ) -> SolverRuntime:
     """Build the static solver context from an input file or a RunSetup.
+
+    ``hold_m1`` (``None``: the :data:`HOLD_M1` context) never releases the
+    m=1 constrained coordinate; ``False`` releases it as VMEC2000 does.
 
     Raises ``RuntimeError`` when JAX is not in float64 (see :func:`vmex.configure`).
 
@@ -786,7 +790,7 @@ def prepare_runtime(
         jmax=int(resolution.ns) - 1,
         lforbal=bool(defaults["lforbal"] if lforbal is None else lforbal),
         lmove_axis=bool(defaults["lmove_axis"]),
-        hold_m1=bool(HOLD_M1.get() and setup.lconm1 and resolution.ntor > 0),
+        hold_m1=bool((HOLD_M1.get() if hold_m1 is None else hold_m1) and setup.lconm1),
         rcon0=jnp.zeros(()), zcon0=jnp.zeros(()),  # placeholder, replaced below
         prec2d=_resolve_prec2d(source, prec2d, precon_type, prec2d_threshold),
         lambda_m0_floor=lambda_m0_floor,
@@ -1137,9 +1141,6 @@ def _force_pipeline(
     rotated = m1_residue_rotation(spectral, lconm1=setup.lconm1)
     zero_gate = m1_zero_condition(fsqz_previous=fsqz_previous, iterations_since_restart=iteration)
     released = zero_m1_z_force(rotated, jnp.asarray(True) if rt.hold_m1 else zero_gate)
-    if rt.hold_m1 and released.force_Z_cc is not None:  # n = 0 lasym: exact gauge, released as VMEC2000
-        cc = jnp.asarray(rotated.force_Z_cc)[:, 1, 0] * (1.0 - jnp.asarray(zero_gate).astype(rotated.force_Z_cc.dtype))
-        released = replace(released, force_Z_cc=jnp.asarray(released.force_Z_cc).at[:, 1, 0].set(cc))
     spectral_finite = (
         _all_finite((spectral, rotated, released)) if collect_health else passing
     )
@@ -2792,8 +2793,15 @@ def solve(
     polish_force_balance: bool | str = False,
     polish_config: Any = None,
     raise_on_max_iterations: bool = True,
+    hold_m1: bool | None = None,
 ) -> SolveResult:
     """Single-grid fixed-boundary solve (VMEC2000 ``eqsolve.f``).
+
+    ``hold_m1=True`` never releases the m=1 constrained coordinate and keeps
+    it on the ``profil3d.f`` guess, as the implicit lanes do, so the root is a
+    function of the input alone; ``False`` releases it below ``fsqz = 1e-6``
+    as VMEC2000 does; the default ``None`` follows :data:`HOLD_M1` (unset:
+    released).
 
     ``source`` is a parsed :class:`vmex.core.input.VmecInput`
     (recommended; supplies the ``delt/tcon0/gamma/nstep/ftol/niter`` defaults,
@@ -2914,6 +2922,7 @@ def solve(
             lconm1=lconm1, precon_type=precon_type,
             prec2d_threshold=prec2d_threshold, prec2d=prec2d,
             use_fft=use_fft_resolved, lambda_m0_floor=lambda_m0_floor,
+            hold_m1=hold_m1,
         )
     with device_context(device, rt.resolution):
         if initial_state is not None:

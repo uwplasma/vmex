@@ -562,7 +562,7 @@ def _host_solve_and_mask_impl(
         )
         _FREE_MASK_CACHE[key] = mask
 
-    # Released gauge entries (ntor = 0, lasym n = 0) have no equation at the
+    # Released gauge entries (ntor = 0) have no equation at the
     # root; hold them at the one reference, as the adjoint does.  The m=1
     # family proper comes from p (im._held).
     project = im._dof_projector(icfg, jax.tree.map(jnp.asarray, mask))
