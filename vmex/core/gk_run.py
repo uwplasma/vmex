@@ -74,7 +74,7 @@ class TurbulenceSettings:
 
     @property
     def ntheta(self) -> int:
-        """Total parallel points ``nz * npol`` (``nz`` per turn is what the GKX deck carries)."""
+        """Total parallel points ``nz * npol``."""
         return int(round(self.nz * self.npol))
 
 
@@ -98,7 +98,7 @@ _DECK = """schema_version = 1
 [grid]
 Nx = {nx}
 Ny = {ny}
-Nz = {nz_total}
+Nz = {ntheta}
 Lx = {lx:.6g}
 Ly = {ly:.6g}
 boundary = "{boundary}"
@@ -169,7 +169,7 @@ def flux_tube_box(cfg: TurbulenceSettings, geom: dict | None = None) -> dict:
 
     Points per poloidal turn: 16 per field period (``nfp / |iota|`` periods per turn), at least 48
     (``cfg.nz`` overrides). Below that the linear growth rate moves by 1-5% and, from about 24 per
-    turn down, jumps to a grid-scale branch (GKX #527 measurements on five public equilibria).
+    turn down, jumps to a grid-scale branch (measured on five public equilibria).
     ``jtwist = None`` leaves GKX's own rule (the line is cut where ``2 s_hat gds21 / gds22`` last
     crosses an integer inside ``npol`` turns, so ``Lx = Ly``); an integer is written to the deck.
     """
@@ -201,7 +201,7 @@ def write_deck(path: Path, wout: Path, cfg: TurbulenceSettings, *, nonlinear: bo
         name=path.name, species=species, wout=wout.resolve(), s=cfg.s, alpha=cfg.alpha,
         t_max=cfg.t_max if nonlinear else min(_T_LINEAR, cfg.t_max),
         nx=cfg.nx if nonlinear else 1, ny=cfg.ny if nonlinear else 3 * int(ky_grid(cfg)[-1] * box["y0"] + 0.5) + 1,
-        ntheta=cfg.nz, nz_total=cfg.ntheta, npol=cfg.npol, lx=box["lx"], ly=box["ly"], y0=box["y0"],
+        ntheta=cfg.ntheta, npol=cfg.npol, lx=box["lx"], ly=box["ly"], y0=box["y0"],
         boundary="fix aspect" if nonlinear else "linked",
         linear=str(not nonlinear).lower(), nonlinear=str(nonlinear).lower(),
         electrostatic=str(es).lower(), adiabatic=str(es).lower(),
@@ -363,11 +363,6 @@ def _run(wout_path: Path, outdir: Path, cfg: TurbulenceSettings, emit) -> dict:
     # GKX releases up to 2.9.0 have no saturation_t_min and reject it in a deck.
     has_t_min = "saturation_t_min" in {f.name for f in dataclasses.fields(TimeConfig)}
     lin_case = gkx.load(write_deck(outdir / f"{label}_gkx_linear.toml", wout_path, cfg, nonlinear=False))
-    from gkx.geometry.vmec_eik import build_vmec_geometry_request
-
-    if build_vmec_geometry_request(lin_case).ntheta != cfg.ntheta:  # GKX #527: grid.ntheta is per turn
-        raise ImportError(f"vmex --turbulence writes ntheta per poloidal turn, which GKX {gkx.__version__} counts as a "
-                          "total; install GKX main from #527 on (the next release)")
     nl_case = gkx.load(write_deck(outdir / f"{label}_gkx_nonlinear.toml", wout_path, cfg, nonlinear=True,
                                   saturation=has_t_min))
     for line in settings_block(wout_path, cfg, backend=f"GKX {gkx.__version__}, {jax.default_backend()}", out=out,

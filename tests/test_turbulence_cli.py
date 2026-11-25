@@ -57,7 +57,7 @@ def test_defaults_deck_and_settings_block(tmp_path):
     cfg = dataclasses.replace(cfg, nz=48)
     deck = tomllib.loads(gk_run.write_deck(tmp_path / "d.toml", tmp_path / "wout_x.nc", cfg,
                                            nonlinear=True).read_text())
-    assert (deck["grid"]["Nz"], deck["grid"]["ntheta"]) == (144, 48) and deck["geometry"]["npol"] == 3.0
+    assert (deck["grid"]["Nz"], deck["grid"]["ntheta"]) == (144, 144) and deck["geometry"]["npol"] == 3.0
     assert deck["grid"]["boundary"] == "fix aspect" and deck["time"]["saturation_t_min"] == 300.0
     old = tomllib.loads(gk_run.write_deck(tmp_path / "o.toml", tmp_path / "wout_x.nc", cfg, nonlinear=True,
                                           saturation=False).read_text())
