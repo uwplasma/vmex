@@ -24,6 +24,7 @@ from vmex.mirror.exterior import (  # noqa: E402
     axisymmetric_plasma_external_neumann,
     axisymmetric_exterior_lateral_field,
     laplace_reduced_green_boundary_residual,
+    panel_green_boundary_residual as vmex_panel_residual,
     solve_reduced_exterior_laplace_neumann,
     solve_axisymmetric_exterior_vacuum,
 )
@@ -131,6 +132,12 @@ def test_axisymmetric_reduction_preserves_ring_values() -> None:
         surface, jnp.ones(surface.reduced_size), jnp.zeros(surface.reduced_size)
     )
     np.testing.assert_allclose(residual, 0.0, atol=2.0e-15)
+    full_ones = jnp.ones(surface.collocation_xyz.shape[0])
+    full_residual = vmex_panel_residual(
+        surface.collocation_xyz, surface.triangles, full_ones, jnp.zeros_like(full_ones),
+        order=2, lateral_shape=surface.lateral_xyz.shape[:2], spectral_side_density=True,
+    )
+    np.testing.assert_allclose(full_residual, 0.0, atol=2.0e-14)
 
 
 def test_cap_grading_clusters_rim_without_changing_cylinder_integrals() -> None:
