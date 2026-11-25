@@ -3372,7 +3372,9 @@ def _implicit_evolved_tangent_multi_rhs(
             lambda prm: raw_residual(z_star, prm), (params,), (tangent,))[1]
         return jax.tree.map(jnp.negative, value)
 
-    rhs_batch = jax.vmap(raw_rhs)(tangent_batch)
+    # lax.map, not vmap: jaxlib 0.6.2's algebraic simplifier miscompiles the
+    # batched parameter JVP (wrong right-hand sides, silently wrong Jacobian).
+    rhs_batch = jax.lax.map(raw_rhs, tangent_batch)
     initial, _ = _raw_block_solve(system, rhs_batch, cfg)
 
     # Supplied bands may be a nearby point's (see _BANDS_REUSE_TOL): their
