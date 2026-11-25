@@ -58,6 +58,22 @@ def _ripple(booz, lo, hi, w, budget, mode_first):
     return (1 - w) * values[lo] + w * values[hi]
 
 
+def _half_mesh(rt):
+    ns = int(np.shape(rt.setup.s_full)[0])
+    return (np.arange(ns - 1) + 0.5) / (ns - 1)
+
+
+def _state_boozer(state, rt, surfaces, mboz, nboz):
+    """NEO-style Boozer mapping (surface first) of a solved state on half-mesh ``surfaces``, traceable."""
+    from .omnigenity import boozer_spectrum_state
+
+    b = boozer_spectrum_state(state, rt, surfaces=surfaces, mboz=mboz, nboz=nboz, geometry=True)
+    names = ("bmnc_b", "rmnc_b", "zmns_b", "pmns_b") + (
+        ("bmns_b", "rmns_b", "zmnc_b", "pmnc_b") if bool(rt.setup.lasym) else ())
+    return {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
+            "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"], **{k: b[k] for k in names}}
+
+
 def epsilon_effective_3_2_from_state(state, rt, surfaces: Sequence[float] = (0.25, 0.5, 0.75), *,
                                      mboz: int = 12, nboz: int = 9, budget=None):
     r"""``epsilon_eff**(3/2)`` of a solved VMEX state at ``surfaces``, traceable end to end.
@@ -68,17 +84,9 @@ def epsilon_effective_3_2_from_state(state, rt, surfaces: Sequence[float] = (0.2
     ``jax.jacrev`` pass through :func:`vmex.core.implicit.solve_implicit` and this function alike.
     ``budget`` is a :class:`neo_jax.RippleBudget`.  The effective ripple is ``value ** (2 / 3)``.
     """
-    from .omnigenity import boozer_spectrum_state
-
-    ns = int(np.shape(rt.setup.s_full)[0])
-    s_half = (np.arange(ns - 1) + 0.5) / (ns - 1)
+    s_half = _half_mesh(rt)
     rows, lo, hi, w = _bracket(s_half, surfaces)
-    b = boozer_spectrum_state(state, rt, surfaces=s_half[rows], mboz=mboz, nboz=nboz, geometry=True)
-    booz = {"nfp_b": b["nfp"], "ixm_b": b["xm_b"], "ixn_b": b["xn_b"], "iota_b": b["iota_b"],
-            "buco_b": b["I_b"], "bvco_b": b["G_b"], "s_b": b["s_b"]}
-    names = ("bmnc_b", "rmnc_b", "zmns_b", "pmns_b") + (
-        ("bmns_b", "rmns_b", "zmnc_b", "pmnc_b") if bool(rt.setup.lasym) else ())
-    booz |= {k: b[k] for k in names}
+    booz = _state_boozer(state, rt, s_half[rows], mboz, nboz)
     return _ripple(booz, lo, hi, w, budget, mode_first=False)
 
 

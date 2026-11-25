@@ -194,7 +194,7 @@ group_of = {max_mode: (max(max_mode + 2, MINIMUM_MPOL), gamma_c, dkx)
 group_max_mode = {
     max_mode: max(other for other in MAX_MODES if group_of[other] == group_of[max_mode])
     for max_mode in MAX_MODES}
-gamma_c_term = (opt.GammaCSmooth(GAMMA_C_SURFACES), 0.0, GAMMA_C_WEIGHT)
+gamma_c_term = (opt.GammaC(GAMMA_C_SURFACES), 0.0, GAMMA_C_WEIGHT)
 problem, group = None, None
 for max_mode, max_nfev, stage_ftol in zip(MAX_MODES, MAX_NFEV, STAGE_FTOL):
     print(f"\n===== pwO stage, max_mode = {max_mode} =====")

@@ -906,90 +906,115 @@ The Fortran-faithful NEO_JAX integrator is also what :func:`~vmex.core.neoclassi
 independent forward screen that accepts or rejects candidates in the pwO
 examples.
 
-Fast-ion confinement proxy
---------------------------
+Fast-ion confinement proxies
+----------------------------
 
 Ripple wells let trapped energetic particles drift radially: where the
-contours of the second adiabatic invariant :math:`J` cross flux surfaces,
-ions born on a superbanana leave the device within a few bounce times.
-Nemov's :math:`\Gamma_c` (Nemov, Kasilov, Kernbichler, Leitold, Phys.
-Plasmas 15, 052501 (2008), eq. 61) measures the angle between the
-bounce-averaged drift and the flux surface,
+contours of the second adiabatic invariant :math:`J(s,\alpha,\lambda)` cross flux
+surfaces, ions born on a superbanana leave the device within a few bounce
+times.  The bounce-averaged drifts are derivatives of :math:`J`: the radial
+drift is :math:`\partial_\alpha J` and the poloidal precession is
+:math:`\partial_s J`.  In Boozer coordinates a field line is
+:math:`\theta=\alpha+\iota\varphi`, :math:`\mathrm dl=(G+\iota I)\,\mathrm d\varphi/B`,
+and with :math:`\hat G=G+\iota I` and
+:math:`w=(1-\lambda B/2)/\sqrt{1-\lambda B}`
 
 .. math::
 
-   \gamma_c = \frac{2}{\pi}\arctan\frac{v_r}{v_p}, \qquad
-   \Gamma_c = \frac{\pi}{4\sqrt 2}\left\langle
-     \int_{1/B_{\max}}^{1/B}\!\mathrm d\lambda\,
-     \frac{B}{\sqrt{1-\lambda B}}\,\gamma_c^{2}\right\rangle,
+   \partial_\alpha J=-\hat G\int w\,\frac{\partial_\theta B}{B^2}\,\mathrm d\varphi,\qquad
+   \partial_s J=\hat G'\int\frac{\sqrt{1-\lambda B}}{B}\,\mathrm d\varphi
+   -\hat G\int w\,\frac{\partial_sB+\iota'(\varphi-\varphi_c)\,\partial_\theta B}{B^2}\,\mathrm d\varphi ,
 
-with :math:`v_r` and :math:`v_p` the bounce-averaged radial and
-poloidal-tangential magnetic drifts (Velasco et al., Nucl. Fusion 61,
-116059 (2021), eqs. 14-16, in the Nemov/DESC form with the surface-tangency
-factor evaluated at the field minimum of each well; KNOSOS uses the
-:math:`\gamma_c^*` variant, which drops that factor).  The residual rows
-are :math:`\Gamma_c` per surface, so the least-squares cost is the sum of
-:math:`w\,\Gamma_c^{2}`; the square is the least-squares form, and
-:math:`\Gamma_c` itself is a proxy rather than a loss law — Velasco et al.
-2021 (section 5.4) find the prompt-loss fraction follows their
-:math:`|\gamma_c^*|` variant (eq. 21) more linearly, and validate
-:math:`\Gamma_\alpha` as the predictor.  Bader et al. and Paul et
-al. document that such proxies correlate imperfectly with measured
-energetic-particle losses, which bounds what any :math:`\Gamma_c` value
-claims. :class:`~vmex.core.gammac.GammaC` evaluates the drift ratio in
-Nemov's own form — DESC's rewrite into single-valued periodic maps
-(``desc.compute._fast_ion`` on the bounce kernel of Unalmis et al., J.
-Plasma Phys. 92(3), 2026, doi:10.1017/S0022377826101652, DESC's sibling
-``GammaC`` objective) — because the literal line-integral form of the
-poloidal drift carries a secular shear term that drives the proxy to zero
-as the sampled line lengthens. The ingredients are exact spectral point
-evaluations on PEST field lines (the :mod:`vmex.core.stability` machinery)
-and the drift kernels of :func:`vmex.core.bounce.bounce_action`; each was
-validated against finite differences of the drift-kinetic identities
-:math:`\partial_\alpha J \propto \tau_b\,\overline{\mathbf v_M\cdot\nabla s}`
-and :math:`\partial_s J \propto -\tau_b\,\overline{\mathbf v_M\cdot\nabla\alpha}`
-and against the equilibrium's own ``wout`` tables.
+so both follow from the Boozer spectrum of :math:`|B|` on neighbouring surfaces
+and :math:`\iota, G, I` (:func:`neo_jax.fastion.fast_ion_proxies`, five rows and a
+quartic radial fit; no :math:`\lambda` angle, metric or pointwise tangency factor).
+The shear term is secular along a line; it is referenced to the midpoint
+:math:`\varphi_c` of each well, the derivative at fixed position of the well on
+the surface, so it stays bounded as the line lengthens.  Velasco et al., Nucl.
+Fusion 61, 116059 (2021), eq. 14 define :math:`\gamma_c^*=\frac2\pi\arctan(\partial_\alpha
+J/|\partial_sJ|)` and
 
-The pitch integral samples the reflecting level :math:`1/\lambda`
-uniformly with an open midpoint rule (the Unalmis et al. pitch-sampling
-guidance), and wells sliding across the ends of the bounded trace are
-faded by a half-transit taper applied to the normalizing
-:math:`\int\mathrm dl/B` as well — an unbiased window on the ergodic
-limit that removes end-of-trace discontinuities. Superbanana layers —
-where the tangential drift :math:`v_p` reverses and
-:math:`\gamma_c \to \pm 1` — are physical and are kept; resolving them
-sets the ``nalpha``/``num_pitch`` budget, they dominate the residual
-resolution noise of boundary gradients, and ``excluded_fraction`` reports
-any well-slot overflow so an under-provisioned evaluation is visible.
-Axisymmetry sends
-:math:`\Gamma_c \to 0` exactly (:math:`\partial_\alpha J = 0`), which the
-tests anchor together with the QA-versus-unoptimized ordering.
+.. math::
 
-**The hard value is not a gradient objective.** The discretized
-:class:`~vmex.core.gammac.GammaC` sampled gradient can change sign under refinement:
-hard well detection and hard branch selection make the discretized
-:math:`\Gamma_c` piecewise in the boundary coefficients with
-grid-dependent breakpoints, and the measured li383 refinement ladder flips
-sign three times (``tests/test_gammac.py``).  Two structures carry the
-noise, both identified by direct gradient decomposition: a pitch node
-landing at distance :math:`d` from a barrier top inherits the
-:math:`1/d` level-curvature of the logarithmically divergent bounce time,
-and a well cell whose radial *and* tangential bounce-averaged drifts
-cancel simultaneously (a superbanana corner) contributes
-:math:`\mathrm d(\arctan(v_r/v_p))/\mathrm dp \sim 1/\|(v_r, v_p)\|` with
-arbitrary sign.  :class:`~vmex.core.gammac.GammaCSmooth` regularizes
-exactly these two structures on the same wells and bounce quadrature — a
-kernel floor :math:`1/\sqrt{\max(1-\lambda B, 0) + \delta}` with
-:math:`\delta` a field-dependent fraction of the trapped range with live derivatives
-(which also removes the birth/death jump of the well-connection graph of
-Ochs 2025, since a newborn well's floored bounce time starts at zero
-rather than the finite oscillator period), and a per-well corner floor
-that compares the drift cancellation against the well's own
-absolute-value bounce integrals. Both classes freeze normalized pitch-grid
-shape derivatives, so even the smooth gradient is approximate. Check actual
-forward descent and sampling refinement for each configuration. The surrogate
-can underestimate shallow ripple wells; anneal ``temperature`` with a finer
-budget and report the independent hard value.
+   \Gamma_c=\frac{\pi}{4\sqrt2}\left\langle\int_{1/B_{\max}}^{1/B}\!\mathrm d\lambda\,
+   \frac{B}{\sqrt{1-\lambda B}}\,\gamma_c^{*2}\right\rangle,\qquad
+   \Gamma_\alpha=\frac12\left\langle\int\!\mathrm d\lambda\,\frac{B}{\sqrt{1-\lambda B}}\,
+   H\big((\alpha_{out}-\alpha)v_\alpha\big)H\big((\alpha-\alpha_{in})v_\alpha\big)\right\rangle
+
+(eqs. 16 and 25; Nemov et al., Phys. Plasmas 15, 052501 (2008), eq. 61 is the
+real-space version).  :math:`\Gamma_\alpha` counts the orbits whose precession
+meets an outward superbanana (:math:`\gamma_c^*>0.2`) before an inward one and
+is bounded by the trapped fraction; ripple wells are ignored as in the paper.
+Each well is an event at its own poloidal position
+:math:`\theta=\alpha+\iota\varphi_{mid}` (a period label would jump by
+:math:`2\pi\iota/N_{fp}` when a well midpoint crosses a period boundary),
+present with its smooth window weight and outward or inward through smoothstep
+thresholds of half-width 0.2 around :math:`\gamma_c^*=0.2` (zero below 0 and
+above :math:`-0.4` respectively, so an omnigenous field loses nothing).  Events
+are deposited as mass with cubic B-spline weights on a periodic :math:`\alpha`
+grid, a bin of mass :math:`m` is crossed with probability :math:`e^{-5m}`, and
+the probability that the first event met going up or down in :math:`\alpha` is
+outward follows from the competing hazards; each well mixes the two directions
+with its own smooth precession direction.  Averaging :math:`\gamma_c^*` per bin
+before thresholding, as an earlier version did, made any sliver of a well a
+full-strength event and the value jumped by 5 to 10 % between field steps of
+:math:`10^{-4}`; the hazard form removes the jumps (second differences of a
+41-point scan fall by a factor 20).  The residual rows of
+:class:`~vmex.core.fastion.GammaC` and :class:`~vmex.core.fastion.GammaAlpha`
+are the values per surface, so the cost is the weighted sum of squares.
+Neither is a loss law (Velasco et al. validate :math:`\Gamma_\alpha` as the
+predictor; Bader et al. and Paul et al. document the imperfect correlation of
+such proxies with measured losses).  The smoothed :math:`\Gamma_\alpha` sits
+within 0.4 % of the sharp-threshold value on QA, 4-9 % below it on the nfp 4
+ellipse, 25-29 % above it on QH and 59-66 % above it on QI (thresholds of half-width 0.05 to
+0.2 give the same value to 2 % there; the sharp value is itself very sensitive,
+because many wells sit just below :math:`\gamma_c^*=0.2`).
+
+**Numerics.**  Each line is a Hermite cubic (exact derivative data from the
+Boozer series) split at its stationary points into monotone pieces, so bounce
+points are exact roots (the effective-ripple primitives of
+:mod:`neo_jax.ripple`).  The pitch integral is split at the critical levels of
+each line, plus equispaced panels; each well is cut at its stationary points
+and every piece takes a sine-mapped Gauss rule (64 nodes, which resolves the
+square-root ends and the near-singular humps); the well integrals are evaluated on the
+panel nodes and interpolated to a dense rule on which :math:`\gamma_c^2` (which
+has narrow resonances where :math:`\partial_sJ` vanishes) is integrated.  The
+panel edges move with the field, so their Leibniz terms are differentiated
+exactly; for :math:`\Gamma_\alpha` the panels are bounded by the critical levels
+of every line.  The kernel's drift integrals are checked against finite
+differences of :math:`J` itself in ``tests/test_fastion.py``.
+
+**Definitions elsewhere.**  Nemov's :math:`\gamma_c` multiplies the poloidal
+drift by :math:`|\nabla\rho|\Vert e_\alpha\Vert` at the lowest point of each well,
+which jumps between the dips of a well with several nearly equal ones (every
+quasisymmetric field has them); and it is a real-space ratio, independent of
+the angle gauge, whereas :math:`\partial_sJ` at fixed :math:`\alpha` depends on it.
+The VMEC-angle form this module used before was neither: it mixed
+:math:`\psi` and :math:`\rho` units in the PEST gauge, and differs from the
+Boozer form by up to 2.3 times on QA.  DESC's ``Gamma_c Velasco`` is the
+literal line integral of the poloidal drift with a secular shear term that
+drives the value to zero as the line lengthens; DESC's ``Gamma_c`` is Nemov's.
+No DESC number is quoted because neither is this quantity.
+Near a quasisymmetric optimum :math:`\Gamma_c` is proportional to the
+quasisymmetry error (the superbanana resonances have area
+:math:`\propto|\partial_\alpha J|`), so it has a cusp there: finite differences
+should be taken away from the exact optimum.
+
+**Gradients.**  Reverse mode through the implicit solve needs a tight forward
+solve and a tight adjoint (``forward_ftol=1e-14``, ``adjoint_tol=1e-13``): the
+state cotangent of these proxies is large against an O(1) response, and the
+default adjoint tolerance left a 30 % error on the nfp 2 ellipse (1.24 against
+1.79 at ``adjoint_tol=1e-13``, frozen-path value 1.85).
+
+For :math:`\Gamma_\alpha` (sum over three surfaces, 16 lines, re-solved central
+differences at steps of 3e-4 and 1e-4, first four coefficients) the reverse-mode
+gradient on QA is -0.573 / 17.70 / 9.99 / 11.57 against FD -0.558, 17.85, 10.40,
+11.96 (3e-4) and -0.575, 18.58, 10.37, 11.41 (1e-4); on the nfp 2 seed
+-0.211 / 33.53 / 6.92 / 28.07 against -0.199, 31.21, 6.92, 28.08 and -0.196,
+33.29, 6.92, 27.95.  The largest differences (6-8 %) are in small or curved
+components; larger steps (1e-3) bend the response by 12 % on the second QA
+coefficient.  The cost of one value-and-gradient is 4-9 minutes on four cores at
+16 lines.
 
 .. _confinement-resolution:
 
@@ -1026,11 +1051,11 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - ``mboz=nboz=14``, ``nphi=101``, ``nalpha=29``, ``n_bounce=31``
      - 0.98, 34 %
      - 0.08 s against 0.25 s
-   * - :class:`~vmex.core.gammac.GammaCSmooth`
-     - ``nalpha=5``, 3 transits, 32 points, 24 pitch, 16 nodes
-     - hard :class:`~vmex.core.gammac.GammaC` at 13 lines, 6 transits, 96 points, 48 pitch, 48 nodes
-     - 0.98, 12 % (hard value)
-     - 0.5 s against 1.5 s (default)
+   * - :class:`~vmex.core.fastion.GammaC`
+     - ``FastIonBudget(n_lines=8, n_transits=2)``
+     - the default (16 lines, 4 transits, 24 nodes per period) or finer
+     - see the convergence table below
+     - 4-6 s per surface value on four CPU cores
    * - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state`
      - default budget (16 lines, 3 + 3 transits, 16 nodes per period, 4 pitch nodes, 32 per well)
      - 48 lines, 6 + 6 transits, 48 nodes per period, 8 pitch nodes, 64 per well
@@ -1043,6 +1068,46 @@ set above is 34 % from the converged value yet ranks equilibria at 0.98, so
 report the validation set. The sampling noise of :math:`\Gamma_c` is real:
 shifting the field-line origin changes the hard value by 5 to 13 % and can
 reorder near-equal candidates; between distinct designs the order is stable.
+
+**Convergence.**  Values at the default budget (64 nodes per well piece,
+cut at its stationary points) with 16 / 32 / 64 lines, at :math:`s=0.5` of
+four configurations (CPU).  :math:`\Gamma_c` is converged to better than
+1 % at 16 lines on QH and QI, 1 % on QA and 4.5 % on the nfp 4 ellipse (still
+moving at 64 lines: iota near a low-order rational costs extra lines).
+:math:`\Gamma_\alpha` is converged to 0.2 % on QA and QH, 0.6 % on the nfp 4
+ellipse (16 to 32 lines) and moves by 1.6 % per doubling of the lines on QI.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Case
+     - :math:`\Gamma_c` at 16 / 32 / 64 lines
+     - :math:`\Gamma_\alpha` at 16 / 32 / 64 lines
+   * - QA
+     - 0.04329 / 0.04303 / 0.04321
+     - 0.1535 / 0.1538 / 0.1536
+   * - QH
+     - 0.01039 / 0.01037 / 0.01036
+     - 0.1829 / 0.1826 / not run
+   * - QI
+     - 0.01510 / 0.01515 / 0.01516
+     - 0.2317 / 0.2281 / 0.2243
+   * - nfp 4 ellipse
+     - 0.0674 / 0.0656 / 0.0643
+     - 0.1697 / 0.1688 / not run
+
+The other knobs move :math:`\Gamma_c` by less than 0.5 %: transits 2/4/8
+(0.0427/0.0432/0.0434 on QA), nodes per period 12 to 96 (0.0432 to 0.0432),
+pitch nodes per panel 3 to 8, and the number of panels 24 to 192.  The nodes
+per well piece are the delicate knob: on QH the unsplit rule gave 0.01048, 0.01045,
+0.01053, 0.01064, 0.01026 at 16, 24, 32, 48, 64 nodes (errors of 0.5-3.7 %, not
+monotone, and the source of a 0.4-0.8 % drift with the number of panels); cutting wells at their stationary points
+reduces the scatter to about 1 % at 48 or more nodes on QH (0.01039 +- 0.0001) and QI
+(0.0151 +- 0.0001 at 48-96, one outlier of 1.5 % at 128).
+:math:`\Gamma_\alpha` is unchanged by all of them.  An equispaced :math:`\alpha`
+average is spectrally accurate for a smooth integrand; the line count needed
+grows as :math:`\iota` approaches a low-order rational because the lines then
+sample few distinct positions.
 
 **Which metric predicts the alpha loss.** Across the 39 optimized equilibria
 the Spearman coefficient between the metric and the alpha loss is 0.93 for

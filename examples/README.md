@@ -250,8 +250,8 @@ that research budget as one commented set of constants next to the default.
   states where maximum-J and quasisymmetry conflict near the axis.
 - `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
   with one seed-normalized scalar objective — quasisymmetry ratio (effective
-  ripple proxy), the smooth `GammaCSmooth` surrogate, and the
-  outer-volume maximum-J residual — then reports hard `Gamma_c` and
+  ripple proxy), the differentiable `GammaC` proxy, and the
+  outer-volume maximum-J residual — then reports `Gamma_c` and
   `epsilon_eff^(3/2)` before and after.
 - `epsilon_effective.py` computes the effective ripple `epsilon_eff^(3/2)` (bounce
   integrals, differentiable) from a solved equilibrium without writing a

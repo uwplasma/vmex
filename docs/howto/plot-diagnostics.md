@@ -53,7 +53,7 @@ confinement panel — pressure on the left axis, with the effective ripple
 $\epsilon_{\rm eff}^{3/2}$ (bounce integrals at the default
 {func}`~vmex.core.neoclassical.epsilon_effective_3_2_from_boozer` budget) and the
 fast-ion proxy $\Gamma_c$
-({func}`~vmex.core.gammac.gamma_c_from_wout` at a compact radial-trend
+({func}`~vmex.core.fastion.fast_ion_from_wout` at a compact radial-trend
 sampling) sharing one dimensionless right axis — the force error
 $\langle|\mathbf J\times\mathbf B-\nabla p|\rangle_s/\langle|\nabla(B^2/2\mu_0)|\rangle_V$,
 Mercier `DMerc` and the Glasser

@@ -100,7 +100,7 @@ links to the module that documents it.
 - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state` /
   :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_wout` — differentiable
   effective-ripple profile ``epsilon_eff**(3/2)`` (Nemov bounce integrals)
-- :func:`~vmex.core.gammac.gamma_c_from_wout` — fast-ion ``Gamma_c`` profile
+- :func:`~vmex.core.fastion.fast_ion_from_wout` — fast-ion ``Gamma_c`` / ``Gamma_alpha``
   from any compatible wout, without a solve
 - :func:`~vmex.core.tracing.essos_vmec_field` — hand a solved equilibrium to
   ESSOS as an ``essos.fields.Vmec`` (optional ESSOS dependency);
@@ -296,7 +296,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str | None]] = {
         ".core.neoclassical", "epsilon_effective_3_2_from_state"),
     "epsilon_effective_3_2_from_wout": (
         ".core.neoclassical", "epsilon_effective_3_2_from_wout"),
-    "gamma_c_from_wout": (".core.gammac", "gamma_c_from_wout"),
+    "fast_ion_from_wout": (".core.fastion", "fast_ion_from_wout"),
     # alpha-particle tracing (ESSOS)
     "AlphaTracingResult": (".core.tracing", "AlphaTracingResult"),
     "essos_vmec_field": (".core.tracing", "essos_vmec_field"),

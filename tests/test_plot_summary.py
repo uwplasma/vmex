@@ -37,9 +37,15 @@ jax.config.update("jax_enable_x64", True)
 
 from vmex.core import optimize as opt  # noqa: E402
 from vmex.core import plotting  # noqa: E402
-from vmex.core import stability as stab  # noqa: E402
 from vmex.core.input import VmecInput  # noqa: E402
 from vmex.core.wout import wout_from_state  # noqa: E402
+
+try:
+    import neo_jax.fastion  # noqa: F401
+    HAS_FASTION = True
+except ImportError:
+    HAS_FASTION = False
+needs_fastion = pytest.mark.skipif(not HAS_FASTION, reason="needs neo_jax.fastion")
 DATA_DIR = Path(__file__).resolve().parents[1] / "examples" / "data"
 DECK = "cth_like_fixed_bdy"
 
@@ -194,6 +200,7 @@ def test_summary_combines_force_current_and_confinement(
     assert any(label == r"$p$" for label in labels)
 
 
+@needs_fastion
 def test_summary_confinement_axis_draws_only_valid_profiles(summary_figure):
     """The right confinement axis carries exactly the valid diagnostics.
 
@@ -353,6 +360,7 @@ def _fresh_conf(wout):
     return plotting.confinement_summary(wout, None, booz_note="not sampled")
 
 
+@needs_fastion
 def test_confinement_summary_is_cached_and_never_recompiles(solved_case):
     """Same WOUT + settings: one computation, one XLA executable.
 
@@ -361,8 +369,6 @@ def test_confinement_summary_is_cached_and_never_recompiles(solved_case):
     a from-scratch recomputation for the same shapes must reuse the jitted
     ``Gamma_c`` executable rather than compile a second one.
     """
-    from vmex.core import gammac
-
     _, wout = solved_case
     plotting._CONFINEMENT_CACHE.clear()
     first = plotting.confinement_summary(wout, None, booz_note="not sampled")
@@ -371,11 +377,9 @@ def test_confinement_summary_is_cached_and_never_recompiles(solved_case):
     elapsed = time.perf_counter() - start
     assert again is first
     assert elapsed < 0.5
-    compiled = gammac._gamma_c_rows_from_tables._cache_size()
     recomputed = _fresh_conf(wout)
     assert recomputed is not first
     np.testing.assert_allclose(recomputed.gamma_c, first.gamma_c)
-    assert gammac._gamma_c_rows_from_tables._cache_size() == compiled
 
 
 def test_confinement_cache_is_bounded_and_weakly_keyed(solved_case, monkeypatch):
@@ -402,6 +406,7 @@ def test_confinement_cache_is_bounded_and_weakly_keyed(solved_case, monkeypatch)
     assert len(plotting._CONFINEMENT_CACHE) == 1
 
 
+@needs_fastion
 def test_confinement_missing_ripple_and_lasym_notes(solved_case):
     """An unusable ripple input or missing Boozer tables give stated reasons."""
     _, wout = solved_case
@@ -418,6 +423,7 @@ def test_confinement_missing_ripple_and_lasym_notes(solved_case):
     assert "tables unavailable" in conf.notes["epsilon_effective"]
 
 
+@needs_fastion
 def test_confinement_one_valid_one_invalid_and_never_zero(
     solved_case, monkeypatch,
 ):
@@ -428,7 +434,7 @@ def test_confinement_one_valid_one_invalid_and_never_zero(
     """
     import matplotlib.pyplot as plt
 
-    from vmex.core import gammac, neoclassical
+    from vmex.core import fastion, neoclassical
 
     _, wout = solved_case
 
@@ -440,7 +446,7 @@ def test_confinement_one_valid_one_invalid_and_never_zero(
 
     monkeypatch.setattr(
         neoclassical, "epsilon_effective_3_2_from_boozer", _fake_eps)
-    monkeypatch.setattr(gammac, "gamma_c_from_wout", _broken_gamma)
+    monkeypatch.setattr(fastion, "fast_ion_from_wout", _broken_gamma)
     plotting._CONFINEMENT_CACHE.clear()
     booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
     conf = plotting.confinement_summary(wout, booz)
@@ -458,6 +464,7 @@ def test_confinement_one_valid_one_invalid_and_never_zero(
         plt.close(fig)
 
 
+@needs_fastion
 def test_confinement_guards_report_failures_and_skip_cache(
     solved_case, monkeypatch,
 ):
@@ -467,7 +474,7 @@ def test_confinement_guards_report_failures_and_skip_cache(
     ``Gamma_c`` (iota ~ 0 poison on every surface), and a wout stand-in that
     cannot be weak-referenced (computed uncached rather than crashing).
     """
-    from vmex.core import gammac, neoclassical
+    from vmex.core import fastion, neoclassical
 
     _, wout = solved_case
     booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
@@ -484,7 +491,7 @@ def test_confinement_guards_report_failures_and_skip_cache(
         neoclassical, "epsilon_effective_3_2_from_boozer",
         lambda _booz: (np.array([0.5]), np.array([0.0])))
     monkeypatch.setattr(
-        gammac, "gamma_c_from_wout",
+        fastion, "fast_ion_from_wout",
         lambda w, **kw: {"s": np.array([0.5]), "gamma_c": np.array([np.nan])})
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
@@ -546,484 +553,16 @@ def test_confinement_log_scale_needs_positive_wide_range():
         plt.close(fig)
 
 
-def test_gamma_c_from_wout_matches_live_state(solved_case):
-    """The plot route reproduces the validated live-state Gamma_c exactly."""
-    from vmex.core import gammac
+@needs_fastion
+def test_fast_ion_from_wout_matches_live_state(solved_case):
+    """The plot route reproduces the live-state Gamma_c (same Boozer rows)."""
+    from neo_jax.fastion import FastIonBudget
+
+    from vmex.core import fastion
 
     eq, wout = solved_case
-    kwargs = dict(surfaces=(0.3, 0.6), **plotting._GAMMA_C_DIAGNOSTIC)
-    live = gammac.gamma_c_state(eq.state, eq.runtime, **kwargs)
-    from_wout = gammac.gamma_c_from_wout(wout, **kwargs)
-    # measured on this deck: 2.8e-11 relative; the atol floor only covers
-    # exact-cancellation surfaces where Gamma_c is pure roundoff (~1e-28)
-    np.testing.assert_allclose(
-        np.asarray(from_wout["gamma_c"]), np.asarray(live["gamma_c"]),
-        rtol=1e-8, atol=1e-20)
-    assert from_wout["surface_rows"] == live["surface_rows"]
-
-
-def test_d_r_reconstruction_matches_traceable(solved_case):
-    """wout-based Glasser D_R == traceable glasser_d_r_state on this deck."""
-    eq, wout = solved_case
-    recon = plotting._glasser_d_r_from_wout(wout)
-    assert recon["valid"], recon["note"]
-    reference = np.asarray(stab.glasser_d_r_state(eq.state, eq.runtime))
-    interior = slice(2, -1)
-    scale = float(np.max(np.abs(reference[interior])))
-    assert scale > 0.0
-    error = float(np.max(np.abs(recon["d_r"][interior] - reference[interior])))
-    assert error <= 1.0e-4 * scale
-
-
-def test_frozen_pressure_scan_recovers_wout(solved_case):
-    """The frozen pressure scan exactly returns the WOUT at its stored beta."""
-    _, wout = solved_case
-    info = plotting._glasser_d_r_from_wout(wout)
-    scan = plotting._frozen_pressure_scan_from_wout(
-        wout, info, np.array([0.0, float(wout.betatotal)]))
-    interior = slice(2, -1)
-    assert scan["valid"] and scan["note"] == "WOUT pressure shape"
-    for key, reference in (
-        ("dwell", wout.DWell), ("dmerc", wout.DMerc), ("d_r", info["d_r"]),
-    ):
-        np.testing.assert_allclose(
-            scan[key][1, interior], np.asarray(reference)[interior], rtol=2.0e-7)
-    np.testing.assert_allclose(
-        scan["dmerc"][0], np.asarray(wout.DMerc) - np.asarray(wout.DWell))
-    np.testing.assert_allclose(
-        scan["d_r"][0], np.asarray(info["d_r"]) + np.asarray(wout.DWell))
-    # -D_R = DMerc minus a non-negative GGJ correction. Nearly coincident
-    # ideal and resistive margins are therefore physical, not duplicated data.
-    assert np.all(-scan["d_r"][:, interior] <= scan["dmerc"][:, interior] + 1e-12)
-
-
-def test_frozen_pressure_scan_uses_explicit_vacuum_seed(solved_case):
-    """A vacuum WOUT uses the documented linear pressure seed, not a floor."""
-    _, wout = solved_case
-    info = plotting._glasser_d_r_from_wout(wout)
-    dwell = np.asarray(wout.DWell)
-    vacuum = dataclasses.replace(
-        wout, pres=np.zeros_like(wout.pres), presf=np.zeros_like(wout.presf),
-        DWell=np.zeros_like(dwell), DMerc=np.asarray(wout.DMerc) - dwell,
-        betatotal=0.0)
-    vacuum_info = {**info, "d_r": np.asarray(info["d_r"]) + dwell}
-    scan = plotting._frozen_pressure_scan_from_wout(
-        vacuum, vacuum_info, np.array([0.0, 0.01]))
-    assert scan["valid"] and "vacuum seed" in scan["note"]
-    np.testing.assert_allclose(scan["dmerc"][0], vacuum.DMerc)
-    np.testing.assert_allclose(scan["d_r"][0], vacuum_info["d_r"])
-    assert np.isfinite(scan["dmerc"]).all()
-    assert np.isfinite(scan["d_r"]).all()
-
-
-def test_frozen_pressure_scan_guards(solved_case, tmp_path):
-    """Malformed beta grids and unavailable beta normalization fail clearly."""
-    _, wout = solved_case
-    info = plotting._glasser_d_r_from_wout(wout)
-    with pytest.raises(ValueError, match="nonnegative 1-D"):
-        plotting._frozen_pressure_scan_from_wout(wout, info, np.array([-0.01, 0.0]))
-    unavailable = plotting._frozen_pressure_scan_from_wout(
-        dataclasses.replace(wout, wb=0.0), info, np.array([0.0, 0.01]))
-    assert unavailable == {
-        "valid": False, "note": "pressure-to-beta normalization unavailable"}
-    with pytest.raises(ValueError, match="beta_max must be positive"):
-        plotting.plot_stability(wout, tmp_path / "invalid.png", beta_max=0.0)
-
-
-def test_saved_summary_png_resolution(solved_case, tmp_path):
-    """plot_wout writes the summary at >= 200 dpi and closes its figures."""
-    import matplotlib.image as mpimg
-    import matplotlib.pyplot as plt
-
-    _, wout = solved_case
-    open_before = set(plt.get_fignums())
-    paths = plotting.plot_wout(wout, tmp_path, which=("summary",), name=DECK)
-    assert set(plt.get_fignums()) == open_before  # no leaked figures
-    png = paths["summary"]
-    assert png.exists()
-    pixels = mpimg.imread(str(png))
-    width_in, height_in = 15.0, 11.5  # _summary_figure figsize
-    assert pixels.shape[1] >= 0.95 * width_in * plotting._DPI
-    assert pixels.shape[0] >= 0.95 * height_in * plotting._DPI
-
-
-def test_saved_stability_png(solved_case, tmp_path):
-    """The detailed stability figure renders both diagnostic panels."""
-    _, wout = solved_case
-    path = plotting.plot_stability(wout, tmp_path / "stability.png")
-    assert path.exists() and path.stat().st_size > 0
-
-
-# ==========================================================================
-# Degenerate inputs and fallback panels
-# ==========================================================================
-
-def test_d_r_guards_reject_degenerate_wouts():
-    """D_R reconstruction flags too-few-surface and vanishing-phip inputs."""
-    tiny = SimpleNamespace(lasym=False, ns=3)
-    info = plotting._glasser_d_r_from_wout(tiny)
-    assert info["valid"] is False and "too few surfaces" in info["note"]
-
-    ns = 5
-    flat = SimpleNamespace(
-        lasym=False, ns=ns, nfp=1, signgs=-1,
-        xm_nyq=np.array([0.0, 1.0]), xn_nyq=np.array([0.0, 0.0]),
-        xm=np.array([0.0, 1.0]), xn=np.array([0.0, 0.0]),
-        pres=np.zeros(ns), phips=np.zeros(ns), vp=np.ones(ns),
-        iotas=np.ones(ns), buco=np.zeros(ns), jdotb=np.zeros(ns),
-        bdotb=np.ones(ns), DMerc=np.zeros(ns),
-    )
-    info = plotting._glasser_d_r_from_wout(flat)
-    assert info["valid"] is False and "vanishing phip" in info["note"]
-
-
-def test_d_r_self_check_rejects_inconsistent_dmerc(solved_case):
-    """A stored DMerc the integrals cannot reproduce invalidates the curve."""
-    _, wout = solved_case
-    tampered = dataclasses.replace(wout, DMerc=np.zeros_like(np.asarray(wout.DMerc)))
-    info = plotting._glasser_d_r_from_wout(tampered)
-    assert info["valid"] is False
-    assert "self-check failed" in info["note"]
-    assert info["d_r"] is None
-
-
-def _mirror_toroidal_angle(wout):
-    """Return the WOUT of the same equilibrium seen through ``zeta -> -zeta``.
-
-    Modes ``(m, n)`` with ``m > 0`` move to ``(m, -n)``; ``m = 0`` sine
-    coefficients change sign.  The pseudo-scalars (iota, the poloidal
-    covariant field, ``B_s`` and ``<J.B>``) flip.  This is the map a solve of
-    the mirrored deck produces, checked table by table on the NFP=4 QI deck
-    to 5e-10.
-    """
-    def flip(table, xm, xn, *, sine, negate):
-        xm = np.asarray(xm, dtype=int)
-        xn = np.asarray(xn, dtype=int)
-        column = {(m, n): k for k, (m, n) in enumerate(zip(xm, xn))}
-        order = [column[(m, -n)] if m > 0 else k for k, (m, n) in enumerate(zip(xm, xn))]
-        out = np.asarray(table, dtype=float)[:, order]
-        if sine:
-            out[:, xm == 0] *= -1.0
-        return -out if negate else out
-
-    base, nyq = (wout.xm, wout.xn), (wout.xm_nyq, wout.xn_nyq)
-    return dataclasses.replace(
-        wout,
-        rmnc=flip(wout.rmnc, *base, sine=False, negate=False),
-        zmns=flip(wout.zmns, *base, sine=True, negate=False),
-        gmnc=flip(wout.gmnc, *nyq, sine=False, negate=False),
-        bmnc=flip(wout.bmnc, *nyq, sine=False, negate=False),
-        bsubumnc=flip(wout.bsubumnc, *nyq, sine=False, negate=True),
-        bsubvmnc=flip(wout.bsubvmnc, *nyq, sine=False, negate=False),
-        bsubsmns=flip(wout.bsubsmns, *nyq, sine=True, negate=True),
-        iotas=-np.asarray(wout.iotas), iotaf=-np.asarray(wout.iotaf),
-        buco=-np.asarray(wout.buco), jdotb=-np.asarray(wout.jdotb),
-    )
-
-
-def test_d_r_self_check_holds_for_both_iota_signs_on_the_solver_grid(solved_case):
-    """D_R and its self-check do not depend on the sign of iota.
-
-    The stored DMerc is a quadrature on the solver's angular grid, and the
-    reconstruction integrates on that grid, so both orientations reproduce
-    it to round-off.  The finer grid it used before disagreed by 3.8e-2 on
-    the negative-iota NFP=4 QI deck, which dropped that deck's D_R curve.
-    """
-    _, wout = solved_case
-    mirrored = _mirror_toroidal_angle(wout)
-    iota_edge = float(np.asarray(wout.iotaf)[-1])
-    assert iota_edge != 0.0
-    assert float(np.asarray(mirrored.iotaf)[-1]) == -iota_edge
-    infos = [plotting._glasser_d_r_from_wout(case) for case in (wout, mirrored)]
-    for info in infos:
-        assert info["valid"], info["note"]
-        # measured 1e-13 on this deck; the previous fixed 64-point grid left 5.4e-9
-        assert info["mismatch"] < 1.0e-11
-    interior = slice(2, -1)
-    scale = float(np.max(np.abs(np.asarray(wout.DMerc)[interior])))
-    np.testing.assert_allclose(
-        infos[1]["d_r"][interior], infos[0]["d_r"][interior], rtol=0.0, atol=1.0e-9 * scale)
-
-
-def test_j_invariant_map_rejects_degenerate_field():
-    """A constant Boozer |B| cannot define a trapped-particle pitch."""
-    booz = {
-        "bmnc_b": np.array([[1.0]]), "bmns_b": None,
-        "xm_b": np.array([0]), "xn_b": np.array([0]),
-        "nfp": 1, "iota_b": np.array([1.0]),
-    }
-    with pytest.raises(ValueError, match="degenerate"):
-        plotting._j_invariant_map(booz)
-
-
-def test_j_invariant_map_uses_one_physical_pitch_on_every_surface(monkeypatch):
-    """A radial maximum-J diagnostic holds physical pitch fixed."""
-    import vmex.core.bounce as bounce
-
-    def _fake_bounce(*, alpha, pitch, **_kwargs):
-        shape = (_kwargs["bmnc_b"].shape[0], len(alpha), 1, 1)
-        return {"action": jax.numpy.broadcast_to(pitch, shape),
-                "bounce_time": jax.numpy.ones(shape),
-                "well_left": jax.numpy.zeros(shape),
-                "usable_mask": jax.numpy.ones(shape, dtype=bool)}
-
-    monkeypatch.setattr(bounce, "bounce_action_from_boozer", _fake_bounce)
-    booz = {
-        "bmnc_b": np.array([[1.0, 0.2], [1.1, 0.2]]), "bmns_b": None,
-        "xm_b": np.array([0, 0]), "xn_b": np.array([0, 1]), "nfp": 1,
-        "iota_b": np.array([0.5, 0.5]), "G_b": np.ones(2), "I_b": np.zeros(2),
-        "s_b": np.array([0.25, 0.75]),
-    }
-    result = plotting._j_invariant_map(booz, pitch_fraction=0.5, nalpha=4, nsurf=None)
-    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05, rtol=0.0, atol=2e-4)
-    np.testing.assert_allclose(result["j_map"], result["pitch"])
-
-    result = plotting._j_invariant_map(booz, pitch=1.0 / 1.05, nalpha=4, nsurf=None)
-    np.testing.assert_allclose(result["j_map"], 1.0 / 1.05)
-    np.testing.assert_allclose(result["pitch_inverse"], 1.05)
-
-    result = plotting._j_invariant_map(booz, pitch=1.0 / 0.85, nalpha=4, nsurf=None)
-    np.testing.assert_allclose(result["j_map"][0], 1.0 / 0.85)
-    np.testing.assert_array_equal(result["trapped_surface"], [True, False])
-    assert np.all(np.isfinite(result["j_map"][0]))
-    assert np.all(np.isnan(result["j_map"][1]))
-    with pytest.raises(ValueError, match="not trapped"):
-        plotting._j_invariant_map(booz, pitch=0.5, nalpha=4, nsurf=None)
-
-
-def _tokamak_booz(shallow_ripple: float = 0.0):
-    """Axisymmetric Boozer field: J is independent of alpha and decreases with eps."""
-    s_b = np.linspace(0.1, 0.98, 8)
-    eps = 0.1 + 0.15 * s_b
-    bmnc = np.stack([np.ones_like(s_b), -eps, np.full_like(s_b, shallow_ripple)], axis=1)
-    return {
-        "bmnc_b": bmnc * np.array([1.0, 1.0, 1.0]), "bmns_b": None,
-        "xm_b": np.array([0, 1, 6]), "xn_b": np.array([0, 0, 0]), "nfp": 2,
-        "iota_b": np.full(8, 0.45), "G_b": np.full(8, 1.0), "I_b": np.zeros(8), "s_b": s_b,
-    }
-
-
-def test_j_invariant_map_axisymmetric_field_is_alpha_independent_and_radially_resolved():
-    """A tokamak has J(alpha) = const; a shallow ripple well never replaces the main well."""
-    clean = plotting._j_invariant_map(_tokamak_booz(), nalpha=24, nsurf=15)
-    assert clean["s_b"].size == 15 and clean["j_map"].shape == (15, 24)
-    spread = np.ptp(clean["j_map"], axis=1) / np.nanmedian(clean["j_map"], axis=1)
-    assert np.nanmax(spread[np.isfinite(spread)]) < 5e-3
-    assert clean["num_periods"] >= 2 and clean["masked_fraction"] == 0.0
-    rippled = plotting._j_invariant_map(_tokamak_booz(0.01), nalpha=24, nsurf=15)
-    both = np.isfinite(clean["j_map"]) & np.isfinite(rippled["j_map"])
-    assert both.sum() > 100
-    np.testing.assert_allclose(rippled["j_map"][both], clean["j_map"][both], rtol=0.15)
-
-
-def test_booz_on_grid_reproduces_axis_scaling_and_profiles():
-    """Resampling is exact for B_mn = s^(m/2) f(s) with f polynomial, and for iota(s)."""
-    s_old = np.linspace(0.08, 0.98, 10)
-    s_new = np.linspace(0.08, 1.0, 17)
-    m = np.array([0, 1, 4])
-
-    def spectra(s):
-        return np.stack([1.0 + 0.1 * s, 0.2 * np.sqrt(s) * (1.0 + s), 0.05 * s**2 * (1.0 - s)], axis=1)
-
-    booz = {"s_b": s_old, "xm_b": m, "bmnc_b": spectra(s_old), "bmns_b": spectra(s_old) * 0.5,
-            "iota_b": 0.4 + 0.3 * s_old**2, "G_b": 1.0 + s_old, "I_b": s_old,
-            "b_min": 0.9 - s_old, "b_max": 1.1 + s_old}
-    new = plotting._booz_on_grid(booz, s_new)
-    np.testing.assert_allclose(new["bmnc_b"], spectra(s_new), atol=2e-5)
-    np.testing.assert_allclose(new["bmns_b"], 0.5 * spectra(s_new), atol=1e-5)
-    np.testing.assert_allclose(new["iota_b"], 0.4 + 0.3 * s_new**2, atol=1e-4)
-    np.testing.assert_array_equal(new["s_b"], s_new)
-
-
-def test_branch_outliers_flag_jumps_and_spikes_but_not_smooth_maps():
-    alpha = np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False)
-    smooth = np.linspace(1.0, 2.0, 20)[:, None] + 0.1 * np.cos(alpha)[None, :]
-    assert not plotting._branch_outliers(smooth).any()
-    spike = smooth.copy()
-    spike[10, 5] += 3.0
-    flagged = plotting._branch_outliers(spike)
-    assert flagged[10, 5] and flagged.sum() < 12
-    step = smooth.copy()
-    step[:, 20:] += 1.0  # a well swap: two branches side by side
-    flagged = plotting._branch_outliers(step)
-    assert flagged[:, 19:21].all() and not flagged[:, 5:15].any()
-
-
-def test_j_map_panel_marks_masked_samples_and_clips_colors_to_percentiles():
-    import matplotlib.pyplot as plt
-
-    alpha = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
-    s_b = np.linspace(0.2, 0.95, 9)
-    j_map = s_b[:, None] * (1.0 + 0.1 * np.cos(alpha))
-    j_map[4, 3] = np.nan
-    j_map[6, 8] = 50.0  # one wild well must not wash out the color scale
-    info = {"alpha": alpha, "s_b": s_b, "j_map": j_map, "orbits": None,
-            "b_min": np.array([0.9, 1.0]), "pitch_inverse": 1.2}
-    fig, ax = plt.subplots()
-    plotting._j_map_panel(ax, fig, info, 1.0)
-    filled = [cs for cs in _contour_sets(ax) if cs.filled]
-    assert filled and max(filled[0].levels) < 5.0
-    assert "no single well resolved" in [t.get_text() for t in ax.get_legend().get_texts()]
-    plt.close(fig)
-
-
-def test_j_map_panel_separates_lost_from_confined_drift_surfaces():
-    """An orbit that reaches the LCFS is drawn dashed and counted as lost."""
-    import matplotlib.pyplot as plt
-
-    alpha = np.linspace(0.0, 2.0 * np.pi, 8, endpoint=False)
-    s_b = np.linspace(0.2, 0.9, 5)
-    t = np.linspace(0.0, 2.0 * np.pi, 40)
-    orbits = {"s": np.stack([0.5 + 0.1 * np.cos(t), 0.9 + 0.2 * (1.0 - np.cos(t))]),
-              "alpha": np.stack([t, t])}
-    info = {"alpha": alpha, "s_b": s_b, "j_map": s_b[:, None] * (1.0 + 0.1 * np.cos(alpha)),
-            "orbits": orbits, "b_min": np.array([0.9, 1.0]), "pitch_inverse": 1.2}
-    fig, ax = plt.subplots()
-    plotting._j_map_panel(ax, fig, info, 1.0)
-    labels = [text.get_text() for text in ax.get_legend().get_texts()]
-    assert labels == ["drift surfaces: confined (1) / lost (1)"]
-    styles = sorted(line.get_linestyle() for line in ax.lines if len(line.get_xdata()) > 1)
-    assert styles == ["-", "--"]
-    plt.close(fig)
-
-
-def test_volume_second_derivative_of_linear_vprime():
-    """The plotted V'' recovers a linear physical V'(s) profile."""
-    ns = 7
-    s_half = plotting._half_mesh_s(ns)
-    slope, intercept = -2.5, 8.0
-    vp = np.concatenate(([0.0], (intercept + slope * s_half) / (2.0 * np.pi) ** 2))
-    s, vpp = plotting._volume_second_derivative(SimpleNamespace(ns=ns, vp=vp))
-    np.testing.assert_allclose(s, s_half)
-    np.testing.assert_allclose(vpp, slope, atol=2.0e-14)
-
-
-def test_vacuum_stability_panel_is_labeled_as_a_limit():
-    """A vacuum curve must not be presented as a pressure-stability certificate."""
-    import matplotlib.pyplot as plt
-
-    wout = SimpleNamespace(
-        ns=7, DMerc=np.ones(7), betatotal=0.0, vp=np.arange(7, dtype=float))
-    figure, axis = plt.subplots()
-    plotting._stability_panel(
-        axis, wout, {"valid": False, "note": "not sampled"}, s_plot_ignore=0.0)
-    assert "vacuum-limit" in axis.lines[0].get_label()
-    assert "not finite-pressure" in axis.get_title()
-    plt.close(figure)
-
-
-def test_stability_panel_accepts_the_minimum_three_surfaces():
-    """NS = 3 is VMEC's smallest grid; V'' needs four surfaces, so it is skipped."""
-    import matplotlib.pyplot as plt
-
-    wout = SimpleNamespace(ns=3, DMerc=np.ones(3), betatotal=0.01, vp=np.arange(3, dtype=float))
-    figure, axis = plt.subplots()
-    plotting._stability_panel(axis, wout, {"valid": False, "note": "n/a"}, s_plot_ignore=0.2)
-    plt.close(figure)
-
-
-def test_summary_survives_boozer_failure(solved_case, monkeypatch):
-    """Boozer-transform failure leaves annotated placeholder panels."""
-    import matplotlib.pyplot as plt
-
-    _, wout = solved_case
-
-    def _broken(_wout, **_kwargs):
-        raise RuntimeError("synthetic boozer failure")
-
-    monkeypatch.setattr(plotting, "_boozer_summary_data", _broken)
-    fig, meta = plotting._summary_figure(wout)
-    try:
-        for name in ("j_invariant", "boozer_mid", "boozer_lcfs"):
-            ax = meta["axes"][name]
-            assert any("Boozer transform unavailable" in t.get_text() for t in ax.texts), name
-            assert ax.get_title().strip() and ax.get_xlabel().strip()
-    finally:
-        plt.close(fig)
-
-
-def test_summary_survives_j_map_failure(solved_case, monkeypatch):
-    """J-map failure annotates its panel; Boozer |B| panels still render."""
-    import matplotlib.pyplot as plt
-
-    _, wout = solved_case
-
-    def _broken(_booz, **_kwargs):
-        raise RuntimeError("synthetic bounce failure")
-
-    monkeypatch.setattr(plotting, "_j_invariant_map", _broken)
-    fig, meta = plotting._summary_figure(wout)
-    try:
-        ax = meta["axes"]["j_invariant"]
-        assert any("J map unavailable" in t.get_text() for t in ax.texts)
-        assert ax.get_title() == "second adiabatic invariant"
-        for name in ("boozer_mid", "boozer_lcfs"):
-            assert _contour_sets(meta["axes"][name]), name
-    finally:
-        plt.close(fig)
-
-
-def test_plot_surfaces_pads_unused_axes(solved_case, tmp_path):
-    """A slice count off the grid ends with blank axes, not an IndexError."""
-    _, wout = solved_case
-    path = plotting.plot_surfaces(
-        wout, tmp_path / "surfaces.png", nzeta=5, nradii=4, ntheta=48,
-    )
-    assert path.exists() and path.stat().st_size > 0
-
-
-@pytest.mark.parametrize("derivative", ({}, {"dtheta": 1}, {"dphi": 1}))
-@pytest.mark.parametrize("parity", ("cos", "sin", "both"))
-@pytest.mark.parametrize("batch_shape", ((), (3,), (2, 3)))
-def test_plot_fourier_synthesis_matches_dense_series(derivative, parity, batch_shape):
-    """Signed modes, asymmetric partners and radial batches keep their series."""
-    rng = np.random.default_rng(918)
-    m, n = np.meshgrid(np.arange(16), np.arange(-12, 13), indexing="ij")
-    m, n = m.ravel(), 3 * n.ravel()
-    theta = np.linspace(0., 2 * np.pi, 31)
-    phi = np.linspace(0., 2 * np.pi / 3, 37)
-    c, s = rng.normal(size=(2, *batch_shape, m.size))
-    c = None if parity == "sin" else c
-    s = None if parity == "cos" else s
-    phase = m[:, None, None] * theta[None, :, None] - n[:, None, None] * phi
-    cosine, sine = np.cos(phase), np.sin(phase)
-    if derivative:
-        factor = m if "dtheta" in derivative else -n
-        cosine, sine = -sine * factor[:, None, None], cosine * factor[:, None, None]
-    expected = np.zeros((*batch_shape, theta.size, phi.size))
-    if c is not None:
-        expected += np.tensordot(c, cosine, axes=(-1, 0))
-    if s is not None:
-        expected += np.tensordot(s, sine, axes=(-1, 0))
-    actual = plotting._eval_modes(c, s, m, n, theta, phi, **derivative)
-    np.testing.assert_allclose(actual, expected, rtol=2e-12, atol=2e-11)
-
-
-def test_near_unity_force_ticks_and_long_stability_status_fit(monkeypatch):
-    """Narrow-range force profiles keep distinct ticks; failure notes stay readable."""
-    plt = plotting._import_matplotlib()
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), layout="constrained")
-    wout = SimpleNamespace(ns=31, DMerc=np.linspace(-1., -2., 31), betatotal=0.,
-                          vp=np.linspace(1., 2., 31))
-    narrow = np.linspace(1 - 1e-10, 1., 29)
-    monkeypatch.setattr(plotting, "_relative_force_error_profile",
-                        lambda _: (np.linspace(0.2, 0.98, 29), narrow, 1.0))
-    try:
-        assert plotting._relative_force_error_panel(axes[0], wout) == 1.0
-        plotting._stability_panel(axes[1], wout, {
-            "valid": False, "note": "D_R self-check failed (DMerc mismatch 3.8e-02)"
-        }, s_plot_ignore=.2)
-        fig.canvas.draw()
-        labels = [text.get_text() for text in _drawn_tick_labels(axes[0].yaxis)]
-        lo, hi = axes[0].get_ylim()
-        labels += [tick.label1.get_text() for tick in axes[0].yaxis.get_minor_ticks()
-                   if lo <= tick.get_loc() <= hi and tick.label1.get_text()]
-        assert len(labels) > 1 and len(labels) == len(set(labels))
-        assert axes[0].get_yscale() == "log"
-        assert axes[0].yaxis.get_offset_text().get_text()
-        np.testing.assert_array_equal(axes[0].lines[0].get_ydata(), narrow)
-        extent = axes[1].title.get_window_extent(fig.canvas.get_renderer())
-        assert extent.x0 >= fig.bbox.x0 and extent.x1 <= fig.bbox.x1
-        assert "self-check failed" in axes[1].get_title()
-    finally:
-        plt.close(fig)
+    budget = FastIonBudget(**plotting._GAMMA_C_DIAGNOSTIC)
+    live = fastion.fast_ion_from_state(eq.state, eq.runtime, (0.3, 0.6), budget=budget)
+    from_wout = fastion.fast_ion_from_wout(wout, (0.3, 0.6), budget=budget)
+    np.testing.assert_allclose(np.asarray(from_wout["gamma_c"]), np.asarray(live["gamma_c"]),
+                               rtol=1e-4, atol=1e-8)

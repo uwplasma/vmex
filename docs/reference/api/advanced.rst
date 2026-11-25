@@ -180,7 +180,7 @@ that the objective modules share live in one place and are re-exported by
 .. automodule:: vmex.core.maxj
    :members:
 
-.. automodule:: vmex.core.gammac
+.. automodule:: vmex.core.fastion
    :members:
 
 .. automodule:: vmex.core.bootstrap

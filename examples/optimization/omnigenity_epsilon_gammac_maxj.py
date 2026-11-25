@@ -3,16 +3,14 @@
 
 Fast-ion refinement of the finite-beta Landreman--Buller--Drevlak QA: one
 scalar objective adds the quasisymmetry ratio residual (the differentiable
-proxy that controls effective ripple), the smooth ``GammaCSmooth``
-surrogate, and the outer-volume maximum-J residual at fixed physical pitch.
+proxy that controls effective ripple), the differentiable ``GammaC``
+proxy, and the outer-volume maximum-J residual at fixed physical pitch.
 Each confinement term is normalized by its seed value so the weights are
 dimensionless preferences, one L-BFGS-B call drives the boundary through one
 reverse implicit adjoint per gradient, and force balance is a constraint by
 construction: every evaluation is a converged hot-restarted equilibrium.
 
-Policy: optimize the surrogate, report the hard values.  Hard ``Gamma_c``
-is evaluated before and after at the shared optimization resolution.
-Minimizing the surrogate does not promise zero prompt orbit losses -- certify a design with collisionless tracing
+Policy: optimize ``GammaC``, report its value before and after.  Minimizing the proxy does not promise zero prompt orbit losses -- certify a design with collisionless tracing
 (``examples/vmex_essos_workflow.py``) before quoting loss fractions.  The
 bootstrap-consistent current profile is frozen during this refinement; see
 ``QA_maxJ_continuation.py`` for the self-consistent Redl loop.
@@ -28,7 +26,9 @@ from scipy.optimize import minimize
 
 import vmex as vj
 from vmex import optimize as opt
-from vmex.core.gammac import GammaC, GammaCSmooth
+from neo_jax.fastion import FastIonBudget
+
+from vmex.core.fastion import GammaC
 from vmex.core.maxj import MaximumJResidual, common_trapped_pitches_state
 
 # The seed deck: the finite-beta Landreman-Buller-Drevlak QA:
@@ -58,19 +58,17 @@ IOTA_MARGIN = 0.95
 MAXJ_TARGET = -0.01
 TRAPPING_DEPTHS = (0.4, 0.8)
 
-# Gamma_c surrogate temperature and quadrature, and the bounce-ACTION plan:
-GC_TEMPERATURE = 0.15
-GC_BUDGET = dict(nalpha=5, num_transit=3, points_per_transit=64,
-                 num_pitch=24, quadrature_order=32)
+# Gamma_c sampling budget, and the bounce-ACTION plan:
+GC_BUDGET = FastIonBudget()
 ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
               max_wells=20, quadrature_order=24)
 ACTION_MBOZ = 10
 
-# Research resolution. The hard Gamma_c carries 10-20 % scatter at the shipped
-# budgets, so quote the budget with any number taken from this script:
+# Research resolution. Gamma_c moves by <1 % under budget doublings except the
+# number of lines (docs/explanation/confinement.rst); quote the budget with any
+# number taken from this script:
 #   MAX_MODE, MAXITER = 3, 40
-#   GC_BUDGET = dict(nalpha=9, num_transit=5, points_per_transit=128,
-#                    num_pitch=48, quadrature_order=32)
+#   GC_BUDGET = FastIonBudget(n_lines=32, n_transits=6)
 #   ACTION = dict(nalpha=9, points_per_period=48, num_periods=10,
 #                 max_wells=24, quadrature_order=32)
 
@@ -92,9 +90,7 @@ ci_smoke = os.environ.get("VMEX_EXAMPLES_CI") == "1"
 if ci_smoke:
     MAX_MODE, MAXITER = 1, 2
     QS_SURFACES, GC_SURFACES = np.linspace(0.2, 0.8, 4), (0.5,)
-    GC_TEMPERATURE = 0.2
-    GC_BUDGET = dict(nalpha=5, num_transit=2, points_per_transit=32,
-                     num_pitch=12, quadrature_order=16)
+    GC_BUDGET = FastIonBudget(n_lines=6, n_transits=2, nodes_per_period=12, n_panel=8, n_level=12, n_well=16, n_dense=32)
     # The bounce-ACTION trace cannot be shortened further: a coarser plan loses
     # the matched wells on the outer surfaces and returns NaN slopes.
     ACTION = dict(nalpha=7, points_per_period=32, num_periods=8,
@@ -127,13 +123,12 @@ pitch = np.asarray(common_trapped_pitches_state(
     num_periods=ACTION["num_periods"]))
 
 qs = opt.QuasisymmetryRatioResidual(QS_SURFACES, helicity_m=1, helicity_n=0)
-gamma_c_smooth = GammaCSmooth(GC_SURFACES, temperature=GC_TEMPERATURE, **GC_BUDGET)
-gamma_c_hard = GammaC(GC_SURFACES, **GC_BUDGET)  # report-only, never differentiated
+gamma_c = GammaC(GC_SURFACES, budget=GC_BUDGET)
 maximum_j = MaximumJResidual(MAXJ_SURFACES, pitch, mboz=ACTION_MBOZ,
                              nboz=ACTION_MBOZ, target=MAXJ_TARGET, **ACTION)
 
 SCALES = {"QS": float(qs.total_state(state0, rt0)),
-          "GammaCSmooth": float(gamma_c_smooth.total_state(state0, rt0)),
+          "GammaC": float(gamma_c.total_state(state0, rt0)),
           "maxJ": float(maximum_j.total_state(state0, rt0))}
 for name, scale in SCALES.items():
     if not np.isfinite(scale) or scale <= 0.0:
@@ -159,8 +154,8 @@ constraint_terms = [
 
 def normalized_terms(equilibrium_state, solver_context):
     return (qs.total_state(equilibrium_state, solver_context) / SCALES["QS"],
-            gamma_c_smooth.total_state(equilibrium_state, solver_context)
-            / SCALES["GammaCSmooth"],
+            gamma_c.total_state(equilibrium_state, solver_context)
+            / SCALES["GammaC"],
             maximum_j.total_state(equilibrium_state, solver_context) / SCALES["maxJ"])
 
 
@@ -178,15 +173,15 @@ def print_terms(label, eq):
     rows = np.asarray(opt.residuals_from_tuples(
         eq.solution, eq.solver_context, constraint_terms))
     print(f"[{label}] w_eps*QS/QS0 = {W_EPS * eps_proxy:.4f}, "
-          f"w_gc*GammaCSmooth/G0 = {W_GC * gc_term:.4f}, "
+          f"w_gc*GammaC/G0 = {W_GC * gc_term:.4f}, "
           f"w_maxj*maxJ/J0 = {W_MAXJ * mj_term:.4f}, "
           f"constraints = {0.5 * float(rows @ rows):.4e}")
 
 
 def hard_confinement(eq):
-    """Hard validation metrics; the surrogate never appears in a quoted number."""
+    """Validation metrics."""
     row = {"gamma_c": np.asarray(
-        gamma_c_hard.compute_state(eq.solution, eq.solver_context)["gamma_c"])}
+        gamma_c.compute_state(eq.solution, eq.solver_context)["gamma_c"])}
     maxj = maximum_j.compute_state(eq.solution, eq.solver_context)
     row["maxj_total"] = float(maxj["total"])
     row["maxj_fraction"] = float(maxj["maximum_j_fraction"])
@@ -195,7 +190,7 @@ def hard_confinement(eq):
 
 
 report = opt.EquilibriumReporter(
-    ("QS", qs.total, ".4e"), ("GammaCSmooth", gamma_c_smooth.total, ".4e"),
+    ("QS", qs.total, ".4e"), ("GammaC", gamma_c.total, ".4e"),
     ("maxJ", maximum_j.total, ".4e"), ("aspect", opt.aspect_ratio, ".3f"),
     ("min |iota|", opt.min_abs_iota, ".3f"),
     ("beta", opt.volume_average_beta, ".3%"))
