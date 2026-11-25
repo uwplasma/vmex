@@ -461,35 +461,24 @@ def test_run_from_json(tmp_path):
     assert (tmp_path / "output_run_from_json" / "wout_circular_tokamak.nc").exists()
 
 
-def test_epsilon_effective_example_bounds_the_neo_controls() -> None:
-    """The example must stay responsive and must not chase a rational surface.
-
-    ``max_rational_field_periods=0`` asks NEO_JAX for an unlimited exact
-    rational correction, which on a near-rational surface does not finish in
-    an example's budget; the script documents the bound and keeps it finite.
-    """
+def test_epsilon_effective_example_uses_the_traceable_state_route() -> None:
+    """The example is a radial profile from the solver state, not a wout round trip."""
     source = (EXAMPLES / "epsilon_effective.py").read_text()
-    assert "epsilon_effective_from_wout" in source
-    assert "max_rational_field_periods=100000" in source
+    assert "epsilon_effective_3_2_from_state" in source
     assert "input.LandremanPaul2021_QA_lowres" in source
-    # a radial profile, not a single surface: the trend is the result
     assert "SURFACES = np.linspace(0.15, 0.95, 5)" in source
-    assert "surfaces=SURFACES" in source and "config=NEO_CONFIG" in source
 
 
-# NEO_JAX is the optional ``neoclassical`` extra, which no CI lane installs
-# today, so this skips everywhere in CI; it is the on-demand check for the
-# example (``pip install vmex[neoclassical]``, then RUN_FULL=1).
-@pytest.mark.full  # ~3.5 min: one solve, then a Boozer transform per surface
 def test_epsilon_effective_example(tmp_path):
-    pytest.importorskip("neo_jax")
-    out = _run_example(EXAMPLES / "epsilon_effective.py", tmp_path, timeout=1800)
+    neo = pytest.importorskip("neo_jax")
+    if not hasattr(neo, "effective_ripple_3_2"):
+        pytest.skip("the effective ripple needs neo-jax >= 1.2.0")
+    out = _run_example(EXAMPLES / "epsilon_effective.py", tmp_path, timeout=600)
     values = re.search(r"epsilon_eff\^\(3/2\) = \[(.+?)\]", out, re.S)
     assert values is not None, out
     profile = np.array([float(v) for v in values.group(1).split()])
     assert profile.size == 5 and np.all(np.isfinite(profile))
-    # a QA ripple is small but nonzero: about 1e-8 here, within 10% when the NEO
-    # steps per period and step budget are doubled, and not monotonic in s
+    # a QA ripple is small but nonzero (about 1e-8) and not monotonic in s
     assert np.all(profile > 0) and np.all(profile < 1e-6), profile
     assert (tmp_path / "epsilon_effective.png").stat().st_size > 10_000
 

@@ -402,21 +402,14 @@ def test_confinement_cache_is_bounded_and_weakly_keyed(solved_case, monkeypatch)
     assert len(plotting._CONFINEMENT_CACHE) == 1
 
 
-def test_confinement_missing_neo_and_lasym_notes(solved_case, monkeypatch):
-    """Missing NEO_JAX or Boozer tables give stated reasons."""
-    from vmex.core import neoclassical
-
+def test_confinement_missing_ripple_and_lasym_notes(solved_case):
+    """An unusable ripple input or missing Boozer tables give stated reasons."""
     _, wout = solved_case
-
-    def _no_neo():
-        raise ImportError("effective ripple requires NEO_JAX")
-
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", _no_neo)
     booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
     assert not conf.validity["epsilon_effective"]
-    assert "NEO_JAX" in conf.notes["epsilon_effective"]
+    assert "effective-ripple evaluation failed" in conf.notes["epsilon_effective"]
     assert conf.validity["gamma_c"]
 
     plotting._CONFINEMENT_CACHE.clear()
@@ -439,15 +432,14 @@ def test_confinement_one_valid_one_invalid_and_never_zero(
 
     _, wout = solved_case
 
-    def _fake_eps(booz, *, config=None):
+    def _fake_eps(booz):
         return np.array([0.3, 0.6, 0.9]), np.array([1e-4, 2e-4, 4e-4])
 
     def _broken_gamma(*args, **kwargs):
         raise RuntimeError("synthetic gamma failure")
 
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
     monkeypatch.setattr(
-        neoclassical, "epsilon_effective_from_boozer", _fake_eps)
+        neoclassical, "epsilon_effective_3_2_from_boozer", _fake_eps)
     monkeypatch.setattr(gammac, "gamma_c_from_wout", _broken_gamma)
     plotting._CONFINEMENT_CACHE.clear()
     booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
@@ -479,25 +471,24 @@ def test_confinement_guards_report_failures_and_skip_cache(
 
     _, wout = solved_case
     booz = {"mboz": 4, "nboz": 4, "s_b": np.array([0.5]), "neo_booz": {}}
-    monkeypatch.setattr(neoclassical, "diagnostic_neo_config", lambda: None)
 
-    def _raises(_booz, *, config=None):
+    def _raises(_booz):
         raise RuntimeError("synthetic NEO failure")
 
-    monkeypatch.setattr(neoclassical, "epsilon_effective_from_boozer", _raises)
+    monkeypatch.setattr(neoclassical, "epsilon_effective_3_2_from_boozer", _raises)
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
-    assert conf.notes["epsilon_effective"] == "NEO evaluation failed: RuntimeError: synthetic NEO failure"
+    assert conf.notes["epsilon_effective"] == "effective-ripple evaluation failed: RuntimeError: synthetic NEO failure"
 
     monkeypatch.setattr(
-        neoclassical, "epsilon_effective_from_boozer",
-        lambda _booz, *, config=None: (np.array([0.5]), np.array([0.0])))
+        neoclassical, "epsilon_effective_3_2_from_boozer",
+        lambda _booz: (np.array([0.5]), np.array([0.0])))
     monkeypatch.setattr(
         gammac, "gamma_c_from_wout",
         lambda w, **kw: {"s": np.array([0.5]), "gamma_c": np.array([np.nan])})
     plotting._CONFINEMENT_CACHE.clear()
     conf = plotting.confinement_summary(wout, booz)
-    assert conf.notes["epsilon_effective"] == "NEO returned no finite positive values"
+    assert conf.notes["epsilon_effective"] == "no finite positive effective ripple"
     assert conf.notes["gamma_c"] == "no surface returned a finite Gamma_c"
     assert not conf.validity["gamma_c"] and conf.gamma_c is None
 

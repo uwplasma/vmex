@@ -871,31 +871,40 @@ Effective ripple
 
 The Nemov effective ripple is the geometric coefficient that sets the
 low-collisionality :math:`1/\nu` transport scale,
-:math:`D_{11}\propto\epsilon_{\mathrm{eff}}^{3/2}/\nu`.  NEO conventionally
-reports :math:`\epsilon_{\mathrm{eff}}^{3/2}` (``epstot``), not
-:math:`\epsilon_{\mathrm{eff}}` itself.  VMEX keeps the validated NEO
-algorithm in the optional NEO_JAX package rather than duplicating a second
-neoclassical solver:
+:math:`D_{11}\propto\epsilon_{\mathrm{eff}}^{3/2}/\nu`; the functions return
+:math:`\epsilon_{\mathrm{eff}}^{3/2}` (NEO's ``epstot``), and
+:math:`\epsilon_{\mathrm{eff}}` is that value to the power 2/3.  NEO_JAX evaluates
+Nemov's bounce integrals (Phys. Plasmas 6, 4622 (1999), in the form of Unalmis
+et al. eq. 2.12 and ``desc.compute._neoclassical``) along Boozer field lines
+with exact bounce points, so the value is a smooth function of the equilibrium
+that is differentiable in forward and reverse mode through the implicit solve:
 
 .. code-block:: python
 
-   from neo_jax import NeoConfig
    import vmex as vj
 
-   config = NeoConfig(theta_n=64, phi_n=64, npart=40)
-   s, epsilon_eff_3_2 = vj.epsilon_effective_from_wout(
-       equilibrium.wout, surfaces=[0.2, 0.5, 0.8, 0.95], config=config)
+   eps_3_2 = vj.epsilon_effective_3_2_from_state(
+       equilibrium.state, equilibrium.runtime, surfaces=[0.25, 0.5, 0.75])
+   # from a file: vj.epsilon_effective_3_2_from_wout(wout, surfaces=[...])
 
-The in-memory adapter performs BOOZ_XFORM without an intermediate file and
-then uses NEO_JAX's batched JAX surface scan.  The smaller configuration used
-by ``--plot`` is a trend diagnostic; converged work must refine NEO controls
-and verify radial convergence.  The current WOUT entry point is diagnostic,
-not an optimization objective.  The planned objective lane will connect the
-traceable VMEX state transform directly to NEO_JAX, use its supported
-forward-mode sensitivities, and certify them against reconverged finite
-differences and STELLOPT NEO before exposing the result in objective tuples.
-LASYM equilibria pass their sine Boozer harmonics; a NEO_JAX without them is
-rejected rather than allowed to drop them silently.
+The value is interpolated linearly in ``s`` between the two half-mesh rows
+that bracket each surface (never snapped to the nearest row).  The resolution is a
+:class:`neo_jax.RippleBudget`; the default is within 1 % of a
+budget three times larger on six boundaries and a QI spectrum, and fewer than
+16 field lines can be 5 to 12 % off.  Against NEO_JAX at a very fine resolution the value
+agrees to 0.04 to 0.3 % on non-quasi-symmetric configurations, and with Fortran
+xneo and with DESC at converged resolution to 0.2 to 3 % (DESC includes the pressure term of the
+geodesic curvature, so it is compared on vacuum fields only).  NEO's
+default-resolution values (``theta_n=32``) are limited by spline noise below
+:math:`\epsilon_{\mathrm{eff}}^{3/2}\sim10^{-5}`: a good QA, such as the
+``LandremanPaul2021_QA_lowres`` deck, has :math:`\epsilon_{\mathrm{eff}}^{3/2}
+\approx 10^{-8}`, which the bounce integrals and a very fine NEO run agree on.
+The value assumes force balance: for near-omnigenous fields it needs the equilibrium solved to ``ftol`` 1e-12 or
+tighter.  On the nfp = 4 QI deck (s = 0.49) the effective ripple is :math:`\epsilon_{\mathrm{eff}}^{3/2}` = 3.4e-3,
+1.4e-3, 5.2e-4, 4.81e-4, 4.80e-4 for ``ftol`` 1e-6, 1e-8, 1e-10, 1e-12, 1e-14, so 1e-10 is 8 % high and 1e-12 is 0.3 % high.
+The Fortran-faithful NEO_JAX integrator is also what :func:`~vmex.core.neoclassical.screen_transport` uses, as the
+independent forward screen that accepts or rejects candidates in the pwO
+examples.
 
 Fast-ion confinement proxy
 --------------------------
@@ -1022,11 +1031,11 @@ difference from the reference. Alpha losses are 2000 fusion alphas born at
      - hard :class:`~vmex.core.gammac.GammaC` at 13 lines, 6 transits, 96 points, 48 pitch, 48 nodes
      - 0.98, 12 % (hard value)
      - 0.5 s against 1.5 s (default)
-   * - NEO effective ripple
-     - not in the loop
-     - ``diagnostic_neo_config()`` (32 x 32, 24 particles, 20 steps per period)
-     - 0.996, 2.5 %
-     - not available
+   * - :func:`~vmex.core.neoclassical.epsilon_effective_3_2_from_state`
+     - default budget (16 lines, 3 + 3 transits, 16 nodes per period, 4 pitch nodes, 32 per well)
+     - 48 lines, 6 + 6 transits, 48 nodes per period, 8 pitch nodes, 64 per well
+     - 0.6 % largest error over 24 surfaces (six boundaries, a QI spectrum); gradient 1.3 % in norm
+     - 1.3 s value and 4.9 s value plus gradient (3 surfaces, nfp = 2, four cores)
 
 The constructed-QI residual is limited by its field-line sampling, not by the
 Boozer resolution (``mboz`` 6 to 24 change it by less than 0.5 %); the sampling

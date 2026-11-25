@@ -720,8 +720,7 @@ def gamma_c_state(
     """Evaluate ``Gamma_c`` on flux surfaces of a converged equilibrium.
 
     ``surfaces`` are normalized-flux values mapped to the nearest interior
-    full-mesh rows (the surface-selection convention of
-    :func:`vmex.core.neoclassical.epsilon_effective_from_wout`).  Each
+    full-mesh rows.  Each
     surface samples ``nalpha`` field lines over ``num_transit`` poloidal turns
     at ``points_per_transit`` points per turn, centred on the field-line label
     so the stellarator reflection is an exact invariance of the estimator; the
