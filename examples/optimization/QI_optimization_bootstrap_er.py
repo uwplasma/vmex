@@ -28,7 +28,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 from scipy.optimize import least_squares
@@ -75,12 +74,12 @@ N_CURRENT_SPLINE = 6
 # Boozer resolution the QI residual is evaluated on:
 QI_OPTIONS = dict(mboz=10, nboz=10, nphi=41, nalpha=12, n_bounce=13)
 
-# Constraints, each a one-sided hinge:
+# Constraints, each a one-sided limit:
 ASPECT_LIMIT = 10.0
 IOTA_FLOOR = 0.5                  # minimum |iota| over the profile
 MIRROR_LIMIT = 0.21
-MIRROR_HINGE_FRACTION = 0.99      # the hinge starts pulling just below the limit
-HINGE_WEIGHT = 1.0e4
+MIRROR_LIMIT_FRACTION = 0.99      # the limit starts pulling just below the limit
+LIMIT_WEIGHT = 1.0e4
 
 # Picard loop: iteration cap and tolerance on the relative change of I'(s), and
 # the final self-consistency requirement (rms of <j.B> VMEX - DKX over rms DKX):
@@ -224,31 +223,13 @@ def make_consistent(deck, equilibrium):
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface."""
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
-def aspect_excess(equilibrium_state, solver_context):
-    """Hinge on the aspect ratio above its limit."""
-    return jnp.maximum(opt.aspect_ratio(equilibrium_state, solver_context) - ASPECT_LIMIT, 0.0)
-
-
-def mirror_excess(equilibrium_state, solver_context):
-    """Hinge on the mirror ratio, pulling from MIRROR_HINGE_FRACTION of the limit."""
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context)
-        - MIRROR_HINGE_FRACTION * MIRROR_LIMIT, 0.0)
-
-
 # Each term is (function, target, weight).
 qi = ConstructedQIResidual(SURFACES, **QI_OPTIONS)
 objective_function_terms = [
     (qi, 0.0, 100.0),
-    (aspect_excess, 0.0, HINGE_WEIGHT),
-    (iota_floor, 0.0, HINGE_WEIGHT),
-    (mirror_excess, 0.0, HINGE_WEIGHT),
+    (opt.aspect_ratio, opt.at_most(ASPECT_LIMIT), LIMIT_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), LIMIT_WEIGHT),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT_FRACTION * MIRROR_LIMIT), LIMIT_WEIGHT),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
 ]
 

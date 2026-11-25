@@ -21,7 +21,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -138,19 +137,10 @@ equilibrium = opt.solve_equilibrium(inp) if FROM_MINIMAL_SEED else None
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 # Each term is (function, target, weight).
 qs = opt.QuasisymmetryRatioResidual(QA_SURFACES, helicity_m=1, helicity_n=0)
 shape_terms = [(qs, 0.0, QA_WEIGHT), (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0), (opt.magnetic_well, MAGNETIC_WELL_TARGET, WELL_WEIGHT),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0), (opt.magnetic_well, MAGNETIC_WELL_TARGET, WELL_WEIGHT),
 ]
 report = opt.EquilibriumReporter(
     ("QS", qs.total, ".4e"), ("aspect", opt.aspect_ratio, ".3f"),
@@ -214,7 +204,7 @@ if FROM_MINIMAL_SEED and not ci_smoke:
 bootstrap = RedlBootstrapMismatch(
     profiles, helicity_n=0, surfaces=QA_SURFACES, n_lambda=REDL_N_LAMBDA)
 finite_beta_terms = [(qs, 0.0, QA_WEIGHT), (bootstrap, 0.0, BOOTSTRAP_WEIGHT),
-    (opt.aspect_ratio, ASPECT_TARGET, 1.0), (iota_floor, 0.0, 10.0),
+    (opt.aspect_ratio, ASPECT_TARGET, 1.0), (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
     (opt.magnetic_well, MAGNETIC_WELL_TARGET, WELL_WEIGHT)]
 

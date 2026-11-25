@@ -13,7 +13,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import minimize
 
@@ -72,28 +71,12 @@ inp = replace(inp, rbc=rbc, zbs=zbs, delt=0.5,
 
 qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=0, helicity_n=1)
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-def elongation_excess(equilibrium_state, solver_context):
-    return jnp.maximum(
-        opt.max_elongation(equilibrium_state, solver_context) - ELONGATION_LIMIT, 0.0)
-
-def mirror_excess(equilibrium_state, solver_context):
-    return jnp.maximum(
-        opt.mirror_ratio(equilibrium_state, solver_context) - MIRROR_LIMIT, 0.0)
-
 objective_function_terms = [
     (qs, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),  # a summed scalar drowns 0.01
-    (iota_floor, 0.0, 10.0),
-    (mirror_excess, 0.0, 10.0),
-    (elongation_excess, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
+    (opt.mirror_ratio, opt.at_most(MIRROR_LIMIT), 10.0),
+    (opt.max_elongation, opt.at_most(ELONGATION_LIMIT), 10.0),
 ]
 
 report = opt.EquilibriumReporter(

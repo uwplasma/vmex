@@ -18,7 +18,6 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
@@ -57,8 +56,8 @@ IOTA_FLOOR = 0.42                 # minimum |iota| over the profile
 
 # Stability rows. VMEC's DMerc and D_R are per unit toroidal flux squared, so
 # PHIEDGE**2 * DMerc is the dimensionless criterion in s, O(1e-2) here; the
-# weight and margin below act on that form. Each row is a hinge, zero on a
-# stable surface. Below STABILITY_MIN_S the finite-difference DMerc is a
+# weight and margin below act on that form. Each row is a one-sided
+# limit, zero on a stable surface. Below STABILITY_MIN_S the finite-difference DMerc is a
 # cancellation of DWell and DGeod, each O(1e3) there, and its sign follows the
 # grid (the first interior surface of the 71-surface grid reads -1.3e3 while
 # its neighbours read +65 and +27), so rows and reported extrema both start at
@@ -152,32 +151,10 @@ inp, equilibrium = picard.input, picard.equilibrium
 
 ### Set up the objective ######################################################
 
-def iota_floor(equilibrium_state, solver_context):
-    """Hinge on the profile minimum of |iota|: a mean target can hide a near-zero surface.
-
-    opt.mean_iota targets the average instead; opt.soft_min_abs_iota is the smooth minimum.
-    """
-    return jnp.maximum(
-        IOTA_FLOOR - opt.min_abs_iota(equilibrium_state, solver_context), 0.0)
-
-
 def stability_window(profile):
     """Interior surfaces with s >= STABILITY_MIN_S, on any radial grid."""
     s = np.linspace(0.0, 1.0, profile.shape[0])
     return profile[(s >= STABILITY_MIN_S) & (s < s[-1])]
-
-
-def mercier_rows(equilibrium_state, solver_context):
-    """Hinge on PHIEDGE**2 DMerc below the margin (DMerc > 0 is stable)."""
-    dmerc = PHIEDGE**2 * opt.d_merc_state(equilibrium_state, solver_context)
-    return jnp.maximum(STABILITY_MARGIN - stability_window(dmerc), 0.0)
-
-
-def resistive_rows(equilibrium_state, solver_context):
-    """Hinge on PHIEDGE**2 D_R above minus the margin (D_R < 0 is stable)."""
-    d_r = PHIEDGE**2 * opt.glasser_d_r_state(
-        equilibrium_state, solver_context, shear_epsilon=1.0e-8)
-    return jnp.maximum(stability_window(d_r) + STABILITY_MARGIN, 0.0)
 
 
 def minimum_dmerc(equilibrium_state, solver_context):
@@ -199,8 +176,10 @@ qs = opt.QuasisymmetryRatioResidual(SURFACES, helicity_m=1, helicity_n=0)
 objective_function_terms = [
     (qs, 0.0, 1.0), (bootstrap, 0.0, 1.0),
     (opt.aspect_ratio, ASPECT_TARGET, 1.0),
-    (iota_floor, 0.0, 10.0),
+    (opt.min_abs_iota, opt.at_least(IOTA_FLOOR), 10.0),
     (opt.volume_average_beta, TARGET_BETA, BETA_WEIGHT),
+    *opt.stability_terms(inp, margin=STABILITY_MARGIN, weight=STABILITY_WEIGHT,
+                         from_s=STABILITY_MIN_S),
 ]
 
 report = opt.EquilibriumReporter(
@@ -222,8 +201,7 @@ for max_mode, max_nfev, n_spline in zip(MAX_MODES, MAX_NFEV, N_CURRENT_SPLINE):
     # A RuntimeWarning about uncertified Jacobian columns is expected once the
     # optimizer leaves the seed and needs no action; see examples/README.md.
     problem = opt.VmecProblem.from_tuples(
-        inp, objective_function_terms + [(mercier_rows, 0.0, STABILITY_WEIGHT),
-                                         (resistive_rows, 0.0, STABILITY_WEIGHT)],
+        inp, objective_function_terms,
         max_mode=max_mode,
         current_dofs=n_spline - 1, vary_major_radius=VARY_MAJOR_RADIUS,
         use_ess=True, restart_from=equilibrium, progress=not ci_smoke)
