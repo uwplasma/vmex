@@ -687,7 +687,8 @@ def native_tangential_gauge_matrix(
     if scale.shape != (layout.size,) or np.any(~np.isfinite(scale)):
         raise ValueError("native gauge coordinate scale has the wrong shape")
     active = np.asarray(layout.active_indices, dtype=np.int64)
-    block = int(layout.mnmax) * int(layout.nbasis)
+    nbasis, mnmax = int(layout.nbasis), int(layout.mnmax)
+    block = mnmax * nbasis
     full_to_packed = np.full(6 * block, -1, dtype=np.int64)
     full_to_packed[active] = np.arange(layout.size, dtype=np.int64)
 
@@ -700,52 +701,45 @@ def native_tangential_gauge_matrix(
     vertical_component = tangent[..., 2] / tangent_norm
     quadrature = np.broadcast_to(np.asarray(plan.quadrature_weights), plan.shape).reshape((plan.shape[0], -1))
     radial = np.asarray(plan.radial_value)
-    radial_support = radial != 0.0
+    radial_support = (radial != 0.0).astype(np.int32)
     cosine = np.asarray(plan.cosine)
     sine = np.asarray(plan.sine)
     row_modes = np.asarray(gauge.row_modes, dtype=np.int64)
     row_basis = np.asarray(gauge.row_basis, dtype=np.int64)
     row_scale = np.asarray(gauge.row_scale, dtype=float)
 
+    unique_modes, inverse_modes = np.unique(row_modes, return_inverse=True)
+    test_sine = sine[unique_modes]
+    ws_radial = (quadrature * radial_component)[None] * test_sine[:, None]
+    ws_vertical = (quadrature * vertical_component)[None] * test_sine[:, None]
+    moments = np.stack(
+        (
+            np.einsum("ura,ma->umr", ws_radial, cosine, optimize=True),
+            np.einsum("ura,ma->umr", ws_radial, sine, optimize=True),
+            np.einsum("ura,ma->umr", ws_vertical, cosine, optimize=True),
+            np.einsum("ura,ma->umr", ws_vertical, sine, optimize=True),
+        )
+    )
+    packed_grid = full_to_packed[: 4 * block].reshape(4, mnmax, nbasis)
+    active_mask = packed_grid[:, :, None, :] >= 0
+
     rows: list[np.ndarray] = []
     columns: list[np.ndarray] = []
     values: list[np.ndarray] = []
-    for test_mode in np.unique(row_modes):
-        row_positions = np.flatnonzero(row_modes == test_mode)
+    for u_idx, test_mode in enumerate(unique_modes):
+        row_positions = np.flatnonzero(inverse_modes == u_idx)
         test_basis = row_basis[row_positions]
-        test_radial = radial[test_mode]
-        test_support = radial_support[test_mode]
-        test_angular = sine[test_mode]
-        for field, component in (
-            (0, radial_component),
-            (1, radial_component),
-            (2, vertical_component),
-            (3, vertical_component),
-        ):
-            angular_table = cosine if field % 2 == 0 else sine
-            for mode in range(layout.mnmax):
-                packed = full_to_packed[field * block + mode * int(layout.nbasis) + np.arange(layout.nbasis)]
-                active_basis = np.flatnonzero(packed >= 0)
-                if active_basis.size == 0:
-                    continue
-                angular_moment = np.sum(
-                    quadrature * component * test_angular[None] * angular_table[mode][None],
-                    axis=1,
-                )
-                coupled = test_radial.T @ (angular_moment[:, None] * radial[mode])
-                overlap = test_support.T @ radial_support[mode]
-                selected_overlap = overlap[np.ix_(test_basis, active_basis)]
-                local_rows, local_columns = np.nonzero(selected_overlap)
-                if local_rows.size == 0:
-                    continue
-                packed_columns = packed[active_basis[local_columns]]
-                rows.append(row_positions[local_rows])
-                columns.append(packed_columns)
-                values.append(
-                    coupled[test_basis[local_rows], active_basis[local_columns]]
-                    * row_scale[row_positions[local_rows]]
-                    * scale[packed_columns]
-                )
+        test_radial = radial[test_mode][:, test_basis]
+        overlap = np.einsum("ri,mrb->mib", radial_support[test_mode][:, test_basis], radial_support, optimize=True) > 0
+        f_idx, m_idx, i_idx, b_idx = np.nonzero(overlap[None] & active_mask)
+        if f_idx.size == 0:
+            continue
+        coupled = np.einsum("fmr,ri,mrb->fmib", moments[:, u_idx], test_radial, radial, optimize=True)
+        packed_columns = packed_grid[f_idx, m_idx, b_idx]
+        selected_rows = row_positions[i_idx]
+        rows.append(selected_rows)
+        columns.append(packed_columns)
+        values.append(coupled[f_idx, m_idx, i_idx, b_idx] * row_scale[selected_rows] * scale[packed_columns])
     if not rows:
         raise ValueError("native sparse gauge has no structural entries")
     matrix = sparse.coo_matrix(
@@ -848,7 +842,6 @@ def _channel_second(
 ) -> tuple[Array, ...]:
     """Synthesize a scalar channel through its coordinate Hessian."""
 
-    value, drho, dtheta, dzeta = _channel(cosine_coefficients, sine_coefficients, plan)
     cosine_jets = _stable_radial_jets(cosine_coefficients, plan)
     sine_jets = _stable_radial_jets(sine_coefficients, plan)
 
@@ -862,25 +855,16 @@ def _channel_second(
 
     radial_value, radial_first, radial_second = zip(cosine_jets, sine_jets)
     return (
-        value,
-        drho,
-        dtheta,
-        dzeta,
+        synthesize(radial_value, (plan.cosine, plan.sine)),
+        synthesize(radial_first, (plan.cosine, plan.sine)),
+        synthesize(radial_value, (plan.cosine_theta, plan.sine_theta)),
+        synthesize(radial_value, (plan.cosine_zeta, plan.sine_zeta)),
         synthesize(radial_second, (plan.cosine, plan.sine)),
         synthesize(radial_first, (plan.cosine_theta, plan.sine_theta)),
         synthesize(radial_first, (plan.cosine_zeta, plan.sine_zeta)),
-        synthesize(
-            radial_value,
-            (plan.cosine_theta_theta, plan.sine_theta_theta),
-        ),
-        synthesize(
-            radial_value,
-            (plan.cosine_theta_zeta, plan.sine_theta_zeta),
-        ),
-        synthesize(
-            radial_value,
-            (plan.cosine_zeta_zeta, plan.sine_zeta_zeta),
-        ),
+        synthesize(radial_value, (plan.cosine_theta_theta, plan.sine_theta_theta)),
+        synthesize(radial_value, (plan.cosine_theta_zeta, plan.sine_theta_zeta)),
+        synthesize(radial_value, (plan.cosine_zeta_zeta, plan.sine_zeta_zeta)),
     )
 
 
@@ -1304,6 +1288,39 @@ def _current_force_samples(state, plan, flux_jets):
     return _samples_from_jets(*jets, plan, state, poloidal_flux_jets=flux_jets)
 
 
+def _pointwise_jet_vjp(stacked, plan, base, force_scale, volume_scale, poloidal_flux_jets=None):
+    def residual(values):
+        samples = _samples_from_jets(
+            tuple(values[0]), tuple(values[1]), tuple(values[2]), plan, base,
+            poloidal_flux_jets=poloidal_flux_jets,
+        )
+        return _weighted_force(samples, plan, base.jacobian_sign, force_scale, volume_scale)
+
+    _, pullback = jax.vjp(residual, stacked)
+    vjp_cols = jax.vmap(lambda e: pullback(jnp.broadcast_to(e, plan.shape + (3,)))[0])(
+        jnp.eye(3, dtype=stacked.dtype)
+    )
+    return jnp.moveaxis(vjp_cols, 0, -1).reshape((30,) + plan.shape + (3,))
+
+
+@jax.jit
+def _current_jet_blocks(base, plan, values, force_scale, volume):
+    stacked = jnp.stack([jnp.stack(_channel_second(getattr(base, f + "_cos"),
+                                                   getattr(base, f + "_sin"), plan))
+                         for f in ("R", "Z", "L")])
+    D = _pointwise_jet_vjp(stacked, plan, base, force_scale, volume, poloidal_flux_jets=values)
+    tangents = jnp.eye(2, dtype=values.dtype)[:, :, None] * jnp.ones_like(values)[None]
+    E = jax.vmap(lambda dp: jax.jvp(
+        lambda p: _weighted_force(
+            _samples_from_jets(tuple(stacked[0]), tuple(stacked[1]), tuple(stacked[2]),
+                               plan, base, poloidal_flux_jets=p),
+            plan, base.jacobian_sign, force_scale, volume,
+        ),
+        (values,), (dp,),
+    )[1])(tangents)
+    return D, E
+
+
 def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volume):
     """Assemble exact diagonal Fourier blocks of J^T J, including dchi/dx.
 
@@ -1323,22 +1340,9 @@ def _current_mode_blocks(base, plan, layout, scale, flux_jets, force_scale, volu
     nr = plan.rho.size
     C = np.asarray(jax.jit(lambda: jax.lax.map(
         lambda row: pullback(row)[0], jnp.eye(2 * nr).reshape(2 * nr, 2, nr)))()).reshape(2, nr, layout.size)
-    stacked = jnp.stack([jnp.stack(_channel_second(getattr(base, f + "_cos"),
-                                                 getattr(base, f + "_sin"), plan))
-                         for f in ("R", "Z", "L")])
-
-    def local(jets, profiles):
-        samples = _samples_from_jets(*jets, plan, base, poloidal_flux_jets=profiles)
-        return _weighted_force(samples, plan, base.jacobian_sign, force_scale, volume)
-
-    def tangent(k):
-        direction = (jnp.arange(30) == k).reshape(3, 10, 1, 1) * jnp.ones_like(stacked)
-        return jax.jvp(lambda jets: local(jets, values), (stacked,), (direction,))[1]
-
-    D = np.asarray(jax.jit(lambda: jax.lax.map(tangent, jnp.arange(30)))()).reshape(3, 10, nr, -1, 3)
-    E = np.asarray(jax.jit(lambda: jax.lax.map(lambda k: jax.jvp(
-        lambda p: local(stacked, p), (values,),
-        ((jnp.arange(2) == k)[:, None] * jnp.ones_like(values),))[1], jnp.arange(2)))()).reshape(2, nr, -1, 3)
+    D_arr, E_arr = _current_jet_blocks(base, plan, values, force_scale, volume)
+    D = np.asarray(D_arr).reshape(3, 10, nr, -1, 3)
+    E = np.asarray(E_arr).reshape(2, nr, -1, 3)
     channel, rest = np.divmod(np.asarray(layout.active_indices), layout.mnmax * layout.nbasis)
     mode, basis = np.divmod(rest, layout.nbasis)
     radial = [np.asarray(t) for t in (plan.radial_value, plan.radial_derivative, plan.radial_second_derivative)]
@@ -1579,8 +1583,8 @@ _JET_ANGULAR = ("", "", "_theta", "_zeta", "", "_theta", "_zeta", "_theta_theta"
 def _jet_jacobian(base, correction, plan, force_scale, volume_scale):
     """``D[k] = d r / d jet_k`` at every node, shape ``(30,) + plan.shape + (3,)``.
 
-    The residual is pointwise in the jets, so one forward tangent per jet
-    (30 in all) gives the full pointwise derivative.
+    The residual is pointwise in the jets, so pulling back the three Cartesian
+    unit vectors gives the full 30-jet derivative in three VJP passes.
     """
 
     def jets(field):
@@ -1589,16 +1593,7 @@ def _jet_jacobian(base, correction, plan, force_scale, volume_scale):
         return jnp.stack([a + b for a, b in zip(base_jets, extra)])
 
     stacked = jnp.stack([jets("R"), jets("Z"), jets("L")])
-
-    def residual(values):
-        samples = _samples_from_jets(tuple(values[0]), tuple(values[1]), tuple(values[2]), plan, base)
-        return _weighted_force(samples, plan, base.jacobian_sign, force_scale, volume_scale)
-
-    def tangent(k):
-        direction = (jnp.arange(30) == k).astype(stacked.dtype).reshape(3, 10, 1, 1) * jnp.ones_like(stacked)
-        return jax.jvp(residual, (stacked,), (direction,))[1]
-
-    return jax.lax.map(tangent, jnp.arange(30))
+    return _pointwise_jet_vjp(stacked, plan, base, force_scale, volume_scale)
 
 
 def _normal_system(chart: _Chart, coordinates, residual, force_scale, volume_scale):
