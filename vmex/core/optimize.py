@@ -133,7 +133,7 @@ from .statephysics import (
 )
 from .wout import WoutData, wout_from_state
 from .problem import Evaluation, FunctionProblem, VmecProblem, _run_with_progress
-from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop
+from .monitoring import EquilibriumReporter, OptimizationMonitor, OptimizationRecord, StallStop, scipy_least_squares
 
 __all__ = [
     "report_targets",
@@ -144,6 +144,7 @@ __all__ = [
     "OptimizationMonitor",
     "OptimizationRecord",
     "StallStop",
+    "scipy_least_squares",
     "make_problem",
     "Equilibrium",
     "solve_equilibrium",
@@ -2724,6 +2725,9 @@ def _least_squares_implicit(
             params_of(_place(x), problem_data))
         if hit[0] != imp._params_key(params_np):
             return False
+        refined = imp._LAST_REFINED.get(cfg)
+        if refined is not None and refined[0] == hit[0] and refined[2]:
+            return False  # anchor above refine_tol: status 3, no certified Jacobian
         result = hit[1]
         if bool(result.converged):
             return True
@@ -2912,20 +2916,18 @@ def _least_squares_implicit(
         """
         Fz, tangent_of, rhs_of, column_of, _ = _jac_parts(x, state, data)
 
-        def column(tp_stack):
-            tp = tangent_of(tp_stack)
-            rhs = rhs_of(tp)
+        def response(rhs):
             dz, krylov = imp._adjoint_solve(
                 Fz, rhs, cfg, rtol=data["jac_tol"],
                 max_restarts=certify_maxiter)
-            report = imp._linear_response_report(
+            return dz, imp._linear_response_report(
                 krylov, rhs, cfg, rtol=data["jac_tol"])
-            return column_of(dz, tp), dz, report
 
         tangent_chunk = ndof if chunk is None else chunk
-        cols, dz_cols, krylov = chunk_map(
-            column, tangent_stack, chunk_size=tangent_chunk
-        )
+        # Right-hand sides and columns by lax.map (see _implicit_evolved_tangent_multi_rhs).
+        rhs_batch = jax.lax.map(lambda t: rhs_of(tangent_of(t)), tangent_stack)
+        dz_cols, krylov = chunk_map(response, rhs_batch, chunk_size=tangent_chunk)
+        cols = jax.lax.map(lambda a: column_of(a[1], tangent_of(a[0])), (tangent_stack, dz_cols))
         return jnp.transpose(cols), dz_cols, _linear_response_summary(krylov)
 
     # Amortized block-tridiagonal variant.  The *raw* residual formulation
@@ -2979,7 +2981,8 @@ def _least_squares_implicit(
             tp = tangent_of(tp_stack)
             return column_of(dz, tp), dz
 
-        cols, dz_cols = chunk_map(column, (stack, dz0), chunk_size=tangent_chunk)
+        # lax.map, not a vmapped chunk: jaxlib 0.6 algsimp miscompiles the batched jvp.
+        cols, dz_cols = jax.lax.map(column, (stack, dz0))
         return jnp.transpose(cols), dz_cols, _linear_response_summary(report)
 
     if jac_solver not in ("auto", "block", "gmres", "reverse"):

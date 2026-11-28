@@ -1169,6 +1169,17 @@ def test_least_squares_implicit_jac_solver_block(monkeypatch):
     np.testing.assert_allclose(problem.jax_fun(problem.x0), jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_value, jax_value, rtol=1e-12)
     np.testing.assert_allclose(graph_gradient, jax_gradient, rtol=1e-12)
+    gmres_problem = opt.VmecProblem.from_tuples(
+        inp,
+        [(opt.aspect_ratio, 4.0, 4.0), (elongation_excess, 0.0, 1.0)],
+        max_mode=1,
+        implicit_jacobian_method="forward_gmres",
+        use_ess=False,
+    )
+    np.testing.assert_allclose(
+        jax.grad(gmres_problem.jax_fun)(jax.numpy.asarray(problem.x0)),
+        jax_gradient, rtol=1e-6,
+    )
     # Concrete calls reuse the host lane; the traced program (a user's
     # jax.jit) must still agree with it.
     with jax.disable_jit(False):
@@ -2103,3 +2114,26 @@ def test_stability_terms_on_an_asymmetric_state():
     rows = np.sqrt(weights) * np.asarray(band(merc(eq.state, eq.runtime)))
     assert rows.shape == weights.shape and np.all(np.isfinite(rows))
     assert np.all(np.isfinite(np.asarray(band_r(res(eq.state, eq.runtime)))))
+
+
+def test_least_squares_jacobian_rejects_a_trial_whose_anchor_misses(monkeypatch):
+    """A trial whose fixed-point anchor ends above ``refine_tol`` is a failed trial.
+
+    Its residual rows are the penalty rows (status 3), so its Jacobian must be
+    their exact Jacobian, the identical rows of ``failure_jacobian``, not an
+    implicit Jacobian taken at a point that is not a root (plan step V2c).
+    The refinement budgets are set to zero after construction, so the trial
+    keeps the host state, whose ``|F|`` at ``ftol`` 1e-10 is far above 1e-10.
+    """
+    from vmex.core import implicit as im
+
+    inp = _ladder_input()
+    terms = [(opt.aspect_ratio, 4.0, 1.0), (opt.mean_iota, 0.3, 1.0)]
+    problem = opt.VmecProblem.from_tuples(inp, terms, max_mode=1, progress=False)
+    for name in ("_REFINE_BLOCK_MAX_STEPS", "_REFINE_MAX_STEPS", "_REFINE_RESTARTS"):
+        monkeypatch.setattr(im, name, 0)
+    trial = problem.x0 + 0.01 * problem.scales
+    problem.residual(trial)
+    jacobian = np.asarray(problem.residual_jac(trial))
+    assert np.all(np.isfinite(jacobian))
+    np.testing.assert_array_equal(jacobian, np.broadcast_to(jacobian[0], jacobian.shape))

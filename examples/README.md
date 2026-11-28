@@ -5,7 +5,7 @@ a sign-aware lambda seed for a finite-radius VMEX solve. Its default is the
 stellarator-symmetric first-order QA example; it does not constrain the
 converged equilibrium to the near-axis expansion or differentiate the generator.
 
-All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16); the package itself supports Python 3.10. The coil and
+All runnable examples live under this single `examples/` tree. Running them needs Python 3.11 or newer (the optimization examples pass `callback=` to SciPy's `least_squares`, new in SciPy 1.16; `QA_optimization.py` and `pwO_optimization.py` call `vmex.optimize.scipy_least_squares`, which also passes it on SciPy 1.15); the package itself supports Python 3.10. The coil and
 exterior-field examples need ESSOS 0.17 or newer: `pip install "vmex[coils]"`,
 or `pip install "vmex[all]"` for everything the examples use.
 
@@ -251,11 +251,11 @@ that research budget as one commented set of constants next to the default.
 - `optimization/omnigenity_epsilon_gammac_maxj.py` refines the finite-beta QA
   with one seed-normalized scalar objective — quasisymmetry ratio (effective
   ripple proxy), the smooth `GammaCSmooth` surrogate, and the
-  outer-volume maximum-J residual — then reports hard `Gamma_c` and NEO_JAX
+  outer-volume maximum-J residual — then reports hard `Gamma_c` and
   `epsilon_eff^(3/2)` before and after.
-- `epsilon_effective.py` computes the NEO_JAX effective ripple from a solved
-  equilibrium without writing a `boozmn` file; raise its `NeoConfig` controls
-  for anything beyond a radial trend.
+- `epsilon_effective.py` computes the effective ripple `epsilon_eff^(3/2)` (bounce
+  integrals, differentiable) from a solved equilibrium without writing a
+  `boozmn` file.
 - `mirror/mirror_fixed_boundary_nonaxisymmetric.py` compares axisymmetric and
   rotating-ellipse fixed-boundary mirrors; `mirror/mirror_free_boundary_beta_scan.py`
   continues a solved ESSOS-coil free boundary through 80% central beta and
